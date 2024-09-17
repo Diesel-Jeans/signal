@@ -267,7 +267,10 @@ version = "0.1.0"
 dependencies = [
  "libsignal-core",
  "libsignal-protocol",
+ "prost",
+ "tokio",
  "tonic",
+ "tonic-build",
 ]
 
 [[package]]
@@ -1447,6 +1450,19 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "tonic-build"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe4ee8877250136bd7e3d2331632810a4df4ea5e004656990d8d66d2f5ee8a67"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "prost-build",
+ "quote",
+ "syn",
 ]
 
 [[package]]
