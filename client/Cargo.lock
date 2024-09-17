@@ -262,8 +262,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "common"
+name = "client"
 version = "0.1.0"
+dependencies = [
+ "libsignal-core",
+ "libsignal-protocol",
+ "tonic",
+]
 
 [[package]]
 name = "cpufeatures"
@@ -1212,16 +1217,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "server"
-version = "0.1.0"
-dependencies = [
- "common",
- "libsignal-core",
- "libsignal-protocol",
- "tonic",
 ]
 
 [[package]]
