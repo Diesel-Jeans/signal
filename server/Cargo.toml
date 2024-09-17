@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+libsignal-core = { git = "https://github.com/Diesel-Jeans/libsignal.git", version = "0.1.0" }
+libsignal-protocol = { git = "https://github.com/Diesel-Jeans/libsignal.git", version = "0.1.0" }
+
 common = { path = "../common"}
