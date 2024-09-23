@@ -9,7 +9,7 @@ use crate::client_common::create_pre_key_bundle;
 
 pub struct Client <R: Rng + CryptoRng>{
     device_id: DeviceId,
-    uuid: String,
+    pub uuid: String,
     e164: String, // phone number
     idkey_pair: IdentityKeyPair,
     store: InMemSignalProtocolStore,

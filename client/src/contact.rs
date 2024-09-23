@@ -2,7 +2,7 @@ use libsignal_protocol::*;
 
 pub struct Contact {
     device_id: DeviceId,
-    uuid: String,
+    pub uuid: String,
     e164: String, // phone number
     pub address: ProtocolAddress,
     pub bundle: Option<PreKeyBundle>

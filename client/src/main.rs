@@ -2,6 +2,7 @@ use rand::{CryptoRng, Rng};
 use contact::Contact;
 use libsignal_protocol::*;
 use rand::rngs::OsRng;
+use server::Server;
 
 mod client_common;
 mod client;
@@ -11,6 +12,7 @@ mod server;
 
 
 use crate::client::Client;
+use crate::server::MockServer;
 
 use common::signal_protobuf::Envelope;
 pub(crate) const CIPHERTEXT_MESSAGE_CURRENT_VERSION: u8 = 4;
@@ -74,6 +76,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // test encryption
     let mut rng = OsRng;
     
+
+    let mut server = MockServer::new();
+
     // alice and bob creates their key pairs public / private keys
     let alice_pair = KeyPair::generate(&mut rng).into();
     let bob_pair = KeyPair::generate(&mut rng).into();
@@ -115,12 +120,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bob_bundle = bob_client.create_bundle().await?;
 
     // *bob uploads his bundle to the server*
-    // server.publish_bundle(bob_bundle);
+    server.publish_bundle(bob_client.uuid.clone(), &bob_bundle).await?;
 
     // *alice fetches bob's bundle, verifies and updates his contact info*
-    // let bob_bundle = server.fetch_bundle(bob_contact).await?
+    let bob_bundle_alice = server.fetch_bundle(&bob_contact).await?;
 
-    alice_client.set_contact_bundle(&mut bob_contact, bob_bundle).await?;
+    alice_client.set_contact_bundle(&mut bob_contact, bob_bundle_alice).await?;
 
     // alice encrypts message to bob
     let to_bob = alice_client.encrypt(&bob_contact, "hello bibob").await?;
