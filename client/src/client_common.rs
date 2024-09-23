@@ -6,33 +6,36 @@ pub async fn create_pre_key_bundle<R: Rng + CryptoRng>(
     store: &mut dyn ProtocolStore,
     mut csprng: &mut R,
 ) -> Result<PreKeyBundle, SignalProtocolError> {
-    // pre_key_pair.public is the one time prekey, this should be fixed to support many prekeys 
-    let pre_key_pair = KeyPair::generate(&mut csprng);
+    // z is random
+    let pre_key_pair = KeyPair::generate(&mut csprng); // OPK - only one but should be more -> publish
     
-    let signed_pre_key_pair = KeyPair::generate(&mut csprng);
-    let kyber_pre_key_pair = kem::KeyPair::generate(kem::KeyType::Kyber1024);
+    let signed_pre_key_pair = KeyPair::generate(&mut csprng); // SPKB - changes periodically -> publish
+    let kyber_pre_key_pair = kem::KeyPair::generate(kem::KeyType::Kyber1024); // PQSPKB - changes periodically -> publish
 
-    let signed_pre_key_public = signed_pre_key_pair.public_key.serialize();
-    let signed_pre_key_signature = store
+    let signed_pre_key_signature = store  // Sig(IKB, EncodeEC(SPKB), ZSPK) - changes periodically -> publish
+        .get_identity_key_pair()// IKB - Bob only needs to upload his identity key to the server once -> publish
+        .await?
+        .private_key()
+        .calculate_signature(&signed_pre_key_pair.public_key.serialize(), &mut csprng)?;
+
+    let kyber_pre_key_signature = store // Sig(IKB, EncodeKEM(PQSPKB), ZPQSPK) - changes periodically -> publish
         .get_identity_key_pair()
         .await?
         .private_key()
-        .calculate_signature(&signed_pre_key_public, &mut csprng)?;
-
-    let kyber_pre_key_public = kyber_pre_key_pair.public_key.serialize();
-    let kyber_pre_key_signature = store
-        .get_identity_key_pair()
-        .await?
-        .private_key()
-        .calculate_signature(&kyber_pre_key_public, &mut csprng)?;
+        .calculate_signature(&kyber_pre_key_pair.public_key.serialize(), &mut csprng)?;
 
     let device_id: u32 = csprng.gen();
-    let pre_key_id: u32 = csprng.gen();
-    let signed_pre_key_id: u32 = csprng.gen();
-    let kyber_pre_key_id: u32 = csprng.gen();
+    let pre_key_id: u32 = csprng.gen(); // IdEC(OPKB1) -> publish
+    let signed_pre_key_id: u32 = csprng.gen(); // IdEC(SPKB) -> publish
+    let kyber_pre_key_id: u32 = csprng.gen();  // IdKEM(PQSPKB) -> publish
+
+    // <-- publish -->
+    // one-time pqkem prekeys - these are not generated and should be, so users can verify integrity
+    // should also generate signatures for each of the keys - (Sig(IKB, EncodeKEM(PQOPKB), Z1)
+    // this can be used: kem::KeyPair::generate(kem::KeyType::Kyber1024)
 
     let pre_key_bundle = PreKeyBundle::new(
-        store.get_local_registration_id().await?,
+        store.get_local_registration_id().await?, // the users unique id
         device_id.into(),
         Some((pre_key_id.into(), pre_key_pair.public_key)),
         signed_pre_key_id.into(),

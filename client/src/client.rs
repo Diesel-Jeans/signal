@@ -1,9 +1,11 @@
 
 use libsignal_protocol::*;
+use std::collections::HashMap;
 use std::time::SystemTime;
 use rand::{CryptoRng, Rng};
 
 use crate::contact::Contact;
+use crate::contact::Device;
 
 use crate::client_common::create_pre_key_bundle;
 
@@ -14,159 +16,80 @@ enum ProtocolKey{
 }
 
 pub struct Client <R: Rng + CryptoRng>{
-    device_id: DeviceId,
-    pub uuid: String,
-    e164: String, // phone number
-    idkey_pair: IdentityKeyPair,
+    pub contact: Contact,
     store: InMemSignalProtocolStore,
-    my_contact: Contact,
     rng: R,
-    //sender_cert: Option<SenderCertificate>
-
-
-    kyber_incrementer: u32
 }
 
 impl <R: Rng + CryptoRng> Client<R>{
-    pub fn new(id: u32, uuid: String, e164: String, pair: IdentityKeyPair, store: InMemSignalProtocolStore, rng: R) -> Client<R> {
-        let contact = Contact::new(id, uuid.clone(), e164.clone());
+    pub fn new(uuid: String, store: InMemSignalProtocolStore, rng: R) -> Client<R> {
         Self {
-            device_id: id.into(),
-            uuid: uuid,
-            e164: e164,
-            idkey_pair: pair,
+            contact: Contact::new(uuid),
             store: store,
-            my_contact: contact,
             rng: rng,
-            //sender_cert: None
-            kyber_incrementer: 0,
         }
     }
-
-    /*pub async fn create_key(&mut self, key_type: ProtocolKey) -> u32 {
-        match key_type {
-            ProtocolKey::KyberPreKey => {
-                let kyber_pair = kem::KeyPair::generate(kem::KeyType::Kyber1024);
-
-            },
-            ProtocolKey::OneTimePreKey => 2,
-            ProtocolKey::SignedPreKey => 3
-        }
-    }
-
-    pub async fn get_key(&mut self, key_type: ProtocolKey, id: u32) -> PublicKey {}*/
 
     pub async fn create_bundle(&mut self) -> Result<PreKeyBundle, SignalProtocolError>{
         create_pre_key_bundle(&mut self.store, &mut self.rng).await
     }
 
-    pub async fn set_contact_bundle(
-        &mut self, 
-        contact: &mut Contact, 
-        bundle: PreKeyBundle) -> Result<(), SignalProtocolError>{
-        let res = process_prekey_bundle(
-            &contact.address, 
-            &mut self.store.session_store,
-            &mut self.store.identity_store, 
-            &bundle, 
-            SystemTime::now(), 
-            &mut self.rng
-        ).await;
 
-        match res {
-            Ok(_) => {
-                contact.bundle = Some(bundle);
-                Ok(())
-            },
-            Err(x) => Err(x)
+
+    pub async fn verify_contact_devices(&mut self, contact: &mut Contact) -> Result<(), SignalProtocolError>{
+        for device in contact {
+            let bundle = match &device.bundle {
+                Some(x) => x,
+                None => continue
+            };
+
+            let _ = match process_prekey_bundle(
+                &device.address, 
+                &mut self.store.session_store,
+                &mut self.store.identity_store, 
+                bundle, 
+                SystemTime::now(), 
+                &mut self.rng
+            ).await {
+                Ok(_) => Ok::<(), SignalProtocolError>(()),
+                Err(_) => {
+                    device.bundle = None;
+                    Ok(())
+                }
+            };
         }
-    }
-
-    pub async fn encrypt(mut self, to: &Contact, msg: &str) -> Result<CiphertextMessage, SignalProtocolError>{
-        message_encrypt(
-            msg.as_bytes(),
-            &to.address,
-            &mut self.store.session_store,
-            &mut self.store.identity_store,
-            SystemTime::now(),
-        )
-        .await
-    }
-
-    pub async fn decrypt(mut self, from: Contact, msg: &CiphertextMessage) -> Result<Vec<u8>, SignalProtocolError>{
-        message_decrypt(
-            msg,
-            &from.address,
-            &mut self.store.session_store,
-            &mut self.store.identity_store,
-            &mut self.store.pre_key_store,
-            &self.store.signed_pre_key_store,
-            &mut self.store.kyber_pre_key_store,
-            &mut self.rng,
-        )
-        .await
-    }
-
-    /*pub async fn fetch_sender_certificate(&mut self) -> Result<(), Box<dyn std::error::Error>>{
-        //TODO: THIS IS TEMPORARY THIS SHOULD FETCH FROM SERVER
-        let trust_root = KeyPair::generate(&mut self.rng);
-        let server_key = KeyPair::generate(&mut self.rng);
-
-        let server_cert =
-            ServerCertificate::new(1, server_key.public_key, &trust_root.private_key, &mut self.rng)?;
-
-        self.sender_cert = Some(SenderCertificate::new(
-            self.uuid.clone(),
-            Some(self.e164.clone()),
-            *self.store.get_identity_key_pair().await?.public_key(),
-            self.device_id,
-            Timestamp::from_epoch_millis(2231735116),
-            server_cert,
-            &server_key.private_key,
-            &mut self.rng,
-        )?);
         Ok(())
     }
 
-    pub async fn ss_encrypt(&mut self, contact: Contact, msg: &str) -> error::Result<Vec<u8>>{
-        //TODO: THIS SHOULD BE HANDLED BETTER
-        
-        let cert = match &self.sender_cert {
-            None => {
-                self.fetch_sender_certificate().await.expect("Please Fix this");
-                self.sender_cert.as_mut().unwrap()
-            },
-            Some(c) => c
-        };
-
-        sealed_sender_encrypt(
-            &contact.address,
-            cert,
-            &msg.to_string().into_bytes(),
-            &mut self.store.session_store,
-            &mut self.store.identity_store,
-            SystemTime::now(),
-            &mut self.rng,
-        ).await    
+    pub async fn encrypt(mut self, to: &Contact, msg: &str) ->Vec<CiphertextMessage>{
+        let mut msgs: Vec<CiphertextMessage> = Vec::new();
+        for device in to{
+            match message_encrypt(
+                msg.as_bytes(),
+                &device.address,
+                &mut self.store.session_store,
+                &mut self.store.identity_store,
+                SystemTime::now(),
+            )
+            .await {
+                Ok(x) => {msgs.push(x)},
+                Err(_) => continue
+            }
+        }
+        msgs
     }
 
-    pub async fn ss_decrypt(&mut self, msg: &str) -> error::Result<SealedSenderDecryptionResult>{
-        //TODO: FIX THIS
-        let trust_root = KeyPair::generate(&mut self.rng); // this will fail
-        
-        sealed_sender_decrypt(
-            &msg.to_string().as_bytes(),
-            &trust_root.public_key,
-            Timestamp::from_epoch_millis(2231735116), //TODO: this should be fixed
-            Some(self.e164.clone()),
-            self.uuid.clone(),
-            self.device_id,
-            &mut self.store.identity_store,
+    pub async fn decrypt(mut self, from_device: &Device, msg: &CiphertextMessage) -> Result<Vec<u8>, SignalProtocolError>{
+        message_decrypt(
+            msg,
+            &from_device.address,
             &mut self.store.session_store,
+            &mut self.store.identity_store,
             &mut self.store.pre_key_store,
             &self.store.signed_pre_key_store,
             &mut self.store.kyber_pre_key_store,
-        ).await
-    }*/
-
+            &mut self.rng,
+        )
+        .await
+    }
 }

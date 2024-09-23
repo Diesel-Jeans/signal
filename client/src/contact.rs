@@ -1,23 +1,65 @@
+use std::collections::HashMap;
 use libsignal_protocol::*;
 
-pub struct Contact {
-    device_id: DeviceId,
-    pub uuid: String,
-    e164: String, // phone number
+#[derive(Clone)]
+pub struct Device {
     pub address: ProtocolAddress,
     pub bundle: Option<PreKeyBundle>
 }
 
-impl Contact {
-    pub fn new(id: u32, uuid: String, e164: String) -> Contact{
-        let device_id = id.into();
-        let address = ProtocolAddress::new(uuid.clone(), device_id);
+impl Device {
+    pub fn new(uuid: String, device_id: u32, bundle: Option<PreKeyBundle>) -> Device{
         Self {
-            device_id: device_id,
-            uuid: uuid,
-            e164: e164,
-            address: address,
-            bundle: None
+            address: ProtocolAddress::new(uuid, device_id.into()),
+            bundle: bundle,
         }
+    }
+}
+
+pub struct Contact {
+    pub uuid: String,
+    devices: HashMap<u32, Device>
+}
+
+impl Contact {
+    pub fn new(uuid: String) -> Contact{
+        Self {
+            uuid: uuid,
+            devices: HashMap::new()
+        }
+    }
+
+    pub fn new_with_devices(uuid: String, devices: &Vec<Device>) -> Contact{
+        let mut contact = Contact::new(uuid);
+        for device in devices {
+            contact.add_device(device.clone());
+        }
+        contact
+    }
+
+    pub fn add_device(&mut self, device: Device){
+        self.devices.insert(device.address.device_id().into(), device);
+    }
+
+    pub fn remove_device(&mut self, device_id: &u32){
+        self.devices.remove(device_id);
+    }
+}
+
+impl<'a> IntoIterator for &'a Contact {
+    type Item = &'a Device;
+    type IntoIter = std::collections::hash_map::Values<'a, u32, Device>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.devices.values()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Contact {
+    type Item = &'a mut Device;
+    type IntoIter = std::collections::hash_map::ValuesMut<'a, u32, Device>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.devices.values_mut()
     }
 }
