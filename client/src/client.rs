@@ -7,28 +7,54 @@ use crate::contact::Contact;
 
 use crate::client_common::create_pre_key_bundle;
 
+enum ProtocolKey{
+    SignedPreKey,
+    KyberPreKey,
+    OneTimePreKey,
+}
+
 pub struct Client <R: Rng + CryptoRng>{
     device_id: DeviceId,
     pub uuid: String,
     e164: String, // phone number
     idkey_pair: IdentityKeyPair,
     store: InMemSignalProtocolStore,
+    my_contact: Contact,
     rng: R,
     //sender_cert: Option<SenderCertificate>
+
+
+    kyber_incrementer: u32
 }
 
 impl <R: Rng + CryptoRng> Client<R>{
     pub fn new(id: u32, uuid: String, e164: String, pair: IdentityKeyPair, store: InMemSignalProtocolStore, rng: R) -> Client<R> {
+        let contact = Contact::new(id, uuid.clone(), e164.clone());
         Self {
             device_id: id.into(),
             uuid: uuid,
             e164: e164,
             idkey_pair: pair,
             store: store,
+            my_contact: contact,
             rng: rng,
             //sender_cert: None
+            kyber_incrementer: 0,
         }
     }
+
+    /*pub async fn create_key(&mut self, key_type: ProtocolKey) -> u32 {
+        match key_type {
+            ProtocolKey::KyberPreKey => {
+                let kyber_pair = kem::KeyPair::generate(kem::KeyType::Kyber1024);
+
+            },
+            ProtocolKey::OneTimePreKey => 2,
+            ProtocolKey::SignedPreKey => 3
+        }
+    }
+
+    pub async fn get_key(&mut self, key_type: ProtocolKey, id: u32) -> PublicKey {}*/
 
     pub async fn create_bundle(&mut self) -> Result<PreKeyBundle, SignalProtocolError>{
         create_pre_key_bundle(&mut self.store, &mut self.rng).await

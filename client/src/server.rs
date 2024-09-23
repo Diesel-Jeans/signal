@@ -28,7 +28,9 @@ impl Server for MockServer {
     async fn fetch_bundle(&self, contact: &Contact) -> Result<PreKeyBundle, String> {
         match self.bundles.borrow().get(&contact.uuid) {
             None => Err("UUID is not in bundles!".to_string()),
-            Some(x) => Ok(x.clone())
+            Some(x) => {
+                Ok(x.clone())
+            }
         }
     }
 

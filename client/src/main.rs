@@ -130,6 +130,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // alice encrypts message to bob
     let to_bob = alice_client.encrypt(&bob_contact, "hello bibob").await?;
 
+    match to_bob {
+        CiphertextMessage::PreKeySignalMessage(_) => print!("Yes"),
+        _ => print!("No")
+    }
+
     // *send over server*
     // server.send(bob_contact, to_bob)
 
