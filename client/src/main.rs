@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut alice_client = Client::new(
         "9d0652a3-dcc3-4d11-975f-74d61598733f".to_string(),
         InMemSignalProtocolStore::new(KeyPair::generate(&mut rng).into(), 1)?,
-        rng.clone(),
+        rng,
     );
 
     let mut bob_client = Client::new(

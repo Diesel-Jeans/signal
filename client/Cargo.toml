@@ -13,6 +13,7 @@ surf = "2.3.2"
 serde = "1.0.210"
 uuid = { version = "1.10.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
 
+anyhow = "1.0.89"
 
 [build-dependencies]
 tonic-build = "0.12.2"
