@@ -1,19 +1,18 @@
 use libsignal_protocol::*;
 use rand::{CryptoRng, Rng};
 
-
 pub async fn create_pre_key_bundle<R: Rng + CryptoRng>(
     store: &mut dyn ProtocolStore,
     mut csprng: &mut R,
 ) -> Result<PreKeyBundle, SignalProtocolError> {
     // z is random
     let pre_key_pair = KeyPair::generate(&mut csprng); // OPK - only one but should be more -> publish
-    
+
     let signed_pre_key_pair = KeyPair::generate(&mut csprng); // SPKB - changes periodically -> publish
     let kyber_pre_key_pair = kem::KeyPair::generate(kem::KeyType::Kyber1024); // PQSPKB - changes periodically -> publish
 
-    let signed_pre_key_signature = store  // Sig(IKB, EncodeEC(SPKB), ZSPK) - changes periodically -> publish
-        .get_identity_key_pair()// IKB - Bob only needs to upload his identity key to the server once -> publish
+    let signed_pre_key_signature = store // Sig(IKB, EncodeEC(SPKB), ZSPK) - changes periodically -> publish
+        .get_identity_key_pair() // IKB - Bob only needs to upload his identity key to the server once -> publish
         .await?
         .private_key()
         .calculate_signature(&signed_pre_key_pair.public_key.serialize(), &mut csprng)?;
@@ -27,7 +26,7 @@ pub async fn create_pre_key_bundle<R: Rng + CryptoRng>(
     let device_id: u32 = csprng.gen();
     let pre_key_id: u32 = csprng.gen(); // IdEC(OPKB1) -> publish
     let signed_pre_key_id: u32 = csprng.gen(); // IdEC(SPKB) -> publish
-    let kyber_pre_key_id: u32 = csprng.gen();  // IdKEM(PQSPKB) -> publish
+    let kyber_pre_key_id: u32 = csprng.gen(); // IdKEM(PQSPKB) -> publish
 
     // <-- publish -->
     // one-time pqkem prekeys - these are not generated and should be, so users can verify integrity
@@ -83,4 +82,3 @@ pub async fn create_pre_key_bundle<R: Rng + CryptoRng>(
         .await?;
     Ok(pre_key_bundle)
 }
-

@@ -1,27 +1,26 @@
-
 use libsignal_protocol::*;
+use rand::{CryptoRng, Rng};
 use std::collections::HashMap;
 use std::time::SystemTime;
-use rand::{CryptoRng, Rng};
 
 use crate::contact::Contact;
 use crate::contact::Device;
 
 use crate::client_common::create_pre_key_bundle;
 
-enum ProtocolKey{
+enum ProtocolKey {
     SignedPreKey,
     KyberPreKey,
     OneTimePreKey,
 }
 
-pub struct Client <R: Rng + CryptoRng>{
+pub struct Client<R: Rng + CryptoRng> {
     pub contact: Contact,
     store: InMemSignalProtocolStore,
     rng: R,
 }
 
-impl <R: Rng + CryptoRng> Client<R>{
+impl<R: Rng + CryptoRng> Client<R> {
     pub fn new(uuid: String, store: InMemSignalProtocolStore, rng: R) -> Client<R> {
         Self {
             contact: Contact::new(uuid),
@@ -30,27 +29,30 @@ impl <R: Rng + CryptoRng> Client<R>{
         }
     }
 
-    pub async fn create_bundle(&mut self) -> Result<PreKeyBundle, SignalProtocolError>{
+    pub async fn create_bundle(&mut self) -> Result<PreKeyBundle, SignalProtocolError> {
         create_pre_key_bundle(&mut self.store, &mut self.rng).await
     }
 
-
-
-    pub async fn verify_contact_devices(&mut self, contact: &mut Contact) -> Result<(), SignalProtocolError>{
+    pub async fn verify_contact_devices(
+        &mut self,
+        contact: &mut Contact,
+    ) -> Result<(), SignalProtocolError> {
         for device in contact {
             let bundle = match &device.bundle {
                 Some(x) => x,
-                None => continue
+                None => continue,
             };
 
             let _ = match process_prekey_bundle(
-                &device.address, 
+                &device.address,
                 &mut self.store.session_store,
-                &mut self.store.identity_store, 
-                bundle, 
-                SystemTime::now(), 
-                &mut self.rng
-            ).await {
+                &mut self.store.identity_store,
+                bundle,
+                SystemTime::now(),
+                &mut self.rng,
+            )
+            .await
+            {
                 Ok(_) => Ok::<(), SignalProtocolError>(()),
                 Err(_) => {
                     device.bundle = None;
@@ -61,9 +63,9 @@ impl <R: Rng + CryptoRng> Client<R>{
         Ok(())
     }
 
-    pub async fn encrypt(mut self, to: &Contact, msg: &str) ->Vec<CiphertextMessage>{
+    pub async fn encrypt(mut self, to: &Contact, msg: &str) -> Vec<CiphertextMessage> {
         let mut msgs: Vec<CiphertextMessage> = Vec::new();
-        for device in to{
+        for device in to {
             match device.bundle {
                 Some(_) => match message_encrypt(
                     msg.as_bytes(),
@@ -72,17 +74,22 @@ impl <R: Rng + CryptoRng> Client<R>{
                     &mut self.store.identity_store,
                     SystemTime::now(),
                 )
-                .await {
-                    Ok(x) => {msgs.push(x)},
-                    Err(_) => continue
-                }
-                None => continue
+                .await
+                {
+                    Ok(x) => msgs.push(x),
+                    Err(_) => continue,
+                },
+                None => continue,
             }
         }
         msgs
     }
 
-    pub async fn decrypt(mut self, from_device: &Device, msg: &CiphertextMessage) -> Result<Vec<u8>, SignalProtocolError>{
+    pub async fn decrypt(
+        mut self,
+        from_device: &Device,
+        msg: &CiphertextMessage,
+    ) -> Result<Vec<u8>, SignalProtocolError> {
         message_decrypt(
             msg,
             &from_device.address,
