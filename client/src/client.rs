@@ -64,16 +64,19 @@ impl <R: Rng + CryptoRng> Client<R>{
     pub async fn encrypt(mut self, to: &Contact, msg: &str) ->Vec<CiphertextMessage>{
         let mut msgs: Vec<CiphertextMessage> = Vec::new();
         for device in to{
-            match message_encrypt(
-                msg.as_bytes(),
-                &device.address,
-                &mut self.store.session_store,
-                &mut self.store.identity_store,
-                SystemTime::now(),
-            )
-            .await {
-                Ok(x) => {msgs.push(x)},
-                Err(_) => continue
+            match device.bundle {
+                Some(_) => match message_encrypt(
+                    msg.as_bytes(),
+                    &device.address,
+                    &mut self.store.session_store,
+                    &mut self.store.identity_store,
+                    SystemTime::now(),
+                )
+                .await {
+                    Ok(x) => {msgs.push(x)},
+                    Err(_) => continue
+                }
+                None => continue
             }
         }
         msgs
