@@ -19,6 +19,7 @@ pub trait Server {
     async fn update_client(&self, new_client: &Contact) -> Result<Ok(), Err()>;
     async fn delete_client(&self, contact: &Contact) -> Result<Ok(), Err()>;
     async fn delete_device(&self, device: &Device) -> Result<Ok(), Err()>;
+    async fn connect() -> Result<dyn Server, Err()>;
 }
 
 impl Server for ServerAPI {
@@ -51,6 +52,10 @@ impl Server for ServerAPI {
     }
 
     async fn delete_device(&self, device: &Device) -> Result<Ok(), Err()> {
+        todo!()
+    }
+
+    async fn connect() -> Result<dyn Server, Err()> {
         todo!()
     }
 }
