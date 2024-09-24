@@ -16,6 +16,7 @@ impl Device {
     }
 }
 
+#[derive(Clone)]
 pub struct Contact {
     pub uuid: String,
     devices: HashMap<u32, Device>,

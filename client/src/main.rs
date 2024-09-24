@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     alice_client
         .verify_contact_devices(&mut bob_contact)
-        .await?;
+        .await;
 
     // alice encrypts message to bob
     let to_bob = alice_client.encrypt(&bob_contact, "hello bibob").await;
