@@ -8,7 +8,7 @@ use surf::{http, Client, Config, Response, Url};
 use tokio_tungstenite::connect_async;
 
 const CLIENT_URI: &str = "/client";
-const MSG_URI: &str = "/message";
+const MSG_URI: &str = "/messages";
 const DEVICE_URI: &str = "/device";
 const BUNDLE_URI: &str = "/bundle";
 
