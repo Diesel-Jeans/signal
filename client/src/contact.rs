@@ -11,7 +11,7 @@ impl Device {
     pub fn new(uuid: String, device_id: u32, bundle: Option<PreKeyBundle>) -> Device {
         Self {
             address: ProtocolAddress::new(uuid, device_id.into()),
-            bundle: bundle,
+            bundle,
         }
     }
 }
@@ -24,7 +24,7 @@ pub struct Contact {
 impl Contact {
     pub fn new(uuid: String) -> Contact {
         Self {
-            uuid: uuid,
+            uuid,
             devices: HashMap::new(),
         }
     }
