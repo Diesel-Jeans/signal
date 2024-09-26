@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/client", delete(handle_delete_client))
         .route("/device", post(handle_register_device))
         .route("/device", delete(handle_delete_device));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:50051").await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:12345").await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
