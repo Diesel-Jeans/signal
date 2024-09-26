@@ -24,8 +24,8 @@ pub trait Server {
     async fn register_device(&self, client_info: &Contact) -> Result<(), Box<dyn std::error::Error>>;
     async fn send_msg(&self, msg: String) -> Result<(), Box<dyn std::error::Error>>;
     async fn update_client(&self, new_client: &Contact) -> Result<(), Box<dyn std::error::Error>>;
-    async fn delete_client(&self, client: &Contact) -> Result<(), Box<dyn std::error::Error>>;
-    async fn delete_device(&self, client_info: &Contact) -> Result<(), Box<dyn std::error::Error>>;
+    async fn delete_client(&self, uuid: String) -> Result<(), Box<dyn std::error::Error>>;
+    async fn delete_device(&self, uuid: String) -> Result<(), Box<dyn std::error::Error>>;
     fn new() -> Result<ServerAPI, Box<dyn std::error::Error>>;
 }
 
@@ -132,9 +132,9 @@ impl Server for ServerAPI {
         }
     }
 
-    async fn delete_client(&self, client: &Contact) -> Result<(), Box<dyn std::error::Error>>{
+    async fn delete_client(&self, uuid: String) -> Result<(), Box<dyn std::error::Error>>{
         let payload = json!({
-            "uuid": client.uuid
+            "uuid": uuid
         });
 
         let mut res = self.client.delete("/client")
@@ -147,9 +147,9 @@ impl Server for ServerAPI {
         }
     }
 
-    async fn delete_device(&self, client_info: &Contact) -> Result<(), Box<dyn std::error::Error>>{
+    async fn delete_device(&self, uuid: String) -> Result<(), Box<dyn std::error::Error>>{
         let payload = json!({
-            "uuid": client_info.uuid
+            "uuid": uuid
         });
 
         let mut res = self.client.delete("/device")
