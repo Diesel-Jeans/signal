@@ -46,16 +46,6 @@ pub trait Server {
 }
 
 impl Server for ServerAPI {
-    fn new() -> Result<ServerAPI, Box<dyn std::error::Error>> {
-        let test_client = Config::new()
-            .set_base_url(Url::parse("http://127.0.0.1:12345")?)
-            .set_timeout(Some(Duration::from_secs(5)))
-            .try_into()?;
-
-        Ok(ServerAPI {
-            client: test_client,
-        })
-    }
     async fn connect() {
         let server_url = "ws://127.0.0.1:12345";
         let (ws, _) = connect_async(server_url).await.expect("Failed to connect");
@@ -71,7 +61,6 @@ impl Server for ServerAPI {
 
         self.make_request(ReqType::Post(payload), BUNDLE_URI).await
     }
-
     async fn fetch_bundle(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.make_request(ReqType::Get, BUNDLE_URI).await
     }
@@ -128,6 +117,17 @@ impl Server for ServerAPI {
         });
         self.make_request(ReqType::Delete(payload), DEVICE_URI)
             .await
+    }
+
+    fn new() -> Result<ServerAPI, Box<dyn std::error::Error>> {
+        let test_client = Config::new()
+            .set_base_url(Url::parse("http://127.0.0.1:12345")?)
+            .set_timeout(Some(Duration::from_secs(5)))
+            .try_into()?;
+
+        Ok(ServerAPI {
+            client: test_client,
+        })
     }
 }
 impl ServerAPI {
