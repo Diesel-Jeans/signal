@@ -1,6 +1,7 @@
 mod client;
 mod contact_manager;
 mod encryption;
+mod key_management;
 mod server;
 
 #[tokio::main]
