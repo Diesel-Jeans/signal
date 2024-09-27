@@ -1,6 +1,8 @@
 use contact::{Contact, Device};
 use libsignal_protocol::*;
 use rand::rngs::OsRng;
+use surf::http::mime::JSON;
+use surf::http::Response;
 
 mod client;
 mod client_common;
@@ -10,6 +12,7 @@ mod server;
 use crate::client::Client;
 
 use common::signal_protobuf::Envelope;
+use common::signal_protocol_messages::RegistrationRequest;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut alice_client = Client::new(
         "9d0652a3-dcc3-4d11-975f-74d61598733f".to_string(),
         InMemSignalProtocolStore::new(KeyPair::generate(&mut rng).into(), 1)?,
-        rng.clone(),
+        rng,
     );
 
     let mut bob_client = Client::new(
@@ -68,8 +71,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         report_spam_token: None,
         shared_mrm_key: None,
     };
+    /*
 
-    surf::put("http://127.0.0.1:50051/messages")
+    surf::put("http://127.0.0.1:50051/message/bob")
         .body_json(&envelope)?
         .await?;
 
@@ -82,6 +86,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let alice_msg = String::from_utf8(alice_bytes)?;
     println!("{alice_msg}");
     //})
+     */
+    println!("Sending message: Register",);
+    let mut response = surf::post("http://127.0.0.1:50051/client")
+        .body_json(&RegistrationRequest {
+            aci: "Darkros124".to_string(),
+        })
+        .expect("should send successful request")
+        .await
+        .expect("should get successful response");
+    println!("Got response: {:?}", response.status());
 
     Ok(())
 }
