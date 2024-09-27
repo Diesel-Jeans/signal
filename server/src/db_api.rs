@@ -22,7 +22,7 @@ pub async fn add_user() -> Result<(), Error> {
 }
 
 pub fn get_user() {
-
+	
 }
 
 pub fn update_user() {
