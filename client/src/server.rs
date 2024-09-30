@@ -1,8 +1,6 @@
-use crate::contact_manager::{Contact, Device};
-use common::signal_protobuf::Envelope;
+use crate::contact_manager::Contact;
 use http::StatusCode;
 use libsignal_protocol::*;
-use std::fmt::format;
 use std::time::Duration;
 use surf::http::convert::json;
 use surf::{http, Client, Config, Response, Url};

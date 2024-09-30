@@ -4,11 +4,11 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use common::signal_protobuf::Envelope;
 use common::signal_protocol_messages::RegistrationRequest;
 use std::sync::{Arc, Mutex};
-use axum::routing::{delete, get, post, put};
 
 #[derive(Debug, Clone)]
 struct ServerState {
@@ -24,7 +24,7 @@ impl ServerState {
 }
 
 async fn handle_send_message(
-    State(mut state): State<ServerState>,
+    State(state): State<ServerState>,
     Path(address): Path<String>,
     Json(payload): Json<Envelope>,
 ) {
@@ -72,7 +72,7 @@ impl IntoResponse for ErrorResponse {
 
 #[axum::debug_handler]
 async fn handle_register_client(
-    State(mut state): State<ServerState>,
+    State(state): State<ServerState>,
     Json(payload): Json<RegistrationRequest>,
 ) -> Result<(), ErrorResponse> {
     println!("Register client");
