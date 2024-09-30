@@ -83,3 +83,64 @@ impl ContactManager {
     }
 
 }
+
+#[cfg(test)]
+mod test {
+    use rand::rngs::OsRng;
+    use uuid::Uuid;
+    use crate::contact_manager::{ContactManager, Contact, Device};
+    use crate::encoder::test::{create_pre_key_bundle, store};
+
+    #[test]
+    fn test_cm_add(){
+        let mut cm = ContactManager::new();
+        let charlie = Uuid::new_v4().to_string();
+        match cm.add_contact(&charlie){
+            Ok(_) => assert!(true),
+            Err(x) => assert!(false, "{}", x)
+        };
+    }
+
+    #[test]
+    fn test_cm_remove(){
+        let mut cm = ContactManager::new();
+        let charlie = Uuid::new_v4().to_string();
+
+        let _ = cm.add_contact(&charlie);
+
+        match cm.remove_contact(&charlie) {
+            Ok(_) => assert!(true),
+            Err(x) => assert!(false, "{}", x)
+        }
+    }
+
+    #[test]
+    fn test_cm_get(){
+        let mut cm = ContactManager::new();
+        let charlie = Uuid::new_v4().to_string();
+
+        let _ = cm.add_contact(&charlie);
+
+        match cm.get_contact(&charlie) {
+            Ok(c) => assert!(c.uuid == charlie && c.devices.len() == 0),
+            Err(x) => assert!(false, "{}", x)
+        };
+    }
+
+    #[tokio::test]
+    async fn test_cm_update(){
+        let mut cm = ContactManager::new();
+        let charlie = Uuid::new_v4().to_string();
+
+        let _ = cm.add_contact(&charlie);
+
+        let mut store = store(1);
+        let bundle = create_pre_key_bundle(&mut store, 1, &mut OsRng).await.unwrap();
+        match cm.update_contact(&charlie, vec![(1, bundle)]){
+            Ok(_) => assert!(true),
+            Err(x) => assert!(false, "{}", x)
+        }
+
+        assert!(cm.get_contact(&charlie).is_ok(), "Charlie was not ok")
+    }
+}
