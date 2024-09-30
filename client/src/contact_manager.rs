@@ -29,23 +29,23 @@ impl Contact {
     }
 }
 
-
-pub struct ContactManager{
-    contacts: HashMap<String, Contact>
+pub struct ContactManager {
+    contacts: HashMap<String, Contact>,
 }
 
 impl ContactManager {
     pub fn new() -> Self {
         Self {
-            contacts: HashMap::new()
+            contacts: HashMap::new(),
         }
     }
 
-    pub fn add_contact(&mut self, uuid: &String) -> Result<(), String>{
-        if self.contacts.contains_key(uuid){
+    pub fn add_contact(&mut self, uuid: &String) -> Result<(), String> {
+        if self.contacts.contains_key(uuid) {
             return Err(format!("Contact with UUID '{uuid}' not found"));
         }
-        self.contacts.insert(uuid.clone(), Contact::new(uuid.clone()));
+        self.contacts
+            .insert(uuid.clone(), Contact::new(uuid.clone()));
         Ok(())
     }
 
@@ -65,44 +65,48 @@ impl ContactManager {
         }
     }
 
-    pub fn remove_contact(&mut self, uuid: &String) -> Result<(), String>{
-        if !self.contacts.contains_key(uuid){
+    pub fn remove_contact(&mut self, uuid: &String) -> Result<(), String> {
+        if !self.contacts.contains_key(uuid) {
             return Err(format!("Contact with UUID '{uuid}' not found"));
         }
         self.contacts.remove(uuid);
         Ok(())
     }
 
-    pub fn update_contact(&mut self, uuid: &String, devices: Vec<(u32, PreKeyBundle)>) -> Result<(), String>{
+    pub fn update_contact(
+        &mut self,
+        uuid: &String,
+        devices: Vec<(u32, PreKeyBundle)>,
+    ) -> Result<(), String> {
         self.get_contact_mut(uuid).map(|x| {
-            for (id, bundle) in devices{
-                x.devices.insert(id, Device::new(uuid.to_string(), id, bundle));
+            for (id, bundle) in devices {
+                x.devices
+                    .insert(id, Device::new(uuid.to_string(), id, bundle));
             }
             ()
         })
     }
-
 }
 
 #[cfg(test)]
 mod test {
+    use crate::contact_manager::{Contact, ContactManager, Device};
+    use crate::encryption::test::{create_pre_key_bundle, store};
     use rand::rngs::OsRng;
     use uuid::Uuid;
-    use crate::contact_manager::{ContactManager, Contact, Device};
-    use crate::encryption::test::{create_pre_key_bundle, store};
 
     #[test]
-    fn test_cm_add(){
+    fn test_cm_add() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
-        match cm.add_contact(&charlie){
+        match cm.add_contact(&charlie) {
             Ok(_) => assert!(true),
-            Err(x) => assert!(false, "{}", x)
+            Err(x) => assert!(false, "{}", x),
         };
     }
 
     #[test]
-    fn test_cm_remove(){
+    fn test_cm_remove() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
 
@@ -110,12 +114,12 @@ mod test {
 
         match cm.remove_contact(&charlie) {
             Ok(_) => assert!(true),
-            Err(x) => assert!(false, "{}", x)
+            Err(x) => assert!(false, "{}", x),
         }
     }
 
     #[test]
-    fn test_cm_get(){
+    fn test_cm_get() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
 
@@ -123,22 +127,24 @@ mod test {
 
         match cm.get_contact(&charlie) {
             Ok(c) => assert!(c.uuid == charlie && c.devices.len() == 0),
-            Err(x) => assert!(false, "{}", x)
+            Err(x) => assert!(false, "{}", x),
         };
     }
 
     #[tokio::test]
-    async fn test_cm_update(){
+    async fn test_cm_update() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
 
         let _ = cm.add_contact(&charlie);
 
         let mut store = store(1);
-        let bundle = create_pre_key_bundle(&mut store, 1, &mut OsRng).await.unwrap();
-        match cm.update_contact(&charlie, vec![(1, bundle)]){
+        let bundle = create_pre_key_bundle(&mut store, 1, &mut OsRng)
+            .await
+            .unwrap();
+        match cm.update_contact(&charlie, vec![(1, bundle)]) {
             Ok(_) => assert!(true),
-            Err(x) => assert!(false, "{}", x)
+            Err(x) => assert!(false, "{}", x),
         }
 
         assert!(cm.get_contact(&charlie).is_ok(), "Charlie was not ok")

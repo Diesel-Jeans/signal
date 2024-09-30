@@ -1,5 +1,3 @@
 use libsignal_protocol::*;
 
-pub trait Server {
-
-}
+pub trait Server {}

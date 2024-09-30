@@ -1,7 +1,7 @@
 mod client;
-mod server;
-mod encryption;
 mod contact_manager;
+mod encryption;
+mod server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
