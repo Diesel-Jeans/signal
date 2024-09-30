@@ -11,6 +11,8 @@ tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 rand = "0.8.5"
 surf = "2.3.2"
 serde = "1.0.210"
+uuid = { version = "1.10.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
+
 anyhow = "1.0.89"
 tokio-tungstenite = "0.24.0"
 async-std = "1.13.0"
