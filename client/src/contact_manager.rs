@@ -89,7 +89,7 @@ mod test {
     use rand::rngs::OsRng;
     use uuid::Uuid;
     use crate::contact_manager::{ContactManager, Contact, Device};
-    use crate::encoder::test::{create_pre_key_bundle, store};
+    use crate::encryption::test::{create_pre_key_bundle, store};
 
     #[test]
     fn test_cm_add(){

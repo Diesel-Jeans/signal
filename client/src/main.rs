@@ -1,6 +1,6 @@
 mod client;
 mod server;
-mod encoder;
+mod encryption;
 mod contact_manager;
 
 #[tokio::main]
