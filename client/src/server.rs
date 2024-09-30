@@ -1,4 +1,4 @@
-use crate::contact::{Contact, Device};
+use crate::contact_manager::{Contact, Device};
 use common::signal_protobuf::Envelope;
 use http::StatusCode;
 use libsignal_protocol::*;
