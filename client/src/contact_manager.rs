@@ -1,13 +1,14 @@
+use crate::key_management::bundle::KeyBundleContent;
 use libsignal_protocol::*;
 use std::collections::HashMap;
 
 pub struct Device {
     pub address: ProtocolAddress,
-    pub bundle: PreKeyBundle,
+    pub bundle: KeyBundleContent,
 }
 
 impl Device {
-    pub fn new(uuid: String, device_id: u32, bundle: PreKeyBundle) -> Device {
+    pub fn new(uuid: String, device_id: u32, bundle: KeyBundleContent) -> Device {
         Self {
             address: ProtocolAddress::new(uuid, device_id.into()),
             bundle,
@@ -76,7 +77,7 @@ impl ContactManager {
     pub fn update_contact(
         &mut self,
         uuid: &String,
-        devices: Vec<(u32, PreKeyBundle)>,
+        devices: Vec<(u32, KeyBundleContent)>,
     ) -> Result<(), String> {
         self.get_contact_mut(uuid).map(|x| {
             for (id, bundle) in devices {
@@ -141,7 +142,7 @@ mod test {
         let bundle = create_pre_key_bundle(&mut store, 1, &mut OsRng)
             .await
             .unwrap();
-        match cm.update_contact(&charlie, vec![(1, bundle)]) {
+        match cm.update_contact(&charlie, vec![(1, bundle.try_into().unwrap())]) {
             Ok(_) => assert!(true),
             Err(x) => assert!(false, "{}", x),
         }

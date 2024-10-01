@@ -55,6 +55,7 @@ pub async fn decrypt<R: Rng + CryptoRng>(
 pub(crate) mod test {
     use crate::contact_manager::{Contact, ContactManager, Device};
     use crate::encryption::{decrypt, encrypt};
+    use crate::key_management::bundle::KeyBundleContent;
     use libsignal_protocol::*;
     use rand::rngs::OsRng;
     use rand::{CryptoRng, Rng};
@@ -87,21 +88,27 @@ pub(crate) mod test {
         let alice_bundle = create_pre_key_bundle(&mut alice_store, 0, &mut rng)
             .await
             .unwrap();
+
+        let alice_bundle_content = alice_bundle.clone().try_into().unwrap();
+
         let bob_bundle = create_pre_key_bundle(&mut bob_store, 1, &mut rng)
             .await
             .unwrap();
 
-        let _ = manager.update_contact(&alice_id, vec![(0, alice_bundle)]);
-        let _ = manager.update_contact(&bob_id, vec![(1, bob_bundle)]);
+        let bob_bundle_content = bob_bundle.clone().try_into().unwrap();
+
+        let _ = manager.update_contact(&alice_id, vec![(0, alice_bundle_content)]);
+        let _ = manager.update_contact(&bob_id, vec![(1, bob_bundle_content)]);
 
         let bob = manager.get_contact(&bob_id).unwrap();
         let bob_device = bob.devices.get(&1).unwrap();
+        let bob_pre_key_bundle = bob_device.bundle.clone().create_key_bundle().unwrap();
 
         let _ = process_prekey_bundle(
             &bob_device.address,
             &mut alice_store.session_store,
             &mut alice_store.identity_store,
-            &bob_device.bundle,
+            &bob_pre_key_bundle,
             SystemTime::now(),
             &mut rng,
         )
