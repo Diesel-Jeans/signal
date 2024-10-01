@@ -1,6 +1,7 @@
+use std::collections::HashMap;
 use anyhow::Result;
 use libsignal_protocol::*;
-use serde::{ Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 #[derive(Clone)]
 pub struct KeyBundleContent {
@@ -55,4 +56,98 @@ impl KeyBundleContent {
             None => Ok(pre_key_bundle),
         }
     }
+
+    pub fn serialize(&self) -> PrimitiveKeyBundleContent {
+        PrimitiveKeyBundleContent::new(
+            self.registration_id,
+            self.device_id.into(),
+            Some(self.onetime_public_key.unwrap().0.into()),
+            self.onetime_public_key.unwrap().1.serialize().into(),
+            self.signed_public_key_id.into(),
+            self.signed_public_key.serialize(),
+            self.signed_signature.clone(),
+            self.identity_key.serialize(),
+            Some(self.kyper_key_essentials.clone().unwrap().0.into()),
+            self.kyper_key_essentials.clone().unwrap().1.serialize().into(),
+            self.kyper_key_essentials.clone().unwrap().2.into(),
+        )
+    }
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PrimitiveKeyBundleContent {
+    registration_id: u32,
+    device_id: u32,
+    onetime_public_key_id: Option<u32>,
+    onetime_public_key: Option<Box<[u8]>>,
+    signed_public_key_id: u32,
+    signed_public_key: Box<[u8]>,
+    signed_signature: Vec<u8>,
+    identity_key: Box<[u8]>,
+    kyper_pre_key_id: Option<u32>,
+    kyper_public_key: Option<Box<[u8]>>,
+    kyper_signature: Vec<u8>,
+}
+impl PrimitiveKeyBundleContent {
+    pub fn new(
+        registration_id: u32,
+        device_id: u32,
+        onetime_public_key_id: Option<u32>,
+        onetime_public_key: Option<Box<[u8]>>,
+        signed_public_key_id: u32,
+        signed_public_key: Box<[u8]>,
+        signed_signature: Vec<u8>,
+        identity_key: Box<[u8]>,
+        kyper_pre_key_id: Option<u32>,
+        kyper_public_key: Option<Box<[u8]>>,
+        kyper_signature: Vec<u8>,
+    ) -> Self {
+        PrimitiveKeyBundleContent {
+            registration_id,
+            device_id,
+            onetime_public_key_id,
+            onetime_public_key,
+            signed_public_key_id,
+            signed_public_key,
+            signed_signature,
+            identity_key,
+            kyper_pre_key_id,
+            kyper_public_key,
+            kyper_signature,
+        }
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::SystemTime;
+    use serde::*;
+    use serde_json;
+    use uuid::Uuid;
+    use libsignal_protocol::*;
+    use rand::rngs::OsRng;
+    use rand::{CryptoRng, Rng};
+    use crate::contact_manager::{ContactManager, Device};
+    use crate::encryption::test::{create_pre_key_bundle, store, signal_bundle_to_our_bundle};
+    use crate::key_management::*;
+
+    #[tokio::test]
+    async fn test_store_device_data() {
+        let alice = Uuid::new_v4().to_string();
+        let device_id = 42069;
+        let mut store = store(device_id);
+
+        let bundle = create_pre_key_bundle(&mut store, device_id, &mut OsRng)
+            .await
+            .unwrap();
+
+        let device = Device::new(alice, device_id, signal_bundle_to_our_bundle(bundle));
+        let out = serde_json::to_string(&device.bundle.serialize()).unwrap();
+        let deserialized = serde_json::from_str(&out).unwrap();
+
+        println!("{}", out);
+        //assert_eq!(device.bundle.serialize(), deserialized);
+    }
+}
+
