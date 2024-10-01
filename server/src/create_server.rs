@@ -32,7 +32,7 @@ async fn handle_send_message(
     match state
         .db
         .lock()
-        .expect("Should not fail :)")
+        .expect("Should eventually lock.")
         .mailbox
         .get_mut(&address)
     {
@@ -84,7 +84,7 @@ async fn handle_register_client(
         });
     }
 
-    let mut db = state.db.lock().expect("Should not fail :)");
+    let mut db = state.db.lock().expect("Should eventually lock.");
     // Check that client does not already exist.
     if db.user.contains(payload.aci.as_str()) {
         println!("User already registered: '{}'", payload.aci);
