@@ -61,12 +61,24 @@ pub(crate) mod test {
     use std::sync::{Arc, Mutex};
     use std::time::SystemTime;
     use uuid::Uuid;
+    use crate::key_management::bundle::KeyBundleContent;
 
     pub fn store(reg: u32) -> InMemSignalProtocolStore {
         let mut rng = OsRng;
         let p = KeyPair::generate(&mut rng).into();
 
         InMemSignalProtocolStore::new(p, reg).unwrap()
+    }
+
+    pub fn signal_bundle_to_our_bundle(bundle: PreKeyBundle) -> KeyBundleContent {
+        KeyBundleContent::new(bundle.registration_id().unwrap(),
+                              bundle.device_id().unwrap(),
+                              Some((bundle.pre_key_id().unwrap().unwrap(), bundle.pre_key_public().unwrap().unwrap())),
+                              (bundle.signed_pre_key_id().unwrap(), bundle.signed_pre_key_public().unwrap()),
+                              bundle.signed_pre_key_signature().unwrap().to_vec(),
+                              bundle.identity_key().unwrap().to_owned(),
+                              Some((bundle.kyber_pre_key_id().unwrap().unwrap(), bundle.kyber_pre_key_public().unwrap().unwrap().to_owned(), bundle.kyber_pre_key_signature().unwrap().unwrap().to_vec())),
+        )
     }
 
     #[tokio::test]
@@ -87,21 +99,29 @@ pub(crate) mod test {
         let alice_bundle = create_pre_key_bundle(&mut alice_store, 0, &mut rng)
             .await
             .unwrap();
+
+        //Shitty hack to stuff a signal prekey bundle into our KeyBundle.
+        let alice_bundle_content = signal_bundle_to_our_bundle(alice_bundle.clone());
+
         let bob_bundle = create_pre_key_bundle(&mut bob_store, 1, &mut rng)
             .await
             .unwrap();
 
-        let _ = manager.update_contact(&alice_id, vec![(0, alice_bundle)]);
-        let _ = manager.update_contact(&bob_id, vec![(1, bob_bundle)]);
+        //Another garbage hack to force Signal's shit into ours
+        let bob_bundle_content = signal_bundle_to_our_bundle(bob_bundle.clone());
+
+        let _ = manager.update_contact(&alice_id, vec![(0, alice_bundle_content)]);
+        let _ = manager.update_contact(&bob_id, vec![(1, bob_bundle_content)]);
 
         let bob = manager.get_contact(&bob_id).unwrap();
         let bob_device = bob.devices.get(&1).unwrap();
+        let bob_pre_key_bundle = bob_device.bundle.clone().create_key_bundle().unwrap();
 
         let _ = process_prekey_bundle(
             &bob_device.address,
             &mut alice_store.session_store,
             &mut alice_store.identity_store,
-            &bob_device.bundle,
+            &bob_pre_key_bundle,
             SystemTime::now(),
             &mut rng,
         )

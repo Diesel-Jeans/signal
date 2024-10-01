@@ -1,6 +1,8 @@
 use anyhow::Result;
 use libsignal_protocol::*;
+use serde::{ Serialize};
 
+#[derive(Clone)]
 pub struct KeyBundleContent {
     registration_id: u32,
     device_id: DeviceId,
