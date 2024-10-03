@@ -13,4 +13,4 @@ axum = "0.7.6"
 serde = { version = "1.0.210", features = ["derive"] }
 
 [build-dependencies]
-tonic-build = "0.12.2"
+tonic-build = "0.12.3"

@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 prost = "0.13.3"
-tonic = "0.12.2"
+tonic = "0.12.3"
 serde = { version = "1.0.210", features = ["derive"] }
 
 [build-dependencies]
-tonic-build = "0.12.2"
+tonic-build = "0.12.3"
