@@ -138,15 +138,15 @@ impl PrimitiveKeyBundleContent {
             )),
             (
                 self.signed_public_key_id.clone().into(),
-                PublicKey::deserialize(self.signed_public_key.clone().into_vec().as_slice())
+                PublicKey::deserialize(&(*self.signed_public_key))
                     .unwrap(),
             ),
             self.signed_signature.clone(),
-            IdentityKey::decode(self.identity_key.clone().to_vec().as_slice()).unwrap(),
+            IdentityKey::decode(&(*self.identity_key)).unwrap(),
             Some((
                 self.kyper_pre_key_id.unwrap().into(),
                 kem::PublicKey::deserialize(
-                    self.kyper_public_key.clone().unwrap().into_vec().as_slice(),
+                    &(*self.kyper_public_key.clone().unwrap()),
                 )
                 .expect("desrialize pk"),
                 self.kyper_signature.clone().into(),
