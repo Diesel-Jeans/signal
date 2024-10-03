@@ -1,6 +1,6 @@
+use crate::key_management::bundle::KeyBundleContent;
 use libsignal_protocol::*;
 use std::collections::HashMap;
-use crate::key_management::bundle::KeyBundleContent;
 
 pub struct Device {
     pub address: ProtocolAddress,
@@ -92,7 +92,7 @@ impl ContactManager {
 #[cfg(test)]
 mod test {
     use crate::contact_manager::{Contact, ContactManager, Device};
-    use crate::encryption::test::{create_pre_key_bundle, store, signal_bundle_to_our_bundle};
+    use crate::encryption::test::{create_pre_key_bundle, signal_bundle_to_our_bundle, store};
     use rand::rngs::OsRng;
     use uuid::Uuid;
 

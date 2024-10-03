@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use anyhow::Result;
 use libsignal_protocol::*;
 use serde::{Deserialize, Serialize, Serializer};
@@ -68,13 +67,18 @@ impl KeyBundleContent {
             self.signed_signature.clone(),
             self.identity_key.serialize(),
             Some(self.kyper_key_essentials.clone().unwrap().0.into()),
-            self.kyper_key_essentials.clone().unwrap().1.serialize().into(),
+            self.kyper_key_essentials
+                .clone()
+                .unwrap()
+                .1
+                .serialize()
+                .into(),
             self.kyper_key_essentials.clone().unwrap().2.into(),
         )
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialOrd, PartialEq, Serialize, Deserialize)]
 pub struct PrimitiveKeyBundleContent {
     registration_id: u32,
     device_id: u32,
@@ -117,23 +121,52 @@ impl PrimitiveKeyBundleContent {
         }
     }
 
+    pub fn create_key_bundle_content(&self) -> KeyBundleContent {
+        KeyBundleContent::new(
+            self.registration_id.into(),
+            self.device_id.into(),
+            Some((
+                self.onetime_public_key_id.clone().unwrap().into(),
+                PublicKey::deserialize(
+                    self.onetime_public_key
+                        .clone()
+                        .unwrap()
+                        .into_vec()
+                        .as_slice(),
+                )
+                .unwrap(),
+            )),
+            (
+                self.signed_public_key_id.clone().into(),
+                PublicKey::deserialize(self.signed_public_key.clone().into_vec().as_slice())
+                    .unwrap(),
+            ),
+            self.signed_signature.clone(),
+            IdentityKey::decode(self.identity_key.clone().to_vec().as_slice()).unwrap(),
+            Some((
+                self.kyper_pre_key_id.unwrap().into(),
+                kem::PublicKey::deserialize(
+                    self.kyper_public_key.clone().unwrap().into_vec().as_slice(),
+                )
+                .expect("desrialize pk"),
+                self.kyper_signature.clone().into(),
+            )),
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
+    use crate::contact_manager::Device;
+    use crate::encryption::test::{create_pre_key_bundle, signal_bundle_to_our_bundle, store};
+    use libsignal_protocol::*;
+    use rand::rngs::OsRng;
     use serde::*;
     use serde_json;
     use uuid::Uuid;
-    use libsignal_protocol::*;
-    use rand::rngs::OsRng;
-    use rand::{CryptoRng, Rng};
-    use crate::contact_manager::{ContactManager, Device};
-    use crate::encryption::test::{create_pre_key_bundle, store, signal_bundle_to_our_bundle};
-    use crate::key_management::*;
 
     #[tokio::test]
-    async fn test_store_device_data() {
+    async fn test_serialize_bundle_data() {
         let alice = Uuid::new_v4().to_string();
         let device_id = 42069;
         let mut store = store(device_id);
@@ -146,8 +179,6 @@ mod tests {
         let out = serde_json::to_string(&device.bundle.serialize()).unwrap();
         let deserialized = serde_json::from_str(&out).unwrap();
 
-        println!("{}", out);
-        //assert_eq!(device.bundle.serialize(), deserialized);
+        assert_eq!(device.bundle.serialize(), deserialized);
     }
 }
-

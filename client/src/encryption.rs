@@ -55,13 +55,13 @@ pub async fn decrypt<R: Rng + CryptoRng>(
 pub(crate) mod test {
     use crate::contact_manager::{Contact, ContactManager, Device};
     use crate::encryption::{decrypt, encrypt};
+    use crate::key_management::bundle::KeyBundleContent;
     use libsignal_protocol::*;
     use rand::rngs::OsRng;
     use rand::{CryptoRng, Rng};
     use std::sync::{Arc, Mutex};
     use std::time::SystemTime;
     use uuid::Uuid;
-    use crate::key_management::bundle::KeyBundleContent;
 
     pub fn store(reg: u32) -> InMemSignalProtocolStore {
         let mut rng = OsRng;
@@ -71,13 +71,24 @@ pub(crate) mod test {
     }
 
     pub fn signal_bundle_to_our_bundle(bundle: PreKeyBundle) -> KeyBundleContent {
-        KeyBundleContent::new(bundle.registration_id().unwrap(),
-                              bundle.device_id().unwrap(),
-                              Some((bundle.pre_key_id().unwrap().unwrap(), bundle.pre_key_public().unwrap().unwrap())),
-                              (bundle.signed_pre_key_id().unwrap(), bundle.signed_pre_key_public().unwrap()),
-                              bundle.signed_pre_key_signature().unwrap().to_vec(),
-                              bundle.identity_key().unwrap().to_owned(),
-                              Some((bundle.kyber_pre_key_id().unwrap().unwrap(), bundle.kyber_pre_key_public().unwrap().unwrap().to_owned(), bundle.kyber_pre_key_signature().unwrap().unwrap().to_vec())),
+        KeyBundleContent::new(
+            bundle.registration_id().unwrap(),
+            bundle.device_id().unwrap(),
+            Some((
+                bundle.pre_key_id().unwrap().unwrap(),
+                bundle.pre_key_public().unwrap().unwrap(),
+            )),
+            (
+                bundle.signed_pre_key_id().unwrap(),
+                bundle.signed_pre_key_public().unwrap(),
+            ),
+            bundle.signed_pre_key_signature().unwrap().to_vec(),
+            bundle.identity_key().unwrap().to_owned(),
+            Some((
+                bundle.kyber_pre_key_id().unwrap().unwrap(),
+                bundle.kyber_pre_key_public().unwrap().unwrap().to_owned(),
+                bundle.kyber_pre_key_signature().unwrap().unwrap().to_vec(),
+            )),
         )
     }
 
