@@ -1,6 +1,7 @@
 use crate::contact_manager::Contact;
 use http::StatusCode;
 use libsignal_protocol::*;
+use std::io::{Error, ErrorKind};
 use std::time::Duration;
 use surf::http::convert::json;
 use surf::{http, Client, Config, Response, Url};
@@ -54,7 +55,7 @@ pub trait Server {
 
 impl Server for ServerAPI {
     async fn connect() {
-        let server_url = "ws://127.0.0.1:12345";
+        let server_url = "ws://127.0.0.1:50051";
         let (ws, _) = connect_async(server_url).await.expect("Failed to connect");
 
         println!("connected!");
@@ -142,7 +143,7 @@ impl Server for ServerAPI {
 
     fn new() -> Result<ServerAPI, Box<dyn std::error::Error>> {
         let test_client = Config::new()
-            .set_base_url(Url::parse("http://127.0.0.1:12345")?)
+            .set_base_url(Url::parse("http://127.0.0.1:50051")?)
             .set_timeout(Some(Duration::from_secs(5)))
             .try_into()?;
 
@@ -170,7 +171,11 @@ impl ServerAPI {
 
         match res.status() {
             StatusCode::Ok => Ok(res),
-            _ => Err("Failed".into()),
+            _ => Err(Error::new(
+                ErrorKind::Other,
+                format!("response returned: {:?}", res.status()),
+            )
+            .into()),
         }
     }
 }
