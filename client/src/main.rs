@@ -13,6 +13,7 @@ use crate::client::Client;
 
 use common::signal_protobuf::Envelope;
 use common::signal_protocol_messages::RegistrationRequest;
+use crate::server::{Server, ServerAPI};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -86,9 +87,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let alice_msg = String::from_utf8(alice_bytes)?;
     println!("{alice_msg}");
     //})
+
+
+
      */
+
+    let client = ServerAPI::new()?;
+    client.connect().await;
+
     println!("Sending message: Register",);
-    let mut response = surf::post("http://127.0.0.1:50051/client")
+    let mut response = surf::post("http://127.0.0.1:12345/client")
         .body_json(&RegistrationRequest {
             aci: "Darkros124".to_string(),
         })

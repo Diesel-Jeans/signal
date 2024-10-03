@@ -1,5 +1,8 @@
 mod in_memory_db;
 
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use tokio::net::{TcpListener, TcpStream};
 use crate::in_memory_db::InMemoryDB;
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -12,6 +15,11 @@ use common::signal_protobuf::Envelope;
 use common::signal_protocol_messages::RegistrationRequest;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::thread::spawn;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::task;
+use tungstenite::{accept, Message};
 
 /// Hello, world!
 #[tokio::main]
@@ -27,9 +35,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/device/:address", post(handle_register_device))
         .route("/device/:address", delete(handle_delete_device))
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:50051").await?;
-    axum::serve(listener, app).await?;
+    let listener = TcpListener::bind("127.0.0.1:12345").await?;
+    receive_websocket().await;
+    tokio::spawn(receive_websocket());
+    tokio::spawn(async { axum::serve(listener, app).await.expect("server did not start"); println!("Server started")});
     Ok(())
+}
+
+async fn receive_websocket() {
+    let addr = "127.0.0.1:8888";
+
+
+    // Create the event loop and TCP listener we'll accept connections on.
+    let try_socket = TcpListener::bind(&addr).await;
+    let listener = try_socket.expect("Failed to bind");
+    println!("Listening on: {}", addr);
+
+    while let Ok((stream, addr)) = listener.accept().await {
+        tokio::spawn(handle_connection(stream, addr));
+    }
+
+}
+
+async fn handle_connection(stream: tokio::net::TcpStream, addr: SocketAddr) {
+    println!("Incoming connection from {}", addr);
+
+    let ws_stream = tokio_tungstenite::accept_async(stream)
+        .await
+        .expect("Error during the websocket handshake occurred");
+    println!("WebSocket connection established: {}", addr);
+
+    let (outgoing, incoming) = ws_stream.split();
+
+    while let Some(message) = incoming.next().await {
+        match message {
+            Ok(msg) => {
+                // Process the message (can be text, binary, etc.)
+                println!("Received: {:?}", msg);
+            }
+            Err(e) => {
+                println!("Error while reading message: {:?}", e);
+                break; // Exit the loop on error
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
