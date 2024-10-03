@@ -2134,6 +2134,7 @@ dependencies = [
  "common",
  "libsignal-core",
  "libsignal-protocol",
+ "rand 0.8.5",
  "serde",
  "tokio",
  "tonic-build",
