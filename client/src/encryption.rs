@@ -70,28 +70,6 @@ pub(crate) mod test {
         InMemSignalProtocolStore::new(p, reg).unwrap()
     }
 
-    pub fn signal_bundle_to_our_bundle(bundle: PreKeyBundle) -> KeyBundleContent {
-        KeyBundleContent::new(
-            bundle.registration_id().unwrap(),
-            bundle.device_id().unwrap(),
-            Some((
-                bundle.pre_key_id().unwrap().unwrap(),
-                bundle.pre_key_public().unwrap().unwrap(),
-            )),
-            (
-                bundle.signed_pre_key_id().unwrap(),
-                bundle.signed_pre_key_public().unwrap(),
-            ),
-            bundle.signed_pre_key_signature().unwrap().to_vec(),
-            bundle.identity_key().unwrap().to_owned(),
-            Some((
-                bundle.kyber_pre_key_id().unwrap().unwrap(),
-                bundle.kyber_pre_key_public().unwrap().unwrap().to_owned(),
-                bundle.kyber_pre_key_signature().unwrap().unwrap().to_vec(),
-            )),
-        )
-    }
-
     #[tokio::test]
     async fn test_encryption() {
         let mut alice_store = store(1);
@@ -111,13 +89,13 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        let alice_bundle_content = signal_bundle_to_our_bundle(alice_bundle.clone());
+        let alice_bundle_content = alice_bundle.clone().into();
 
         let bob_bundle = create_pre_key_bundle(&mut bob_store, 1, &mut rng)
             .await
             .unwrap();
 
-        let bob_bundle_content = signal_bundle_to_our_bundle(bob_bundle.clone());
+        let bob_bundle_content = bob_bundle.clone().into();
 
         let _ = manager.update_contact(&alice_id, vec![(0, alice_bundle_content)]);
         let _ = manager.update_contact(&bob_id, vec![(1, bob_bundle_content)]);

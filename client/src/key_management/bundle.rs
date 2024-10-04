@@ -150,6 +150,30 @@ impl KeyBundleContent {
     }
 }
 
+impl From<PreKeyBundle> for KeyBundleContent {
+    fn from(bundle: PreKeyBundle) -> Self {
+        KeyBundleContent::new(
+            bundle.registration_id().unwrap(),
+            bundle.device_id().unwrap(),
+            Some((
+                bundle.pre_key_id().unwrap().unwrap(),
+                bundle.pre_key_public().unwrap().unwrap(),
+            )),
+            (
+                bundle.signed_pre_key_id().unwrap(),
+                bundle.signed_pre_key_public().unwrap(),
+            ),
+            bundle.signed_pre_key_signature().unwrap().to_vec(),
+            bundle.identity_key().unwrap().to_owned(),
+            Some((
+                bundle.kyber_pre_key_id().unwrap().unwrap(),
+                bundle.kyber_pre_key_public().unwrap().unwrap().to_owned(),
+                bundle.kyber_pre_key_signature().unwrap().unwrap().to_vec(),
+            )),
+        )
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialOrd, PartialEq, Serialize, Deserialize)]
 pub struct PrimitiveKeyBundleContent {
     registration_id: u32,
@@ -197,7 +221,7 @@ impl PrimitiveKeyBundleContent {
 #[cfg(test)]
 mod tests {
     use crate::contact_manager::Device;
-    use crate::encryption::test::{create_pre_key_bundle, signal_bundle_to_our_bundle, store};
+    use crate::encryption::test::{create_pre_key_bundle, store};
     use crate::key_management::bundle::{KeyBundleContent, PrimitiveKeyBundleContent};
     use libsignal_protocol::*;
     use rand::rngs::OsRng;
@@ -215,7 +239,7 @@ mod tests {
             .await
             .unwrap();
 
-        let device = Device::new(alice, device_id, signal_bundle_to_our_bundle(bundle));
+        let device = Device::new(alice, device_id, bundle.into());
         let out = serde_json::to_string(&device.bundle.serialize()).unwrap();
         let deserialized = serde_json::from_str(&out).unwrap();
 
@@ -228,11 +252,10 @@ mod tests {
         let device_id = 42069;
         let mut store = store(device_id);
 
-        let bundle = signal_bundle_to_our_bundle(
-            create_pre_key_bundle(&mut store, device_id, &mut OsRng)
-                .await
-                .unwrap(),
-        );
+        let bundle: KeyBundleContent = create_pre_key_bundle(&mut store, device_id, &mut OsRng)
+            .await
+            .unwrap()
+            .into();
 
         let none_bundle = KeyBundleContent::new(
             bundle.registration_id,
@@ -262,7 +285,7 @@ mod tests {
             .await
             .unwrap();
 
-        let device = Device::new(alice, device_id, signal_bundle_to_our_bundle(bundle));
+        let device = Device::new(alice, device_id, bundle.into());
         let base_content = device.bundle.serialize();
         let primitive_bundle_with_none = PrimitiveKeyBundleContent::new(
             base_content.registration_id,

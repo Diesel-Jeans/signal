@@ -33,7 +33,7 @@ pub fn retrive_device_data() -> Result<(Info)> {
 #[cfg(test)]
 mod tests {
     use crate::contact_manager::Device;
-    use crate::encryption::test::{create_pre_key_bundle, signal_bundle_to_our_bundle, store};
+    use crate::encryption::test::{create_pre_key_bundle, store};
     use crate::storage::{retrive_device_data, store_device_data};
     use libsignal_protocol::*;
     use rand::rngs::OsRng;
@@ -51,7 +51,7 @@ mod tests {
             .await
             .unwrap();
 
-        let device = Device::new(alice, device_id, signal_bundle_to_our_bundle(bundle));
+        let device = Device::new(alice, device_id, bundle.into());
 
         store_device_data(&device).unwrap();
 

@@ -91,7 +91,7 @@ impl ContactManager {
 #[cfg(test)]
 mod test {
     use crate::contact_manager::{Contact, ContactManager, Device};
-    use crate::encryption::test::{create_pre_key_bundle, signal_bundle_to_our_bundle, store};
+    use crate::encryption::test::{create_pre_key_bundle, store};
     use rand::rngs::OsRng;
     use uuid::Uuid;
 
@@ -142,7 +142,7 @@ mod test {
         let bundle = create_pre_key_bundle(&mut store, 1, &mut OsRng)
             .await
             .unwrap();
-        match cm.update_contact(&charlie, vec![(1, signal_bundle_to_our_bundle(bundle))]) {
+        match cm.update_contact(&charlie, vec![(1, bundle.into())]) {
             Ok(_) => assert!(true),
             Err(x) => assert!(false, "{}", x),
         }
