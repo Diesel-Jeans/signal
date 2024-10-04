@@ -258,7 +258,8 @@ mod tests {
         let bundle: KeyBundleContent = create_pre_key_bundle(&mut store, device_id, &mut OsRng)
             .await
             .unwrap()
-            .try_into().unwrap();
+            .try_into()
+            .unwrap();
 
         let none_bundle = KeyBundleContent::new(
             bundle.registration_id,
