@@ -60,14 +60,14 @@ impl KeyBundleContent {
         let one_time_key: (u32, Box<[u8]>) = if (self.onetime_public_key.is_none()) {
             (0, Box::new([]))
         } else {
-            let (prekey_id, public_key) = self.onetime_public_key.unwrap();
+            let (prekey_id, public_key) = self.onetime_public_key.expect("");
             (prekey_id.into(), public_key.serialize())
         };
 
         let kyber_key: (u32, Box<[u8]>, Vec<u8>) = if (self.kyper_key_essentials.is_none()) {
             (0, Box::new([]), vec![])
         } else {
-            let (kyber_id, kyber_key, vec) = self.kyper_key_essentials.to_owned().unwrap();
+            let (kyber_id, kyber_key, vec) = self.kyper_key_essentials.to_owned().expect("");
             (kyber_id.into(), kyber_key.serialize(), vec)
         };
 
@@ -100,15 +100,15 @@ impl KeyBundleContent {
                 Some((
                     bundle
                         .onetime_public_key_id
-                        .expect("Public key id not found")
+                        .expect("")
                         .into(),
                     PublicKey::deserialize(
                         &(*bundle
                             .onetime_public_key
                             .to_owned()
-                            .expect("Public key not found")),
+                            .expect("")),
                     )
-                    .expect("Cannot create public key"),
+                    .expect(""),
                 ))
             };
 
@@ -206,12 +206,12 @@ impl PrimitiveKeyBundleContent {
 mod tests {
     use crate::contact_manager::Device;
     use crate::encryption::test::{create_pre_key_bundle, signal_bundle_to_our_bundle, store};
+    use crate::key_management::bundle::{KeyBundleContent, PrimitiveKeyBundleContent};
     use libsignal_protocol::*;
     use rand::rngs::OsRng;
     use serde::*;
     use serde_json;
     use uuid::Uuid;
-    use crate::key_management::bundle::{KeyBundleContent, PrimitiveKeyBundleContent};
 
     #[tokio::test]
     async fn test_serialize_bundle_data() {
@@ -236,11 +236,21 @@ mod tests {
         let device_id = 42069;
         let mut store = store(device_id);
 
-        let bundle = signal_bundle_to_our_bundle(create_pre_key_bundle(&mut store, device_id, &mut OsRng)
-            .await
-            .unwrap());
+        let bundle = signal_bundle_to_our_bundle(
+            create_pre_key_bundle(&mut store, device_id, &mut OsRng)
+                .await
+                .unwrap(),
+        );
 
-        let none_bundle = KeyBundleContent::new(bundle.registration_id, bundle.device_id, None, (bundle.signed_public_key_id, bundle.signed_public_key), bundle.signed_signature, bundle.identity_key, None);
+        let none_bundle = KeyBundleContent::new(
+            bundle.registration_id,
+            bundle.device_id,
+            None,
+            (bundle.signed_public_key_id, bundle.signed_public_key),
+            bundle.signed_signature,
+            bundle.identity_key,
+            None,
+        );
         let res = none_bundle.serialize();
 
         assert_eq!(res.onetime_public_key_id.unwrap(), 0);
@@ -262,7 +272,19 @@ mod tests {
 
         let device = Device::new(alice, device_id, signal_bundle_to_our_bundle(bundle));
         let base_content = device.bundle.serialize();
-        let primitive_bundle_with_none = PrimitiveKeyBundleContent::new(base_content.registration_id, base_content.device_id, None, None, base_content.signed_public_key_id, base_content.signed_public_key, base_content.signed_signature, base_content.identity_key, None, None, None);
+        let primitive_bundle_with_none = PrimitiveKeyBundleContent::new(
+            base_content.registration_id,
+            base_content.device_id,
+            None,
+            None,
+            base_content.signed_public_key_id,
+            base_content.signed_public_key,
+            base_content.signed_signature,
+            base_content.identity_key,
+            None,
+            None,
+            None,
+        );
         let bundle_with_none = KeyBundleContent::deserialize(primitive_bundle_with_none);
         assert!(bundle_with_none.kyper_key_essentials.is_none());
         assert!(bundle_with_none.onetime_public_key.is_none());
