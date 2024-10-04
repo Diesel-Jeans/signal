@@ -98,17 +98,9 @@ impl KeyBundleContent {
                 None
             } else {
                 Some((
-                    bundle
-                        .onetime_public_key_id
-                        .expect("")
-                        .into(),
-                    PublicKey::deserialize(
-                        &(*bundle
-                            .onetime_public_key
-                            .to_owned()
-                            .expect("")),
-                    )
-                    .expect(""),
+                    bundle.onetime_public_key_id.expect("").into(),
+                    PublicKey::deserialize(&(*bundle.onetime_public_key.to_owned().expect("")))
+                        .expect(""),
                 ))
             };
 
