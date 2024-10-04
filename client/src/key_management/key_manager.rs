@@ -1,16 +1,10 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
+use common::pre_key::PreKey;
 use libsignal_protocol::*;
 use rand::{CryptoRng, Rng};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-#[derive(Hash, Eq, PartialEq)]
-pub enum PreKey {
-    Signed,
-    Kyber,
-    OneTime,
-}
 
 pub enum KeyType {
     KemKey(kem::KeyPair),
@@ -124,6 +118,7 @@ impl KeyManager {
 
                 Ok((KeyType::KeyPair(onetime_pre_key_pair), None))
             }
+            _ => bail!("Unexpected key"),
         }
     }
 }
