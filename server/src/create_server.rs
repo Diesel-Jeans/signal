@@ -1,6 +1,3 @@
-
-mod in_memory_db;
-
 use crate::in_memory_db::InMemoryDB;
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -11,27 +8,7 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use common::signal_protobuf::Envelope;
 use common::signal_protocol_messages::RegistrationRequest;
-use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-
-/// Hello, world!
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let state = ServerState::new();
-    let app = Router::new()
-        .route("/message/:address", put(handle_send_message))
-        .route("/bundle/:address", post(handle_publish_bundle))
-        .route("/bundle/:address", get(handle_fetch_bundle))
-        .route("/client", post(handle_register_client))
-        .route("/client", put(handle_update_client))
-        .route("/client/:address", delete(handle_delete_client))
-        .route("/device/:address", post(handle_register_device))
-        .route("/device/:address", delete(handle_delete_device))
-        .with_state(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:50051").await?;
-    axum::serve(listener, app).await?;
-    Ok(())
-}
 
 #[derive(Debug, Clone)]
 struct ServerState {
@@ -47,7 +24,7 @@ impl ServerState {
 }
 
 async fn handle_send_message(
-    State(mut state): State<ServerState>,
+    State(state): State<ServerState>,
     Path(address): Path<String>,
     Json(payload): Json<Envelope>,
 ) {
@@ -55,7 +32,7 @@ async fn handle_send_message(
     match state
         .db
         .lock()
-        .expect("Should not fail :)")
+        .expect("Should eventually lock.")
         .mailbox
         .get_mut(&address)
     {
@@ -95,7 +72,7 @@ impl IntoResponse for ErrorResponse {
 
 #[axum::debug_handler]
 async fn handle_register_client(
-    State(mut state): State<ServerState>,
+    State(state): State<ServerState>,
     Json(payload): Json<RegistrationRequest>,
 ) -> Result<(), ErrorResponse> {
     println!("Register client");
@@ -107,7 +84,7 @@ async fn handle_register_client(
         });
     }
 
-    let mut db = state.db.lock().expect("Should not fail :)");
+    let mut db = state.db.lock().expect("Should eventually lock.");
     // Check that client does not already exist.
     if db.user.contains(payload.aci.as_str()) {
         println!("User already registered: '{}'", payload.aci);
@@ -142,4 +119,21 @@ async fn handle_delete_client() {
 
 async fn handle_delete_device() {
     println!("Delete device");
+}
+
+pub async fn start_signal_server() -> Result<(), Box<dyn std::error::Error>> {
+    let state = ServerState::new();
+    let app = Router::new()
+        .route("/message/:address", put(handle_send_message))
+        .route("/bundle/:address", post(handle_publish_bundle))
+        .route("/bundle/:address", get(handle_fetch_bundle))
+        .route("/client", post(handle_register_client))
+        .route("/client", put(handle_update_client))
+        .route("/client/:address", delete(handle_delete_client))
+        .route("/device/:address", post(handle_register_device))
+        .route("/device/:address", delete(handle_delete_device))
+        .with_state(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:50051").await?;
+    axum::serve(listener, app).await?;
+    Ok(())
 }

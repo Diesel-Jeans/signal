@@ -84,7 +84,6 @@ impl ContactManager {
                 x.devices
                     .insert(id, Device::new(uuid.to_string(), id, bundle));
             }
-            ()
         })
     }
 }
