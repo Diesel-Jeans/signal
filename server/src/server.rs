@@ -1,11 +1,14 @@
+use anyhow::{bail, Result};
 use axum::extract::{Path, State};
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
 use axum::http::Method;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
+use common::pre_key::PreKey;
 use common::web_api::{CreateAccountOptions, UploadKeys, UploadSignedPreKey};
-use libsignal_protocol::PreKeyBundleContent;
+use libsignal_protocol::{kem, PreKeyBundleContent, PublicKey};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,10 +21,33 @@ type UserID = u32;
 type Message = String;
 type ErrorMessage = String;
 
+enum PublicKeyType {
+    Kem(kem::PublicKey),
+    Ec(PublicKey),
+}
+
+impl PublicKeyType {
+    fn expect_kem(self) -> kem::PublicKey {
+        if let PublicKeyType::Kem(key) = self {
+            key
+        } else {
+            panic!("dev_err: expected a kem key, got an ec key")
+        }
+    }
+    fn expect_ec(self) -> PublicKey {
+        if let PublicKeyType::Ec(key) = self {
+            key
+        } else {
+            panic!("dev_err: expected an ec key, got a kem key")
+        }
+    }
+}
+
 pub struct InMemorySignalDatabase {
     mail_queues: HashMap<UserID, VecDeque<Message>>,
     usernames: HashMap<UserID, Username>,
     devices: HashMap<UserID, HashSet<DeviceID>>,
+    keys: HashMap<UserID, HashMap<DeviceID, HashMap<PreKey, UploadSignedPreKey>>>,
 }
 
 impl InMemorySignalDatabase {
@@ -30,6 +56,7 @@ impl InMemorySignalDatabase {
             mail_queues: HashMap::new(),
             usernames: HashMap::new(),
             devices: HashMap::new(),
+            keys: HashMap::new(),
         }
     }
 }
@@ -167,6 +194,51 @@ async fn delete_client(
     todo!()
 }
 
+// The Signal endpoint /v2/keys/check says that a u64 id is needed, however their ids, such as
+// KyperPreKeyID only supports u32. Here only a u32 is used and therefore only a 4 byte size
+// instead of the sugested u64.
+async fn keys_check(
+    database: Arc<Mutex<InMemorySignalDatabase>>,
+    usr_id: UserID,
+    device_id: DeviceID,
+    usr_digest: [u8; 32],
+) -> Result<bool> {
+    let database = database.lock().await;
+    if let Some(keys) = database
+        .keys
+        .get(&usr_id)
+        .and_then(|usr_map| usr_map.get(&device_id))
+    {
+        fn get_pre_key<'a>(
+            key_type: &PreKey,
+            table: &'a HashMap<PreKey, UploadSignedPreKey>,
+        ) -> Result<&'a UploadSignedPreKey> {
+            if let Some(key) = table.get(key_type) {
+                Ok(key)
+            } else {
+                bail!("There is no {:?} key for user", key_type)
+            }
+        }
+
+        let identity_key_upload = get_pre_key(&PreKey::Identity, keys)?;
+        let signed_key_upload = get_pre_key(&PreKey::Signed, keys)?;
+        let kyper_key_update = get_pre_key(&PreKey::Kyber, keys)?;
+
+        let mut digest = Sha256::new();
+        digest.update(&identity_key_upload.public_key);
+        digest.update(&signed_key_upload.key_id.to_be_bytes());
+        digest.update(signed_key_upload.public_key.to_owned());
+        digest.update(&kyper_key_update.key_id.to_be_bytes());
+        digest.update(kyper_key_update.public_key.to_owned());
+
+        let server_digest: [u8; 32] = digest.finalize().into();
+
+        Ok(server_digest == usr_digest)
+    } else {
+        bail!("Client has no keys")
+    }
+}
+
 #[derive(Clone)]
 struct ServerState {
     db: Arc<Mutex<InMemorySignalDatabase>>,
@@ -256,4 +328,81 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:50051").await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod server_tests {
+    use super::*;
+    use libsignal_protocol::*;
+    use rand::rngs::OsRng;
+    use sha2::{Digest, Sha256};
+
+    #[tokio::test]
+    async fn keys_check_test() {
+        let database = Arc::new(Mutex::new(InMemorySignalDatabase::new()));
+        let usr_id: UserID = 0u32;
+        let device_id: DeviceID = 0u32;
+        let mut rng = OsRng;
+
+        let kyper_pre_key_pair = kem::KeyPair::generate(kem::KeyType::Kyber1024);
+        let kyper_key_id = 0u32;
+        let signed_pre_key_pair = KeyPair::generate(&mut rng);
+        let signed_key_id = 0u32;
+        let identity_key_pair = KeyPair::generate(&mut rng);
+
+        let mut database_lock = database.lock().await;
+        database_lock.keys.insert(usr_id, HashMap::new());
+        database_lock
+            .keys
+            .get_mut(&usr_id)
+            .unwrap()
+            .insert(device_id, HashMap::new());
+
+        let key_map = database_lock
+            .keys
+            .get_mut(&usr_id)
+            .unwrap()
+            .get_mut(&device_id)
+            .unwrap();
+
+        key_map.insert(
+            PreKey::Identity,
+            UploadSignedPreKey {
+                key_id: 0,
+                public_key: identity_key_pair.public_key.serialize(),
+                signature: Box::new([0]),
+            },
+        );
+        key_map.insert(
+            PreKey::Signed,
+            UploadSignedPreKey {
+                key_id: signed_key_id,
+                public_key: signed_pre_key_pair.public_key.serialize(),
+                signature: Box::new([0]),
+            },
+        );
+        key_map.insert(
+            PreKey::Kyber,
+            UploadSignedPreKey {
+                key_id: kyper_key_id,
+                public_key: kyper_pre_key_pair.public_key.serialize(),
+                signature: Box::new([0]),
+            },
+        );
+
+        drop(database_lock);
+
+        let mut usr_digest = Sha256::new();
+        usr_digest.update(&identity_key_pair.public_key.serialize());
+        usr_digest.update(&signed_key_id.to_be_bytes());
+        usr_digest.update(signed_pre_key_pair.public_key.serialize().to_owned());
+        usr_digest.update(&kyper_key_id.to_be_bytes());
+        usr_digest.update(kyper_pre_key_pair.public_key.serialize().to_owned());
+
+        let usr_digest: [u8; 32] = usr_digest.finalize().into();
+
+        assert!(keys_check(database, usr_id, device_id, usr_digest)
+            .await
+            .unwrap())
+    }
 }
