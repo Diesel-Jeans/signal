@@ -111,7 +111,6 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        //Shitty hack to stuff a signal prekey bundle into our KeyBundle.
         let alice_bundle_content = signal_bundle_to_our_bundle(alice_bundle.clone());
 
         let bob_bundle = create_pre_key_bundle(&mut bob_store, 1, &mut rng)
