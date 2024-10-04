@@ -51,7 +51,7 @@ mod tests {
             .await
             .unwrap();
 
-        let device = Device::new(alice, device_id, bundle.into());
+        let device = Device::new(alice, device_id, bundle.try_into().unwrap());
 
         store_device_data(&device).unwrap();
 

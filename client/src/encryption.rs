@@ -89,13 +89,13 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        let alice_bundle_content = alice_bundle.clone().into();
+        let alice_bundle_content = alice_bundle.clone().try_into().unwrap();
 
         let bob_bundle = create_pre_key_bundle(&mut bob_store, 1, &mut rng)
             .await
             .unwrap();
 
-        let bob_bundle_content = bob_bundle.clone().into();
+        let bob_bundle_content = bob_bundle.clone().try_into().unwrap();
 
         let _ = manager.update_contact(&alice_id, vec![(0, alice_bundle_content)]);
         let _ = manager.update_contact(&bob_id, vec![(1, bob_bundle_content)]);

@@ -142,7 +142,7 @@ mod test {
         let bundle = create_pre_key_bundle(&mut store, 1, &mut OsRng)
             .await
             .unwrap();
-        match cm.update_contact(&charlie, vec![(1, bundle.into())]) {
+        match cm.update_contact(&charlie, vec![(1, bundle.try_into().unwrap())]) {
             Ok(_) => assert!(true),
             Err(x) => assert!(false, "{}", x),
         }

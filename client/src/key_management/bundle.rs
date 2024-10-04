@@ -1,6 +1,7 @@
 use anyhow::Result;
 use libsignal_protocol::*;
 use serde::{Deserialize, Serialize, Serializer};
+use std::ops::Deref;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct KeyBundleContent {
@@ -58,8 +59,8 @@ impl KeyBundleContent {
 
     pub fn serialize(&self) -> PrimitiveKeyBundleContent {
         let one_time_key: (u32, Box<[u8]>) = match &self.onetime_public_key {
-          Some((id, key)) => (id.into(), key.serialize()),
-          None => (0, Box::new([]))
+            Some((id, key)) => (id.to_owned().into(), key.serialize()),
+            None => (0, Box::new([])),
         };
 
         let kyber_key: (u32, Box<[u8]>, Vec<u8>) = match self.kyper_key_essentials.to_owned() {
@@ -146,27 +147,33 @@ impl KeyBundleContent {
     }
 }
 
-impl From<PreKeyBundle> for KeyBundleContent {
-    fn from(bundle: PreKeyBundle) -> Self {
-        KeyBundleContent::new(
-            bundle.registration_id().unwrap(),
-            bundle.device_id().unwrap(),
-            Some((
-                bundle.pre_key_id().unwrap().unwrap(),
-                bundle.pre_key_public().unwrap().unwrap(),
-            )),
-            (
-                bundle.signed_pre_key_id().unwrap(),
-                bundle.signed_pre_key_public().unwrap(),
-            ),
-            bundle.signed_pre_key_signature().unwrap().to_vec(),
-            bundle.identity_key().unwrap().to_owned(),
-            Some((
-                bundle.kyber_pre_key_id().unwrap().unwrap(),
-                bundle.kyber_pre_key_public().unwrap().unwrap().to_owned(),
-                bundle.kyber_pre_key_signature().unwrap().unwrap().to_vec(),
-            )),
-        )
+impl TryFrom<PreKeyBundle> for KeyBundleContent {
+    type Error = SignalProtocolError;
+    fn try_from(bundle: PreKeyBundle) -> Result<Self, Self::Error> {
+        let one_time_public_key: Option<(PreKeyId, PublicKey)> =
+            match (bundle.pre_key_id(), bundle.pre_key_public()) {
+                (Ok(Some(id)), Ok(Some(key))) => Some((id, key)),
+                _ => None,
+            };
+
+        let kyber = match (
+            bundle.kyber_pre_key_id(),
+            bundle.kyber_pre_key_public(),
+            bundle.kyber_pre_key_signature(),
+        ) {
+            (Ok(Some(id)), Ok(Some(key)), Ok(Some(sig))) => Some((id, key.clone(), sig.to_vec())),
+            _ => None,
+        };
+
+        Ok(KeyBundleContent::new(
+            bundle.registration_id()?,
+            bundle.device_id()?,
+            one_time_public_key,
+            (bundle.signed_pre_key_id()?, bundle.signed_pre_key_public()?),
+            bundle.signed_pre_key_signature()?.to_vec(),
+            bundle.identity_key()?.to_owned(),
+            kyber,
+        ))
     }
 }
 
@@ -235,7 +242,7 @@ mod tests {
             .await
             .unwrap();
 
-        let device = Device::new(alice, device_id, bundle.into());
+        let device = Device::new(alice, device_id, bundle.try_into().unwrap());
         let out = serde_json::to_string(&device.bundle.serialize()).unwrap();
         let deserialized = serde_json::from_str(&out).unwrap();
 
@@ -251,7 +258,7 @@ mod tests {
         let bundle: KeyBundleContent = create_pre_key_bundle(&mut store, device_id, &mut OsRng)
             .await
             .unwrap()
-            .into();
+            .try_into().unwrap();
 
         let none_bundle = KeyBundleContent::new(
             bundle.registration_id,
@@ -281,7 +288,7 @@ mod tests {
             .await
             .unwrap();
 
-        let device = Device::new(alice, device_id, bundle.into());
+        let device = Device::new(alice, device_id, bundle.try_into().unwrap());
         let base_content = device.bundle.serialize();
         let primitive_bundle_with_none = PrimitiveKeyBundleContent::new(
             base_content.registration_id,
