@@ -1,6 +1,7 @@
 use axum::extract::{Path, State};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
+use common::web_api::{CreateAccountOptions, UploadKeys, UploadSignedPreKey};
 use libsignal_protocol::PreKeyBundleContent;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -188,7 +189,11 @@ async fn handle_send_message(
     println!("Received message: {:?}", payload);
 }
 
-async fn handle_publish_bundle() {
+async fn handle_publish_bundle(
+    State(state): State<ServerState>,
+    Path(address): Path<String>,
+    Json(payload): Json<UploadKeys>,
+) {
     println!("Publish bundle");
 }
 
@@ -196,7 +201,11 @@ async fn handle_fetch_bundle() {
     println!("Fetch bundle");
 }
 
-async fn handle_register_client() {
+async fn handle_register_client(
+    State(state): State<ServerState>,
+    Path(address): Path<String>,
+    Json(options): Json<CreateAccountOptions>,
+) {
     println!("Register client");
 }
 
