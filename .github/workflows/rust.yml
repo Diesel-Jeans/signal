@@ -10,10 +10,16 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  install_doxygen_deps:
     runs-on: ubuntu-latest
-
+    steps:
+      - uses: actions/checkout@v4
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: protobuf-compiler libprotobuf-dev
+  
+  build:
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Setup Protobuf
