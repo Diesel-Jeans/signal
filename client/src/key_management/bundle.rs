@@ -57,18 +57,14 @@ impl KeyBundleContent {
     }
 
     pub fn serialize(&self) -> PrimitiveKeyBundleContent {
-        let one_time_key: (u32, Box<[u8]>) = if (self.onetime_public_key.is_none()) {
-            (0, Box::new([]))
-        } else {
-            let (prekey_id, public_key) = self.onetime_public_key.expect("");
-            (prekey_id.into(), public_key.serialize())
+        let one_time_key: (u32, Box<[u8]>) = match &self.onetime_public_key {
+          Some((id, key)) => (id.into(), key.serialize()),
+          None => (0, Box::new([]))
         };
 
-        let kyber_key: (u32, Box<[u8]>, Vec<u8>) = if (self.kyper_key_essentials.is_none()) {
-            (0, Box::new([]), vec![])
-        } else {
-            let (kyber_id, kyber_key, vec) = self.kyper_key_essentials.to_owned().expect("");
-            (kyber_id.into(), kyber_key.serialize(), vec)
+        let kyber_key: (u32, Box<[u8]>, Vec<u8>) = match self.kyper_key_essentials.to_owned() {
+            Some((id, key, sign)) => (id.into(), key.serialize(), sign),
+            None => (0, Box::new([]), Vec::new()),
         };
 
         PrimitiveKeyBundleContent::new(
