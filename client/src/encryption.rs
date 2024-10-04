@@ -118,7 +118,6 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        //Another garbage hack to force Signal's shit into ours
         let bob_bundle_content = signal_bundle_to_our_bundle(bob_bundle.clone());
 
         let _ = manager.update_contact(&alice_id, vec![(0, alice_bundle_content)]);
