@@ -18,25 +18,44 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Set up Cache for protoc
-        id: cache-protoc
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/protoc
-          key: ${{ runner.os }}-protoc-${{ env.PROTOC_VERSION }}
-          restore-keys: |
-            ${{ runner.os }}-protoc-
+      id: cache-protoc
+      uses: actions/cache@v3
+      with:id: cache-protoc
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/protoc
+        key: ${{ runner.os }}-protoc-${{ env.PROTOC_VERSION }}
+        restore-keys: |
+          ${{ runner.os }}-protoc-
 
-      - name: Install protoc if not cached
-        if: steps.cache-protoc.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p ~/.cache/protoc
-          wget https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip
-          unzip protoc-${PROTOC_VERSION}-linux-x86_64.zip -d ~/.cache/protoc
-          rm protoc-${PROTOC_VERSION}-linux-x86_64.zip
-          chmod +x ~/.cache/protoc/bin/protoc
+    - name: Install protoc if not cached
+      if: steps.cache-protoc.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p ~/.cache/protoc
+        wget https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip
+        unzip protoc-${PROTOC_VERSION}-linux-x86_64.zip -d ~/.cache/protoc
+        rm protoc-${PROTOC_VERSION}-linux-x86_64.zip
+        chmod +x ~/.cache/protoc/bin/protoc
 
-      - name: Add protoc to PATH
-        run: echo "$HOME/.cache/protoc/bin" >> $GITHUB_PATH
+    - name: Add protoc to PATH
+      run: echo "$HOME/.cache/protoc/bin" >> $GITHUB_PATH
+
+        path: ~/.cache/protoc
+        key: ${{ runner.os }}-protoc-${{ env.PROTOC_VERSION }}
+        restore-keys: |
+          ${{ runner.os }}-protoc-
+
+    - name: Install protoc if not cached
+      if: steps.cache-protoc.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p ~/.cache/protoc
+        wget https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip
+        unzip protoc-${PROTOC_VERSION}-linux-x86_64.zip -d ~/.cache/protoc
+        rm protoc-${PROTOC_VERSION}-linux-x86_64.zip
+        chmod +x ~/.cache/protoc/bin/protoc
+
+    - name: Add protoc to PATH
+      run: echo "$HOME/.cache/protoc/bin" >> $GITHUB_PATH
 
     - name: Run fmt
       run: cargo fmt --check
