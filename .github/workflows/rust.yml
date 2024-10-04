@@ -19,9 +19,7 @@ jobs:
     - uses: actions/checkout@v4
     - name: Set up Cache for protoc
       id: cache-protoc
-      uses: actions/cache@v3
-      with:id: cache-protoc
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.cache/protoc
         key: ${{ runner.os }}-protoc-${{ env.PROTOC_VERSION }}
