@@ -39,7 +39,7 @@ jobs:
 
     - name: Add protoc to PATH
       run: echo "$HOME/.cache/protoc/bin" >> $GITHUB_PATH
-
+      with:
         path: ~/.cache/protoc
         key: ${{ runner.os }}-protoc-${{ env.PROTOC_VERSION }}
         restore-keys: |
