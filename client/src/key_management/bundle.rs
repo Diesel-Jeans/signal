@@ -2,7 +2,7 @@ use anyhow::Result;
 use libsignal_protocol::*;
 use serde::{Deserialize, Serialize, Serializer};
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct KeyBundleContent {
     registration_id: u32,
     device_id: DeviceId,
@@ -57,23 +57,103 @@ impl KeyBundleContent {
     }
 
     pub fn serialize(&self) -> PrimitiveKeyBundleContent {
+        let one_time_key: (u32, Box<[u8]>) = if (self.onetime_public_key.is_none()) {
+            (0, Box::new([0]))
+        } else {
+            let (prekey_id, public_key) = self.onetime_public_key.unwrap();
+            (prekey_id.into(), public_key.serialize())
+        };
+
+        let kyber_key: (u32, Box<[u8]>, Vec<u8>) = if (self.kyper_key_essentials.is_none()) {
+            (0, Box::new([0]), vec![0])
+        } else {
+            let (kyber_id, kyber_key, vec) = self.kyper_key_essentials.to_owned().unwrap();
+            (kyber_id.into(), kyber_key.serialize(), vec)
+        };
+
         PrimitiveKeyBundleContent::new(
             self.registration_id,
             self.device_id.into(),
-            Some(self.onetime_public_key.unwrap().0.into()),
-            self.onetime_public_key.unwrap().1.serialize().into(),
+            Some(one_time_key.0),
+            Some(one_time_key.1),
             self.signed_public_key_id.into(),
             self.signed_public_key.serialize(),
             self.signed_signature.clone(),
             self.identity_key.serialize(),
-            Some(self.kyper_key_essentials.clone().unwrap().0.into()),
-            self.kyper_key_essentials
-                .clone()
-                .unwrap()
-                .1
-                .serialize()
-                .into(),
-            self.kyper_key_essentials.clone().unwrap().2.into(),
+            Some(kyber_key.0),
+            Some(kyber_key.1),
+            Some(kyber_key.2),
+        )
+    }
+
+    pub fn deserialize(bundle: &PrimitiveKeyBundleContent) -> KeyBundleContent {
+        let one_time_key: Option<(PreKeyId, PublicKey)> =
+            if (bundle.onetime_public_key_id.is_none()
+                || bundle.onetime_public_key.is_none()
+                || bundle
+                    .onetime_public_key_id
+                    .expect("One time pre key id is somehow None after a none check - kill me")
+                    == 0)
+            {
+                None
+            } else {
+                Some((
+                    bundle
+                        .onetime_public_key_id
+                        .expect("Public key id not found")
+                        .into(),
+                    PublicKey::deserialize(
+                        &(*bundle
+                            .onetime_public_key
+                            .to_owned()
+                            .expect("Public key not found")),
+                    )
+                    .expect("Cannot create public key"),
+                ))
+            };
+
+        let kyber: Option<(KyberPreKeyId, kem::PublicKey, Vec<u8>)> =
+            if (bundle.kyper_pre_key_id.is_none()
+                || bundle.kyper_public_key.is_none()
+                || bundle.kyper_signature.is_none()
+                || bundle
+                    .kyper_pre_key_id
+                    .expect("None checks are fucked if this happens")
+                    == 0)
+            {
+                None
+            } else {
+                Some((
+                    bundle
+                        .kyper_pre_key_id
+                        .expect("Kyber pre key id not found")
+                        .into(),
+                    kem::PublicKey::deserialize(
+                        &(*bundle
+                            .kyper_public_key
+                            .to_owned()
+                            .expect("Public key not found")),
+                    )
+                    .expect("Public kyber key gen failed"),
+                    bundle
+                        .kyper_signature
+                        .to_owned()
+                        .expect("Kyber signature is missing"),
+                ))
+            };
+
+        KeyBundleContent::new(
+            bundle.registration_id,
+            bundle.device_id.into(),
+            one_time_key,
+            (
+                bundle.signed_public_key_id.into(),
+                PublicKey::deserialize(&(*bundle.signed_public_key))
+                    .expect("Cannot generate public key"),
+            ),
+            bundle.signed_signature.to_owned(),
+            IdentityKey::decode(&(*bundle.identity_key)).expect("Identity key gen failed"),
+            kyber,
         )
     }
 }
@@ -90,7 +170,7 @@ pub struct PrimitiveKeyBundleContent {
     identity_key: Box<[u8]>,
     kyper_pre_key_id: Option<u32>,
     kyper_public_key: Option<Box<[u8]>>,
-    kyper_signature: Vec<u8>,
+    kyper_signature: Option<Vec<u8>>,
 }
 impl PrimitiveKeyBundleContent {
     pub fn new(
@@ -104,7 +184,7 @@ impl PrimitiveKeyBundleContent {
         identity_key: Box<[u8]>,
         kyper_pre_key_id: Option<u32>,
         kyper_public_key: Option<Box<[u8]>>,
-        kyper_signature: Vec<u8>,
+        kyper_signature: Option<Vec<u8>>,
     ) -> Self {
         PrimitiveKeyBundleContent {
             registration_id,
@@ -119,39 +199,6 @@ impl PrimitiveKeyBundleContent {
             kyper_public_key,
             kyper_signature,
         }
-    }
-
-    pub fn create_key_bundle_content(&self) -> KeyBundleContent {
-        KeyBundleContent::new(
-            self.registration_id.into(),
-            self.device_id.into(),
-            Some((
-                self.onetime_public_key_id.clone().unwrap().into(),
-                PublicKey::deserialize(
-                    self.onetime_public_key
-                        .clone()
-                        .unwrap()
-                        .into_vec()
-                        .as_slice(),
-                )
-                .unwrap(),
-            )),
-            (
-                self.signed_public_key_id.clone().into(),
-                PublicKey::deserialize(&(*self.signed_public_key))
-                    .unwrap(),
-            ),
-            self.signed_signature.clone(),
-            IdentityKey::decode(&(*self.identity_key)).unwrap(),
-            Some((
-                self.kyper_pre_key_id.unwrap().into(),
-                kem::PublicKey::deserialize(
-                    &(*self.kyper_public_key.clone().unwrap()),
-                )
-                .expect("desrialize pk"),
-                self.kyper_signature.clone().into(),
-            )),
-        )
     }
 }
 
