@@ -28,12 +28,7 @@ jobs:
 
     - name: Install protoc if not cached
       if: steps.cache-protoc.outputs.cache-hit != 'true'
-      run: |
-        mkdir -p ~/.cache/protoc
-        wget https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip
-        unzip protoc-${PROTOC_VERSION}-linux-x86_64.zip -d ~/.cache/protoc
-        rm protoc-${PROTOC_VERSION}-linux-x86_64.zip
-        chmod +x ~/.cache/protoc/bin/protoc
+      run: sudo apt update && sudo apt upgrade -y && sudo apt install -y protobuf-compiler libprotobuf-dev
 
     - name: Add protoc to PATH
       run: echo "$HOME/.cache/protoc/bin" >> $GITHUB_PATH
