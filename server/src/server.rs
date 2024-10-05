@@ -271,7 +271,7 @@ impl ServerState {
             .await
             .expect("Unable to connect to Postgres");
 
-        sqlx::migrate!("./migrations").run(&pool).await?;
+        // sqlx::migrate!("./migrations").run(&pool).await?;
 
         Ok(ServerState {
             db: Arc::new(Mutex::new(InMemorySignalDatabase::new())),

@@ -1,7 +1,4 @@
 pub mod web_api;
-pub mod device;
-pub mod key_bundle;
-pub mod user;
 
 pub mod signal_protobuf {
     tonic::include_proto!("textsecure"); // The string specified here must match the proto package name
