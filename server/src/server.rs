@@ -96,6 +96,71 @@ async fn store_prekeys_for(
     todo!()
 }
 
+fn usr_identifier_to_usr_id(usr_identifier: String) -> UserID {
+    todo!("1. Find the right type for the user identifyer\n 2. Make a convertion between said type too u32 or UserID")
+}
+
+async fn remove_key_by_id(
+    database: Arc<Mutex<InMemorySignalDatabase>>,
+    user_id: UserID,
+    device_id: DeviceID,
+    key_id: u32,
+    key_type: PreKey,
+) {
+    database
+        .lock()
+        .await
+        .keys
+        .get_mut(&user_id)
+        .and_then(|device_map| device_map.get_mut(&device_id))
+        .and_then(|key_map| key_map.get_mut(&key_type))
+        .map(|key_list| key_list.retain(|key| key.key_id != key_id));
+}
+
+async fn fetch_other_user_keys(
+    database: Arc<Mutex<InMemorySignalDatabase>>,
+    usr_identifier: String,
+    device_id: DeviceID,
+) -> Result<UploadKeys> {
+    fn get_first_key<'a>(
+        database: &tokio::sync::MutexGuard<'a, InMemorySignalDatabase>,
+        usr_id: UserID,
+        device_id: DeviceID,
+        key_type: PreKey,
+    ) -> Option<UploadSignedPreKey> {
+        database
+            .keys
+            .get(&usr_id)
+            .and_then(|device_map| device_map.get(&device_id))
+            .and_then(|key_map| key_map.get(&key_type))
+            .map(|key| key[0].clone())
+    }
+
+    let usr_id = usr_identifier_to_usr_id(usr_identifier);
+    let onetime_key = get_first_key(&database.lock().await, usr_id, device_id, PreKey::OneTime);
+    if let Some(key) = &onetime_key {
+        remove_key_by_id(
+            database.clone(),
+            usr_id,
+            device_id,
+            key.key_id,
+            PreKey::OneTime,
+        )
+        .await;
+    }
+
+    let database = database.lock().await;
+    Ok(UploadKeys::new(
+        get_first_key(&database, usr_id, device_id, PreKey::Identity)
+            .map(|key| key.public_key)
+            .ok_or(anyhow::anyhow!("Could not find an identity key"))?,
+        onetime_key,
+        None, // Add logic deciding whether to use the kem keys as one time key or last resort
+        get_first_key(&database, usr_id, device_id, PreKey::Kyber), // Last resort as default
+        get_first_key(&database, usr_id, device_id, PreKey::Signed),
+    ))
+}
+
 async fn get_onetime_prekey_count(
     database: Arc<Mutex<InMemorySignalDatabase>>,
     usr_id: UserID,
@@ -108,8 +173,8 @@ async fn get_onetime_prekey_count(
         .get(&usr_id)
         .and_then(|device_map| device_map.get(&device_id))
         .and_then(|key_map| key_map.get(&PreKey::OneTime))
-        .and_then(|key_list| Some(key_list.len()))
-        .ok_or_else(|| anyhow::anyhow!("Could not get one time pre key count"))
+        .map(|key_list| key_list.len())
+        .ok_or(anyhow::anyhow!("Could not get one time pre key count"))
 }
 
 async fn store_username_for(
@@ -214,8 +279,9 @@ async fn keys_check(
     device_id: DeviceID,
     usr_digest: [u8; 32],
 ) -> Result<bool> {
-    let database = database.lock().await;
     if let Some(keys) = database
+        .lock()
+        .await
         .keys
         .get(&usr_id)
         .and_then(|usr_map| usr_map.get(&device_id))
