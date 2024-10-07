@@ -41,6 +41,23 @@ pub struct UploadKeys {
     pq_last_resort_pre_key: Option<UploadSignedPreKey>,
     signed_pre_key: Option<UploadSignedPreKey>,
 }
+impl UploadKeys {
+    pub fn new(
+        identity_key: Box<[u8]>,
+        pre_keys: Option<UploadSignedPreKey>,
+        pq_pre_keys: Option<UploadSignedPreKey>,
+        pq_last_resort_pre_key: Option<UploadSignedPreKey>,
+        signed_pre_key: Option<UploadSignedPreKey>,
+    ) -> Self {
+        Self {
+            identity_key,
+            pre_keys,
+            pq_pre_keys,
+            pq_last_resort_pre_key,
+            signed_pre_key,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
