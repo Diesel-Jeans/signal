@@ -47,7 +47,7 @@ pub struct InMemorySignalDatabase {
     mail_queues: HashMap<UserID, VecDeque<Message>>,
     usernames: HashMap<UserID, Username>,
     devices: HashMap<UserID, HashSet<DeviceID>>,
-    keys: HashMap<UserID, HashMap<DeviceID, HashMap<PreKey, UploadSignedPreKey>>>,
+    keys: HashMap<UserID, HashMap<DeviceID, HashMap<PreKey, Vec<UploadSignedPreKey>>>>,
 }
 
 impl InMemorySignalDatabase {
@@ -94,11 +94,20 @@ async fn store_prekeys_for(
     todo!()
 }
 
-async fn get_prekeys_for(
+async fn get_onetime_prekey_count(
     database: Arc<Mutex<InMemorySignalDatabase>>,
-    id: UserID,
-) -> Result<PreKeyBundleContent, ErrorMessage> {
-    todo!()
+    usr_id: UserID,
+    device_id: DeviceID,
+) -> Result<usize> {
+    database
+        .lock()
+        .await
+        .keys
+        .get(&usr_id)
+        .and_then(|device_map| device_map.get(&device_id))
+        .and_then(|key_map| key_map.get(&PreKey::OneTime))
+        .and_then(|key_list| Some(key_list.len()))
+        .ok_or_else(|| anyhow::anyhow!("Could not get one time pre key count"))
 }
 
 async fn store_username_for(
@@ -211,10 +220,14 @@ async fn keys_check(
     {
         fn get_pre_key<'a>(
             key_type: &PreKey,
-            table: &'a HashMap<PreKey, UploadSignedPreKey>,
+            table: &'a HashMap<PreKey, Vec<UploadSignedPreKey>>,
         ) -> Result<&'a UploadSignedPreKey> {
             if let Some(key) = table.get(key_type) {
-                Ok(key)
+                if key.len() <= 1 {
+                    Ok(&key[0])
+                } else {
+                    bail!("There are too many keys of type: {:?}.", key_type)
+                }
             } else {
                 bail!("There is no {:?} key for user", key_type)
             }
@@ -365,30 +378,30 @@ mod server_tests {
             .get_mut(&device_id)
             .unwrap();
 
-        key_map.insert(
-            PreKey::Identity,
-            UploadSignedPreKey {
+        key_map
+            .entry(PreKey::Identity)
+            .or_insert_with(Vec::new)
+            .push(UploadSignedPreKey {
                 key_id: 0,
                 public_key: identity_key_pair.public_key.serialize(),
                 signature: Box::new([0]),
-            },
-        );
-        key_map.insert(
-            PreKey::Signed,
-            UploadSignedPreKey {
+            });
+        key_map
+            .entry(PreKey::Signed)
+            .or_insert_with(Vec::new)
+            .push(UploadSignedPreKey {
                 key_id: signed_key_id,
                 public_key: signed_pre_key_pair.public_key.serialize(),
                 signature: Box::new([0]),
-            },
-        );
-        key_map.insert(
-            PreKey::Kyber,
-            UploadSignedPreKey {
+            });
+        key_map
+            .entry(PreKey::Kyber)
+            .or_insert_with(Vec::new)
+            .push(UploadSignedPreKey {
                 key_id: kyper_key_id,
                 public_key: kyper_pre_key_pair.public_key.serialize(),
                 signature: Box::new([0]),
-            },
-        );
+            });
 
         drop(database_lock);
 
@@ -403,6 +416,51 @@ mod server_tests {
 
         assert!(keys_check(database, usr_id, device_id, usr_digest)
             .await
-            .unwrap())
+            .unwrap());
+        assert_ne!(vec![0; 32].as_slice(), usr_digest);
+    }
+    #[tokio::test]
+    async fn get_keys_test() {
+        let database = Arc::new(Mutex::new(InMemorySignalDatabase::new()));
+        let usr_id: UserID = 0u32;
+        let device_id: DeviceID = 0u32;
+
+        let mut database_lock = database.lock().await;
+        database_lock.keys.insert(usr_id, HashMap::new());
+        database_lock
+            .keys
+            .get_mut(&usr_id)
+            .unwrap()
+            .insert(device_id, HashMap::new());
+
+        let key_map = database_lock
+            .keys
+            .get_mut(&usr_id)
+            .unwrap()
+            .get_mut(&device_id)
+            .unwrap();
+
+        let j = 10;
+        let mut i = 0;
+        while j > i {
+            key_map
+                .entry(PreKey::OneTime)
+                .or_insert_with(Vec::new)
+                .push(UploadSignedPreKey {
+                    key_id: 0,
+                    public_key: Box::new([0]),
+                    signature: Box::new([0]),
+                });
+            i = i + 1;
+        }
+
+        drop(database_lock);
+
+        assert_eq!(
+            get_onetime_prekey_count(database, usr_id, device_id)
+                .await
+                .unwrap(),
+            j
+        );
     }
 }
