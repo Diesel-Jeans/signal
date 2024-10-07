@@ -6,7 +6,11 @@ use libsignal_protocol::PreKeyBundleContent;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
+use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
+use axum::http::{HeaderValue, Method};
 use tokio::sync::Mutex;
+use tower_http::cors::{Any, CorsLayer};
 
 type Username = String;
 type DeviceID = u32;
@@ -226,6 +230,11 @@ async fn handle_delete_device() {
 }
 
 pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
+    let cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .max_age(Duration::from_secs(5184000))
+        .allow_credentials(true)
+        .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
     let server = ServerState::new();
     let app = Router::new()
         .route("/message/:address", put(handle_send_message))
@@ -236,7 +245,8 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/client/:address", delete(handle_delete_client))
         .route("/device/:address", post(handle_register_device))
         .route("/device/:address", delete(handle_delete_device))
-        .with_state(server);
+        .with_state(server)
+        .layer(cors);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:50051").await?;
     axum::serve(listener, app).await?;
     Ok(())

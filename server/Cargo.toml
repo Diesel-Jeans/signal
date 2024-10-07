@@ -12,6 +12,7 @@ tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 axum = { version = "0.7.6", features = ["macros"] }
 serde = { version = "1.0.210", features = ["derive"] }
 rand = "0.8.5"
+tower-http = { version = "0.6.1", features = ["cors"] }
 
 [build-dependencies]
 tonic-build = "0.12.3"
