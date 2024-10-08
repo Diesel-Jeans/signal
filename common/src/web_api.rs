@@ -59,7 +59,7 @@ impl UploadKeys {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevicePreKeyBundle {
     pub aci_signed_pre_key: UploadSignedPreKey,

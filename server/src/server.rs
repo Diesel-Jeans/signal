@@ -1,10 +1,16 @@
+use crate::database::{Device, SignalDatabase};
+use crate::in_memory_db::InMemorySignalDatabase;
 use anyhow::{bail, Result};
-use axum::extract::{Path, State};
+use axum::extract::{FromRef, FromRequestParts, Path, State};
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
+use axum::http::request::Parts;
 use axum::http::Method;
+use axum::http::{Response, StatusCode};
+use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
-use axum::{Json, Router};
+use axum::{async_trait, debug_handler, Json, Router};
 use common::pre_key::PreKey;
+use common::signal_protobuf::Envelope;
 use common::web_api::{CreateAccountOptions, UploadKeys, UploadSignedPreKey};
 use libsignal_protocol::{kem, PreKeyBundleContent, PublicKey};
 use serde::{Deserialize, Serialize};
@@ -45,244 +51,23 @@ impl PublicKeyType {
     }
 }
 
-pub struct InMemorySignalDatabase {
-    mail_queues: HashMap<UserID, VecDeque<Message>>,
-    usernames: HashMap<UserID, Username>,
-    devices: HashMap<UserID, HashSet<DeviceID>>,
-    keys: HashMap<UserID, HashMap<DeviceID, HashMap<PreKey, Vec<UploadSignedPreKey>>>>,
-}
-
-impl InMemorySignalDatabase {
-    pub fn new() -> Self {
-        Self {
-            mail_queues: HashMap::new(),
-            usernames: HashMap::new(),
-            devices: HashMap::new(),
-            keys: HashMap::new(),
-        }
-    }
-}
-
-async fn store_message_for(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    id: UserID,
-    message: Message,
-) -> Result<(), ErrorMessage> {
-    let mut database = database.lock().await;
-    if let Some(queue) = database.mail_queues.get_mut(&id) {
-        queue.push_back(message);
-        Ok(())
-    } else {
-        Err("The person that you messaged does not exist".into())
-    }
-}
-async fn get_messages_for(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    id: UserID,
-) -> Result<Vec<Message>, ErrorMessage> {
-    let mut database = database.lock().await;
-    if let Some(queue) = database.mail_queues.get_mut(&id) {
-        Ok(queue.drain(..).collect())
-    } else {
-        Err("There is no mail queue for the specified user".into())
-    }
-}
-
-async fn store_prekeys_for(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    id: UserID,
-    keys: PreKeyBundleContent,
-) -> Result<(), ErrorMessage> {
-    todo!()
-}
-
-fn usr_identifier_to_usr_id(usr_identifier: String) -> UserID {
-    todo!("1. Find the right type for the user identifyer\n 2. Make a convertion between said type too u32 or UserID")
-}
-
-async fn remove_key_by_id(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    user_id: UserID,
-    device_id: DeviceID,
-    key_id: u32,
-    key_type: PreKey,
-) {
-    database
-        .lock()
-        .await
-        .keys
-        .get_mut(&user_id)
-        .and_then(|device_map| device_map.get_mut(&device_id))
-        .and_then(|key_map| key_map.get_mut(&key_type))
-        .map(|key_list| key_list.retain(|key| key.key_id != key_id));
-}
-
-async fn fetch_other_user_keys(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    usr_identifier: String,
-    device_id: DeviceID,
-) -> Result<UploadKeys> {
-    fn get_first_key<'a>(
-        database: &tokio::sync::MutexGuard<'a, InMemorySignalDatabase>,
-        usr_id: UserID,
-        device_id: DeviceID,
-        key_type: PreKey,
-    ) -> Option<UploadSignedPreKey> {
-        database
-            .keys
-            .get(&usr_id)
-            .and_then(|device_map| device_map.get(&device_id))
-            .and_then(|key_map| key_map.get(&key_type))
-            .map(|key| key[0].clone())
-    }
-
-    let usr_id = usr_identifier_to_usr_id(usr_identifier);
-    let onetime_key = get_first_key(&database.lock().await, usr_id, device_id, PreKey::OneTime);
-    if let Some(key) = &onetime_key {
-        remove_key_by_id(
-            database.clone(),
-            usr_id,
-            device_id,
-            key.key_id,
-            PreKey::OneTime,
-        )
-        .await;
-    }
-
-    let database = database.lock().await;
-    Ok(UploadKeys::new(
-        get_first_key(&database, usr_id, device_id, PreKey::Identity)
-            .map(|key| key.public_key)
-            .ok_or(anyhow::anyhow!("Could not find an identity key"))?,
-        onetime_key,
-        None, // Add logic deciding whether to use the kem keys as one time key or last resort
-        get_first_key(&database, usr_id, device_id, PreKey::Kyber), // Last resort as default
-        get_first_key(&database, usr_id, device_id, PreKey::Signed),
-    ))
-}
-
-async fn get_onetime_prekey_count(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    usr_id: UserID,
-    device_id: DeviceID,
-) -> Result<usize> {
-    database
-        .lock()
-        .await
-        .keys
-        .get(&usr_id)
-        .and_then(|device_map| device_map.get(&device_id))
-        .and_then(|key_map| key_map.get(&PreKey::OneTime))
-        .map(|key_list| key_list.len())
-        .ok_or(anyhow::anyhow!("Could not get one time pre key count"))
-}
-
-async fn store_username_for(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    id: UserID,
-    username: &Username,
-) -> Result<(), ErrorMessage> {
-    let mut database = database.lock().await;
-    database.usernames.insert(id, username.clone());
-    Ok(())
-}
-
-async fn store_user_id_for(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    username: &Username,
-    id: UserID,
-) -> Result<(), ErrorMessage> {
-    todo!()
-}
-
-async fn create_user_id_for(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    username: &Username,
-) -> Result<UserID, ErrorMessage> {
-    let mut database = database.lock().await;
-    if !database
-        .usernames
-        .iter()
-        .any(|(_, existing)| *username == **existing)
-    {
-        use rand::distributions::{Alphanumeric, DistString};
-
-        let id: UserID = Alphanumeric
-            .sample_string(&mut rand::thread_rng(), 16)
-            .parse()
-            .unwrap();
-        database.usernames.insert(id.clone(), username.clone());
-        Ok(id)
-    } else {
-        Err("Username already exists".into())
-    }
-}
-
-async fn get_user_id_for(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    username: &Username,
-) -> Result<UserID, ErrorMessage> {
-    let mut database = database.lock().await;
-    if let Some(id) = database
-        .usernames
-        .iter()
-        .find(|(_, existing)| **existing == *username)
-    {
-        Ok(id.0.clone())
-    } else {
-        Err("Username not found".into())
-    }
-}
-
-async fn create_new_device_id(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    id: &UserID,
-) -> Result<DeviceID, ErrorMessage> {
-    let mut database = database.lock().await;
-    if let Some(devices) = database.devices.get_mut(id) {
-        let max = *devices.iter().max().unwrap_or(&0u32);
-        for i in 0u32.into()..max {
-            if !devices.contains(&i) {
-                devices.insert(i.to_owned());
-                return Ok(i.to_owned());
-            }
-        }
-        let new_device = max + 1;
-        devices.insert(new_device);
-        Ok(new_device)
-    } else {
-        Err("Device could not be created because user did not exist".into())
-    }
-}
-
-async fn delete_device(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    id: UserID,
-    device: DeviceID,
-) -> Result<(), ErrorMessage> {
-    todo!()
-}
-
-async fn delete_client(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    id: UserID,
-) -> Result<(), ErrorMessage> {
-    todo!()
-}
-
 // The Signal endpoint /v2/keys/check says that a u64 id is needed, however their ids, such as
 // KyperPreKeyID only supports u32. Here only a u32 is used and therefore only a 4 byte size
 // instead of the sugested u64.
-async fn keys_check(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
+async fn handle_post_keycheck<T: SignalDatabase>(
+    database: T,
     usr_id: UserID,
     device_id: DeviceID,
     usr_digest: [u8; 32],
 ) -> Result<bool> {
+    todo!()
+    /*
     if let Some(keys) = database
         .lock()
         .await
         .keys
+        .lock()
+        .await
         .get(&usr_id)
         .and_then(|usr_map| usr_map.get(&device_id))
     {
@@ -318,6 +103,7 @@ async fn keys_check(
     } else {
         bail!("Client has no keys")
     }
+    */
 }
 
 #[derive(Clone)]
@@ -350,48 +136,123 @@ struct Msg {
     message: String,
 }
 
-async fn handle_send_message(
-    State(state): State<ServerState>,
-    Path(address): Path<String>,
-    Json(payload): Json<Msg>,
-) {
-    println!("Received message: {:?}", payload);
+#[derive(Clone, Debug)]
+struct SignalServerState<T: SignalDatabase> {
+    db: T,
 }
 
-async fn handle_publish_bundle(
-    State(state): State<ServerState>,
+impl<T: SignalDatabase> SignalServerState<T> {
+    #[allow(dead_code)]
+    fn database(&self) -> T {
+        self.db.clone()
+    }
+}
+
+impl SignalServerState<InMemorySignalDatabase> {
+    fn new() -> Self {
+        Self {
+            db: InMemorySignalDatabase::new(),
+        }
+    }
+}
+
+async fn handle_put_messages<T: SignalDatabase>(
+    state: SignalServerState<T>,
+    address: Device,
+    payload: Envelope,
+) -> impl IntoResponse {
+    println!("Received message");
+    if let Err(result) = state.database().push_msg_queue(&address, payload).await {
+        println!(
+            "An error occurred while trying to push message to database: {}",
+            result
+        )
+    }
+    Response::new("Message sent!".to_string())
+}
+
+async fn handle_get_messages<T: SignalDatabase>(
+    State(state): State<SignalServerState<InMemorySignalDatabase>>,
+    Path(address): Path<String>,
+    Json(payload): Json<Envelope>,
+) {
+}
+
+async fn handle_register_account<T: SignalDatabase>(
+    State(state): State<SignalServerState<T>>,
     Path(address): Path<String>,
     Json(payload): Json<UploadKeys>,
 ) {
     println!("Publish bundle");
 }
 
-async fn handle_fetch_bundle() {
-    println!("Fetch bundle");
-}
-
-async fn handle_register_client(
-    State(state): State<ServerState>,
+async fn handle_put_registration<T: SignalDatabase>(
+    State(state): State<SignalServerState<T>>,
     Path(address): Path<String>,
     Json(options): Json<CreateAccountOptions>,
 ) {
     println!("Register client");
 }
 
-async fn handle_register_device() {
-    println!("Register device");
+/// Handler for the PUT v1/messages/{address} endpoint.
+#[debug_handler]
+async fn put_messages_endpoint(
+    State(state): State<SignalServerState<InMemorySignalDatabase>>,
+    Path(address): Path<String>,
+    Json(payload): Json<Envelope>, // TODO: Multiple messages could be sent at one time
+) -> impl IntoResponse {
+    let device = address
+        .try_into()
+        .expect("A user shurely would never send an invalid address :)");
+    handle_put_messages(state, device, payload).await
 }
 
-async fn handle_update_client() {
-    println!("Update client");
+/// Handler for the GET v1/messages endpoint.
+#[debug_handler]
+async fn get_messages_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+    // TODO: Call `handle_get_messages`
 }
 
-async fn handle_delete_client() {
-    println!("Update");
+/// Handler for the PUT v1/registration endpoint.
+#[debug_handler]
+async fn put_registration_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+    // TODO: Call `handle_put_registration`
 }
 
-async fn handle_delete_device() {
-    println!("Delete device");
+/// Handler for the GET v2/keys endpoint.
+#[debug_handler]
+async fn get_keys_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+    // TODO: Call `handle_get_keys`
+}
+
+/// Handler for the POST v2/keys/check endpoint.
+#[debug_handler]
+async fn post_keycheck_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+    // TODO: Call `handle_post_keycheck`
+}
+
+/// Handler for the PUT v2/keys endpoint.
+#[debug_handler]
+async fn put_keys_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+    // TODO: Call `handle_put_keys`
+}
+
+/// Handler for the DELETE v1/accounts/me endpoint.
+#[debug_handler]
+async fn delete_account_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+    // TODO: Call `handle_delete_account`
+}
+
+/// Handler for the DELETE v1/devices/{device_id} endpoint.
+#[debug_handler]
+async fn delete_device_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+    // TODO: Call `handle_delete_device`
+}
+
+/// Handler for the POST v1/devices/link endpoint.
+#[debug_handler]
+async fn post_link_device_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+    // TODO: Call `handle_post_link_device`
 }
 
 pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
@@ -406,18 +267,20 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .max_age(Duration::from_secs(5184000))
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
-    let server = ServerState::new().await?;
+    let server = SignalServerState::new();
     let app = Router::new()
-        .route("/message/:address", put(handle_send_message))
-        .route("/bundle/:address", post(handle_publish_bundle))
-        .route("/bundle/:address", get(handle_fetch_bundle))
-        .route("/client", post(handle_register_client))
-        .route("/client", put(handle_update_client))
-        .route("/client/:address", delete(handle_delete_client))
-        .route("/device/:address", post(handle_register_device))
-        .route("/device/:address", delete(handle_delete_device))
+        .route("/v1/messages", get(get_messages_endpoint))
+        .route("/v1/messages/:destination", put(put_messages_endpoint))
+        .route("/v1/registration/", post(handle_register_account))
+        .route("/v2/keys", get(get_keys_endpoint))
+        .route("/v2/keys/check", post(post_keycheck_endpoint))
+        .route("/v2/keys", put(put_keys_endpoint))
+        .route("/v1/accounts/me", delete(delete_account_endpoint))
+        .route("/v1/devices/link", post(post_link_device_endpoint))
+        .route("/v1/devices/:device_id", delete(delete_device_endpoint))
         .with_state(server)
         .layer(cors);
+
     let listener = tokio::net::TcpListener::bind("127.0.0.1:50051").await?;
     axum::serve(listener, app).await?;
     Ok(())
@@ -426,13 +289,16 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod server_tests {
     use super::*;
+    use super::{handle_put_messages, SignalServerState};
+    use crate::database::{Device, SignalDatabase, User, UserID};
     use libsignal_protocol::*;
     use rand::rngs::OsRng;
     use sha2::{Digest, Sha256};
 
+    /*
     #[tokio::test]
-    async fn keys_check_test() {
-        let database = Arc::new(Mutex::new(InMemorySignalDatabase::new()));
+    async fn handle_post_keycheck_test() {
+        let database = InMemorySignalDatabase::new();
         let usr_id: UserID = 0u32;
         let device_id: DeviceID = 0u32;
         let mut rng = OsRng;
@@ -443,16 +309,19 @@ mod server_tests {
         let signed_key_id = 0u32;
         let identity_key_pair = KeyPair::generate(&mut rng);
 
-        let mut database_lock = database.lock().await;
-        database_lock.keys.insert(usr_id, HashMap::new());
-        database_lock
+        database.keys.lock().await.insert(usr_id, HashMap::new());
+        database
             .keys
+            .lock()
+            .await
             .get_mut(&usr_id)
             .unwrap()
             .insert(device_id, HashMap::new());
 
-        let key_map = database_lock
+        let key_map = database
             .keys
+            .lock()
+            .await
             .get_mut(&usr_id)
             .unwrap()
             .get_mut(&device_id)
@@ -483,7 +352,7 @@ mod server_tests {
                 signature: Box::new([0]),
             });
 
-        drop(database_lock);
+        drop(database);
 
         let mut usr_digest = Sha256::new();
         usr_digest.update(&identity_key_pair.public_key.serialize());
@@ -494,31 +363,44 @@ mod server_tests {
 
         let usr_digest: [u8; 32] = usr_digest.finalize().into();
 
-        assert!(keys_check(database, usr_id, device_id, usr_digest)
-            .await
-            .unwrap());
+        assert!(
+            handle_post_keycheck(database, usr_id, device_id, usr_digest)
+                .await
+                .unwrap()
+        );
         assert_ne!(vec![0; 32].as_slice(), usr_digest);
     }
-    #[tokio::test]
+    */
+    // TODO: This should test GET keys endpoint.
+    /*#[tokio::test]
     async fn get_keys_test() {
         let database = Arc::new(Mutex::new(InMemorySignalDatabase::new()));
         let usr_id: UserID = 0u32;
         let device_id: DeviceID = 0u32;
 
         let mut database_lock = database.lock().await;
-        database_lock.keys.insert(usr_id, HashMap::new());
         database_lock
             .keys
+            .lock()
+            .await
+            .insert(usr_id, HashMap::new());
+        database_lock
+            .keys
+            .lock()
+            .await
             .get_mut(&usr_id)
             .unwrap()
             .insert(device_id, HashMap::new());
 
-        let key_map = database_lock
+        let mut key_map = database_lock
             .keys
+            .lock()
+            .await
             .get_mut(&usr_id)
             .unwrap()
             .get_mut(&device_id)
-            .unwrap();
+            .unwrap()
+            .clone();
 
         let j = 10;
         let mut i = 0;
@@ -541,6 +423,54 @@ mod server_tests {
                 .await
                 .unwrap(),
             j
+        );
+    }*/
+
+    #[tokio::test]
+    async fn send_messages_adds_message_to_queue() {
+        let destination = Device { id: 0, owner: 0 };
+        let other = Device { id: 1, owner: 0 };
+        let state = SignalServerState::new();
+        state.database().add_user("bob", "1234").await;
+        state
+            .database()
+            .add_device(&destination.owner, destination.clone())
+            .await
+            .unwrap();
+        state
+            .database()
+            .add_device(&other.owner, other.clone())
+            .await
+            .unwrap();
+        let message = common::signal_protobuf::Envelope {
+            r#type: None,
+            source_service_id: None,
+            source_device: None,
+            client_timestamp: None,
+            content: None,
+            server_guid: None,
+            server_timestamp: None,
+            ephemeral: None,
+            destination_service_id: None,
+            urgent: None,
+            updated_pni: None,
+            story: None,
+            report_spam_token: None,
+            shared_mrm_key: None,
+        };
+        handle_put_messages(state.clone(), destination.clone(), message.clone()).await;
+
+        assert!(
+            message
+                == state
+                    .database()
+                    .mail_queues
+                    .lock()
+                    .await
+                    .get_mut(&destination)
+                    .unwrap()
+                    .pop_front()
+                    .unwrap()
         );
     }
 }

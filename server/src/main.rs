@@ -1,6 +1,7 @@
-mod create_server;
+#![allow(unused)]
+pub mod database;
 mod db;
-mod in_memory_db;
+pub mod in_memory_db;
 mod server;
 
 #[tokio::main]
