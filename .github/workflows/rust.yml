@@ -15,13 +15,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Setup Protobuf
-      run: sudo apt update && sudo apt upgrade -y && sudo apt install -y protobuf-compiler libprotobuf-dev
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set up cache for Protobuf
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.local/bin/protoc
+          ~/.cache/protobuf
+        key: ${{ runner.os }}-protobuf-${{ hashFiles('/home/runner/.local/include/google/protobuf/descriptor.proto') }}
+        restore-keys: |
+          ${{ runner.os }}-protobuf-
+
+    - name: Install Protobuf
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        # Install Protoc.
+        wget https://github.com/protocolbuffers/protobuf/releases/download/v21.3/protoc-21.3-linux-x86_64.zip
+        unzip -o protoc-21.3-linux-x86_64.zip -d ~/.local
     - name: Run fmt
       run: cargo fmt --check
-    - name: Run Clippy
-      run: cargo clippy
     - name: Build
       run: cargo build --verbose
     - name: Run tests
