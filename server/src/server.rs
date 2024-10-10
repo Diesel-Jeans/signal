@@ -257,6 +257,7 @@ async fn keys_check(
 #[derive(Clone)]
 pub struct ServerState {
     pub db: Arc<Mutex<InMemorySignalDatabase>>,
+
     pub pool: Pool<Postgres>,
 }
 
@@ -270,8 +271,6 @@ impl ServerState {
             .connect(&db_url)
             .await
             .expect("Unable to connect to Postgres");
-
-        // sqlx::migrate!("./migrations").run(&pool).await?;
 
         Ok(ServerState {
             db: Arc::new(Mutex::new(InMemorySignalDatabase::new())),

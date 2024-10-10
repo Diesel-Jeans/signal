@@ -13,7 +13,8 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
-
+    env:
+      DATABASE_URL: postgres://root:root@0.0.0.0:5432/signal_db
     steps:
     - name: Checkout code
       uses: actions/checkout@v4

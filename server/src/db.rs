@@ -4,7 +4,7 @@ use axum::extract::State;
 use common::{
     signal_protobuf::Envelope,
     web_api::Account,
-    web_api::{Device, PreKeyBundleKeys, UploadSignedPreKey},
+    web_api::{Device, DevicePreKeyBundle, UploadSignedPreKey},
 };
 
 pub async fn add_account(State(state): State<ServerState>, account: Account) -> Result<()> {
@@ -295,7 +295,7 @@ pub async fn pop_msg_queue(
 
 pub async fn store_key_bundle(
     State(state): State<ServerState>,
-    data: PreKeyBundleKeys,
+    data: DevicePreKeyBundle,
     owner: &Device,
     account: &Account,
 ) -> Result<()> {
@@ -386,7 +386,7 @@ pub async fn get_key_bundle(
     State(state): State<ServerState>,
     d_owner: &Device,
     a_owner: &Account,
-) -> Result<PreKeyBundleKeys> {
+) -> Result<DevicePreKeyBundle> {
     sqlx::query!(
         r#"
         SELECT
@@ -428,7 +428,7 @@ pub async fn get_key_bundle(
     .fetch_one(&state.pool)
     .await
     .map(|row| {
-        PreKeyBundleKeys {
+        DevicePreKeyBundle {
             aci_signed_pre_key: UploadSignedPreKey {
                 key_id: row.aspk_id.parse().unwrap(),
                 public_key: row.aspk.into(),

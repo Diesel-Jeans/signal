@@ -44,7 +44,7 @@ pub struct UploadKeys {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PreKeyBundleKeys {
+pub struct DevicePreKeyBundle {
     pub aci_signed_pre_key: UploadSignedPreKey,
     pub pni_signed_pre_key: UploadSignedPreKey,
     pub aci_pq_last_resort_pre_key: UploadSignedPreKey,

@@ -12,4 +12,4 @@ docker-compose up
 
 2. (Optionally) Open the brower on `localhost:5050` and login using the PGADMIN email and password.
 
-4. Start the server, and it should successfully connect to the database. Enjoy!
+3. Start the server, and it should successfully connect to the database. Enjoy!
