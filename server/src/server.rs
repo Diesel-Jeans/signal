@@ -9,6 +9,8 @@ use common::web_api::{CreateAccountOptions, UploadKeys, UploadSignedPreKey};
 use libsignal_protocol::{kem, PreKeyBundleContent, PublicKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{Pool, Postgres};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -253,15 +255,27 @@ async fn keys_check(
 }
 
 #[derive(Clone)]
-struct ServerState {
-    db: Arc<Mutex<InMemorySignalDatabase>>,
+pub struct ServerState {
+    pub db: Arc<Mutex<InMemorySignalDatabase>>,
+
+    pub pool: Pool<Postgres>,
 }
 
 impl ServerState {
-    fn new() -> ServerState {
-        ServerState {
+    async fn new() -> Result<ServerState> {
+        dotenv::dotenv().expect("Unable to load environment variables from .env file");
+        let db_url = std::env::var("DATABASE_URL").expect("Unable to read DATABASE_URL env var");
+
+        let pool = PgPoolOptions::new()
+            .max_connections(100)
+            .connect(&db_url)
+            .await
+            .expect("Unable to connect to Postgres");
+
+        Ok(ServerState {
             db: Arc::new(Mutex::new(InMemorySignalDatabase::new())),
-        }
+            pool,
+        })
     }
 }
 
@@ -326,7 +340,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .max_age(Duration::from_secs(5184000))
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
-    let server = ServerState::new();
+    let server = ServerState::new().await?;
     let app = Router::new()
         .route("/message/:address", put(handle_send_message))
         .route("/bundle/:address", post(handle_publish_bundle))
