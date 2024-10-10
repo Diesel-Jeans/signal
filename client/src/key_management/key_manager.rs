@@ -3,7 +3,6 @@ use common::pre_key::PreKey;
 use libsignal_protocol::*;
 use rand::{CryptoRng, Rng};
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub enum KeyType {
@@ -11,24 +10,25 @@ pub enum KeyType {
     KeyPair(KeyPair),
 }
 
-pub struct KeyManager {
+struct KeyManager {
     key_incrementer_map: HashMap<PreKey, u32>,
 }
 
 impl KeyManager {
     pub fn new() -> KeyManager {
-        let mut key_incrementer_map = HashMap::new();
-        key_incrementer_map.insert(PreKey::Signed, 0);
-        key_incrementer_map.insert(PreKey::Kyber, 0);
-        key_incrementer_map.insert(PreKey::OneTime, 0);
         Self {
-            key_incrementer_map,
+            key_incrementer_map: HashMap::from([
+                (PreKey::Signed, 0u32),
+                (PreKey::Kyber, 0u32),
+                (PreKey::OneTime, 0u32),
+            ]),
         }
     }
 
     fn get_new_key_id(&mut self, key_type: &PreKey) -> u32 {
-        let id = self.key_incrementer_map.get_mut(key_type).unwrap().deref() + 1u32;
-        id - 1
+        let id = self.key_incrementer_map.get(key_type).unwrap().clone();
+        *self.key_incrementer_map.get_mut(key_type).unwrap() += 1u32;
+        id
     }
 
     async fn compute_signature<R: Rng + CryptoRng>(
@@ -133,6 +133,15 @@ mod key_manager_tests {
         let mut rng = OsRng;
         let p = KeyPair::generate(&mut rng).into();
         InMemSignalProtocolStore::new(p, reg).unwrap()
+    }
+
+    #[test]
+    fn get_id_test() {
+        let mut manager = KeyManager::new();
+        let id0 = manager.get_new_key_id(&PreKey::OneTime);
+        assert_eq!(id0, 0);
+        let id1 = manager.get_new_key_id(&PreKey::OneTime);
+        assert_eq!(id1, 1);
     }
 
     #[tokio::test]
