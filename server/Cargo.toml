@@ -13,6 +13,9 @@ axum = { version = "0.7.6", features = ["macros"] }
 serde = { version = "1.0.210", features = ["derive"] }
 rand = "0.8.5"
 tower-http = { version = "0.6.1", features = ["cors"] }
+redis = "0.23.0"
+deadpool-redis = "0.18.0"
+uuid = { version = "1.10.0", features = ["v4"] }
 
 [build-dependencies]
 tonic-build = "0.12.3"

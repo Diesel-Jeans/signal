@@ -4,13 +4,19 @@ use axum::http::Method;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use common::web_api::{CreateAccountOptions, UploadKeys, UploadSignedPreKey};
+use deadpool_redis::{
+    redis::{cmd, FromRedisValue},
+    Config, Pool, Runtime, Connection
+};
 use libsignal_protocol::PreKeyBundleContent;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
+use axum::handler::Handler;
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
+use crate::message_cache::{insert, send_message_to_db, listen_for_expirations};
 
 type Username = String;
 type DeviceID = u32;
@@ -168,14 +174,19 @@ async fn delete_client(
 }
 
 #[derive(Clone)]
-struct ServerState {
+pub(crate) struct ServerState {
     db: Arc<Mutex<InMemorySignalDatabase>>,
+    pub(crate) redis: Pool,
 }
 
 impl ServerState {
-    fn new() -> ServerState {
+    async fn new() -> ServerState {
+        let mut redis_config = Config::from_url("redis://127.0.0.1:6379");
+        let redis_pool = redis_config.create_pool(Some(Runtime::Tokio1)).unwrap();
+
         ServerState {
             db: Arc::new(Mutex::new(InMemorySignalDatabase::new())),
+            redis: redis_pool,
         }
     }
 }
@@ -190,7 +201,11 @@ async fn handle_send_message(
     Path(address): Path<String>,
     Json(payload): Json<Msg>,
 ) {
-    println!("Received message: {:?}", payload);
+    let mut connection = state.redis.get().await.unwrap();
+    let addr = address.as_str();
+
+    insert(&mut connection, "b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(), 2, "Hello this is a test of the insert() function".to_string(), "1337".to_string() ).await;
+
 }
 
 async fn handle_publish_bundle(
@@ -241,7 +256,10 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .max_age(Duration::from_secs(5184000))
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
-    let server = ServerState::new();
+    let server = ServerState::new().await;
+    let redis_pubsub_client = redis::Client::open("redis://127.0.0.1:6379").unwrap();
+    let redis_pubsub_client_connection = redis_pubsub_client.get_connection().unwrap();
+    tokio::spawn(listen_for_expirations(redis_pubsub_client_connection));
     let app = Router::new()
         .route("/message/:address", put(handle_send_message))
         .route("/bundle/:address", post(handle_publish_bundle))
@@ -253,7 +271,8 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/device/:address", delete(handle_delete_device))
         .with_state(server)
         .layer(cors);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:50051").await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:1234").await?;
+    println!("hello");
     axum::serve(listener, app).await?;
     Ok(())
 }
