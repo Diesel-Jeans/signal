@@ -150,6 +150,44 @@ pub async fn add_device(
     .map_err(|err| err.into())
 }
 
+pub async fn get_device(
+    State(state): State<ServerState>,
+    owner: &Account,
+    device_id: u32,
+) -> Result<Device> {
+    sqlx::query!(
+        r#"
+        SELECT
+            device_id
+        FROM
+            devices
+        WHERE
+            owner = (
+                SELECT
+                    id
+                FROM
+                    accounts
+                WHERE
+                    aci = $1
+                    AND pni = $2
+            )
+            AND device_id = $3
+        "#,
+        owner.aci,
+        owner.pni,
+        device_id.to_string()
+    )
+    .fetch_one(&state.pool)
+    .await
+    .map(|row| Device {
+        device_id: row.device_id.parse().unwrap(),
+        name: "".to_string(),
+        last_seen: 0,
+        created: 0,
+    })
+    .map_err(|err| err.into())
+}
+
 pub async fn get_devices(State(state): State<ServerState>, owner: &Account) -> Result<Vec<Device>> {
     sqlx::query!(
         r#"
