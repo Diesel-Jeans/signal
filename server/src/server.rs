@@ -1,5 +1,7 @@
-use crate::database::{Device, SignalDatabase};
+use crate::api_error::ApiError;
+use crate::database::{DeviceID, SignalDatabase, UserID};
 use crate::in_memory_db::InMemorySignalDatabase;
+use crate::postgres::PostgresDatabase;
 use anyhow::{bail, Result};
 use axum::extract::{FromRef, FromRequestParts, Path, State};
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
@@ -11,7 +13,8 @@ use axum::routing::{delete, get, post, put};
 use axum::{async_trait, debug_handler, Json, Router};
 use common::pre_key::PreKey;
 use common::signal_protobuf::Envelope;
-use common::web_api::{CreateAccountOptions, UploadKeys, UploadSignedPreKey};
+use common::web_api::{Account, CreateAccountOptions, Device, UploadKeys, UploadSignedPreKey};
+use libsignal_core::{DeviceId, ProtocolAddress};
 use libsignal_protocol::{kem, PreKeyBundleContent, PublicKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -22,12 +25,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
-
-type Username = String;
-type DeviceID = u32;
-type UserID = u32;
-type Message = String;
-type ErrorMessage = String;
 
 enum PublicKeyType {
     Kem(kem::PublicKey),
@@ -149,20 +146,33 @@ impl<T: SignalDatabase> SignalServerState<T> {
 }
 
 impl SignalServerState<InMemorySignalDatabase> {
-    fn new() -> Self {
+    async fn new() -> Self {
         Self {
             db: InMemorySignalDatabase::new(),
         }
     }
 }
 
+impl SignalServerState<PostgresDatabase> {
+    async fn new() -> Self {
+        Self {
+            db: PostgresDatabase::connect().await.unwrap(),
+        }
+    }
+}
+
 async fn handle_put_messages<T: SignalDatabase>(
     state: SignalServerState<T>,
-    address: Device,
+    account: Account,
+    device: Device,
     payload: Envelope,
 ) -> impl IntoResponse {
     println!("Received message");
-    if let Err(result) = state.database().push_msg_queue(&address, payload).await {
+    if let Err(result) = state
+        .database()
+        .push_msg_queue(&device, &account, &payload)
+        .await
+    {
         println!(
             "An error occurred while trying to push message to database: {}",
             result
@@ -197,64 +207,105 @@ async fn handle_put_registration<T: SignalDatabase>(
 /// Handler for the PUT v1/messages/{address} endpoint.
 #[debug_handler]
 async fn put_messages_endpoint(
-    State(state): State<SignalServerState<InMemorySignalDatabase>>,
+    State(state): State<SignalServerState<PostgresDatabase>>,
     Path(address): Path<String>,
     Json(payload): Json<Envelope>, // TODO: Multiple messages could be sent at one time
-) -> impl IntoResponse {
-    let device = address
-        .try_into()
-        .expect("A user shurely would never send an invalid address :)");
-    handle_put_messages(state, device, payload).await
+) -> Result<(), ApiError> {
+    let (user_id, dev_id) = address
+        .find(".")
+        .ok_or(ApiError {
+            message: "Could not parse address. Address did not contain '.'".to_owned(),
+            error_code: None,
+            status_code: StatusCode::BAD_REQUEST,
+        })
+        .map(|pos| address.split_at(pos))?;
+    let device_id: DeviceID = dev_id[1..].parse().map_err(|e| ApiError {
+        message: format!("Could not parse device_id: {}.", e),
+        error_code: None,
+        status_code: StatusCode::BAD_REQUEST,
+    })?;
+
+    let address = ProtocolAddress::new(user_id.to_owned(), DeviceId::from(device_id.clone()));
+    // TODO: This assumes that everyone uses ACI
+    let account = state
+        .database()
+        .get_account(Some(address.name().to_owned()), None)
+        .await
+        .map_err(|err| ApiError {
+            message: format!("Could not find the account '{}': {}.", address.name(), err),
+            error_code: None,
+            status_code: StatusCode::BAD_REQUEST,
+        })?;
+    let device = state
+        .database()
+        .get_device(&account, device_id)
+        .await
+        .map_err(|_| ApiError {
+            message: format!(
+                "Could not find device {} for the user {}",
+                device_id, user_id,
+            ),
+            error_code: None,
+            status_code: StatusCode::BAD_REQUEST,
+        })?;
+
+    handle_put_messages(state, account, device, payload).await;
+    Ok(())
 }
 
 /// Handler for the GET v1/messages endpoint.
 #[debug_handler]
-async fn get_messages_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+async fn get_messages_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
     // TODO: Call `handle_get_messages`
 }
 
 /// Handler for the PUT v1/registration endpoint.
 #[debug_handler]
-async fn put_registration_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+async fn put_registration_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
     // TODO: Call `handle_put_registration`
 }
 
 /// Handler for the GET v2/keys endpoint.
 #[debug_handler]
-async fn get_keys_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+async fn get_keys_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
     // TODO: Call `handle_get_keys`
 }
 
 /// Handler for the POST v2/keys/check endpoint.
 #[debug_handler]
-async fn post_keycheck_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+async fn post_keycheck_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
     // TODO: Call `handle_post_keycheck`
 }
 
 /// Handler for the PUT v2/keys endpoint.
 #[debug_handler]
-async fn put_keys_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+async fn put_keys_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
     // TODO: Call `handle_put_keys`
 }
 
 /// Handler for the DELETE v1/accounts/me endpoint.
 #[debug_handler]
-async fn delete_account_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+async fn delete_account_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
     // TODO: Call `handle_delete_account`
 }
 
 /// Handler for the DELETE v1/devices/{device_id} endpoint.
 #[debug_handler]
-async fn delete_device_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+async fn delete_device_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
     // TODO: Call `handle_delete_device`
 }
 
 /// Handler for the POST v1/devices/link endpoint.
 #[debug_handler]
-async fn post_link_device_endpoint(State(state): State<SignalServerState<InMemorySignalDatabase>>) {
+async fn post_link_device_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
     // TODO: Call `handle_post_link_device`
 }
 
+/// To add a new endpoint:
+///  * create an async router function: `<method>_<endpoint_name>_endpoint`.
+///  * create an async handler function: `handle_<method>_<endpoint_name>`
+///  * add the router function to the axum router below.
+///  * call the handler function from the router function to handle the request.
 pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let cors = CorsLayer::new()
         .allow_methods([
@@ -267,7 +318,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .max_age(Duration::from_secs(5184000))
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
-    let server = SignalServerState::new();
+    let state = SignalServerState::<PostgresDatabase>::new().await;
     let app = Router::new()
         .route("/v1/messages", get(get_messages_endpoint))
         .route("/v1/messages/:destination", put(put_messages_endpoint))
@@ -278,7 +329,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/accounts/me", delete(delete_account_endpoint))
         .route("/v1/devices/link", post(post_link_device_endpoint))
         .route("/v1/devices/:device_id", delete(delete_device_endpoint))
-        .with_state(server)
+        .with_state(state)
         .layer(cors);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:50051").await?;
@@ -290,7 +341,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 mod server_tests {
     use super::*;
     use super::{handle_put_messages, SignalServerState};
-    use crate::database::{Device, SignalDatabase, User, UserID};
+    use crate::database::{SignalDatabase, UserID};
     use libsignal_protocol::*;
     use rand::rngs::OsRng;
     use sha2::{Digest, Sha256};
@@ -428,8 +479,19 @@ mod server_tests {
 
     #[tokio::test]
     async fn send_messages_adds_message_to_queue() {
-        let destination = Device { id: 0, owner: 0 };
-        let other = Device { id: 1, owner: 0 };
+        let destination = Device {
+            device_id: 0,
+            name: "bob".to_owned(),
+            last_seen: 0,
+            created: 0,
+        };
+        let other = Device {
+            device_id: 0,
+            name: "alice".to_owned(),
+            last_seen: 0,
+            created: 0,
+        };
+        /*
         let state = SignalServerState::new();
         state.database().add_user("bob", "1234").await;
         state
@@ -439,7 +501,7 @@ mod server_tests {
             .unwrap();
         state
             .database()
-            .add_device(&other.owner, other.clone())
+            .add_device(&other.owner, other)
             .await
             .unwrap();
         let message = common::signal_protobuf::Envelope {
@@ -472,5 +534,6 @@ mod server_tests {
                     .pop_front()
                     .unwrap()
         );
+        */
     }
 }

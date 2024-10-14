@@ -1,7 +1,8 @@
 #![allow(unused)]
+mod api_error;
 pub mod database;
-mod db;
 pub mod in_memory_db;
+mod postgres;
 mod server;
 
 #[tokio::main]

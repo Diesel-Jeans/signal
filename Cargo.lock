@@ -571,6 +571,7 @@ dependencies = [
 name = "common"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "libsignal-protocol",
  "prost",
  "serde",

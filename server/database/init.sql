@@ -73,7 +73,7 @@ CREATE TABLE one_time_pre_key_store (
 INSERT INTO
     accounts (aci, pni, auth_token, identity_key)
 VALUES
-    ('bob', NULL, '1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b', '\x424f424b4559'::bytea); -- auth_token = BBBBBB
+    ('bob', NULL, '1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b', '\x053b258970748dff667800108898e390a1dfabd8fa66889748d903c12fbc5c732d'::bytea); -- auth_token = BBBBBB
 
 INSERT INTO
     accounts (aci, pni, auth_token, identity_key)
@@ -84,7 +84,7 @@ VALUES
 INSERT INTO
     devices (device_id, owner)
 SELECT
-    'bob_device', id
+    '0', id
 FROM
     accounts
 WHERE
@@ -94,7 +94,7 @@ WHERE
 INSERT INTO
     devices (device_id, owner)
 SELECT
-    'alice_device', id
+    '0', id
 FROM
     accounts
 WHERE

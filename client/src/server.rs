@@ -1,6 +1,8 @@
 use crate::contact_manager::Contact;
+use async_std::fs::write;
 use http::StatusCode;
 use libsignal_protocol::*;
+use std::fmt::Display;
 use std::io::{Error, ErrorKind};
 use std::time::Duration;
 use surf::http::convert::json;
@@ -8,7 +10,7 @@ use surf::{http, Client, Config, Response, Url};
 use tokio_tungstenite::connect_async;
 
 const CLIENT_URI: &str = "/client";
-const MSG_URI: &str = "/message";
+const MSG_URI: &str = "v1/messages";
 const DEVICE_URI: &str = "/device";
 const BUNDLE_URI: &str = "/bundle";
 
@@ -21,6 +23,21 @@ enum ReqType {
     Post(serde_json::Value),
     Put(serde_json::Value),
     Delete(serde_json::Value),
+}
+
+impl Display for ReqType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                ReqType::Get => "GET",
+                ReqType::Post(value) => "POST",
+                ReqType::Put(value) => "PUT",
+                ReqType::Delete(value) => "DELETE",
+            }
+        )
+    }
 }
 
 pub trait Server {
@@ -42,7 +59,8 @@ pub trait Server {
     async fn send_msg(
         &self,
         msg: String,
-        uuid: String,
+        user_id: String,
+        device_id: u32,
     ) -> Result<Response, Box<dyn std::error::Error>>;
     async fn update_client(
         &self,
@@ -102,12 +120,13 @@ impl Server for ServerAPI {
     async fn send_msg(
         &self,
         msg: String,
-        uuid: String,
+        user_id: String,
+        device_id: u32,
     ) -> Result<Response, Box<dyn std::error::Error>> {
         let payload = json!({
             "message": msg
         });
-        let uri = format!("{}/{}", MSG_URI, uuid);
+        let uri = format!("{}/{}.{}", MSG_URI, user_id, device_id);
 
         self.make_request(ReqType::Put(payload), uri).await
     }
@@ -158,7 +177,8 @@ impl ServerAPI {
         req_type: ReqType,
         uri: String,
     ) -> Result<Response, Box<dyn std::error::Error>> {
-        let res = match req_type {
+        println!("Sent request {} {}", req_type, uri);
+        let mut res = match req_type {
             ReqType::Get => self.client.get(uri),
             ReqType::Post(payload) => self.client.post(uri).body(surf::Body::from_json(&payload)?),
             ReqType::Put(payload) => self.client.put(uri).body(surf::Body::from_json(&payload)?),
@@ -173,7 +193,11 @@ impl ServerAPI {
             StatusCode::Ok => Ok(res),
             _ => Err(Error::new(
                 ErrorKind::Other,
-                format!("response returned: {:?}", res.status()),
+                format!(
+                    "response returned: {:?}\n{}",
+                    res.status(),
+                    res.body_string().await.unwrap_or("".to_owned())
+                ),
             )
             .into()),
         }

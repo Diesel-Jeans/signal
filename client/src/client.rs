@@ -19,7 +19,7 @@ impl Client {
     pub async fn send_message(&self, message: &str) -> Result<(), Box<dyn std::error::Error>> {
         let res = self
             .server_api
-            .send_msg(message.to_owned(), "bob".to_owned());
+            .send_msg(message.to_owned(), "bob".to_owned(), 0);
         println!("Sent message: {}", message);
         match res.await {
             Ok(response) => {

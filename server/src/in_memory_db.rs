@@ -1,22 +1,27 @@
+use crate::database::DeviceID;
+use crate::database::PreKeyBundle;
+use crate::database::SignalDatabase;
+use crate::database::UserID;
+use crate::database::Username;
+use anyhow::anyhow;
+use anyhow::bail;
+use anyhow::Result;
+use axum::async_trait;
+use common::pre_key::PreKey;
+use common::signal_protobuf::Envelope;
+use common::web_api::Account;
+use common::web_api::Device;
+use common::web_api::DevicePreKeyBundle;
+use common::web_api::UploadSignedPreKey;
+use libsignal_protocol::IdentityKey;
+use libsignal_protocol::PublicKey;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::default;
 use std::fmt::format;
 use std::sync::Arc;
-
-use crate::database::Device;
-use crate::database::DeviceID;
-use crate::database::Error;
-use crate::database::PreKeyBundle;
-use crate::database::SignalDatabase;
-use crate::database::User;
-use crate::database::UserID;
-use crate::database::Username;
-use axum::async_trait;
-use common::pre_key::PreKey;
-use common::signal_protobuf::Envelope;
-use common::web_api::UploadSignedPreKey;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -25,6 +30,7 @@ pub struct InMemorySignalDatabase {
     pub devices: Arc<Mutex<HashMap<UserID, Vec<Device>>>>,
     pub keys:
         Arc<Mutex<HashMap<UserID, HashMap<DeviceID, HashMap<PreKey, Vec<UploadSignedPreKey>>>>>>,
+    pub accounts: Arc<Mutex<HashMap<String, Account>>>,
 }
 /*
 impl InMemorySignalDatabase {
@@ -87,34 +93,113 @@ impl InMemorySignalDatabase {
     }
 }
 */
+
 #[async_trait]
 impl SignalDatabase for InMemorySignalDatabase {
-    async fn add_user(&self, username: &str, password: &str) -> Result<(), Error> {
+    async fn add_account(&self, account: Account) -> Result<()> {
         self.devices.lock().await.entry(0).or_insert_with(Vec::new);
         Ok(())
     }
+    async fn get_account(&self, aci: Option<String>, pni: Option<String>) -> Result<Account> {
+        let id = aci
+            .or(pni)
+            .ok_or_else(|| anyhow!("No user id was supplied."))?;
 
-    async fn get_user(&self, username: &str) -> Result<User, Error> {
-        todo!()
+        self.accounts
+            .lock()
+            .await
+            .get(&id)
+            .ok_or_else(|| anyhow!("No user exists with ID: {}", id))
+            .map(Clone::clone)
     }
-
-    async fn update_user_username(
+    async fn update_account_aci(
         &self,
-        old_username: &str,
-        new_username: &str,
-    ) -> Result<(), Error> {
+        old_aci: Option<String>,
+        new_aci: Option<String>,
+    ) -> Result<()> {
+        todo!()
+    }
+    async fn update_account_pni(
+        &self,
+        old_pni: Option<String>,
+        new_pni: Option<String>,
+    ) -> Result<()> {
         todo!()
     }
 
-    async fn update_user_password(&self, username: &str, new_password: &str) -> Result<(), Error> {
+    async fn delete_account(&self, aci: Option<String>, pni: Option<String>) -> Result<()> {
         todo!()
     }
 
-    async fn delete_user(&self, username: &str) -> Result<(), Error> {
+    async fn get_devices(&self, owner: &Account) -> Result<Vec<Device>> {
         todo!()
     }
 
-    async fn add_device(&self, owner: &UserID, device: Device) -> Result<(), Error> {
+    async fn get_device(&self, owner: &Account, device_id: DeviceID) -> Result<Device> {
+        todo!()
+    }
+
+    async fn delete_device(&self, owner: &Account, id: DeviceID) -> Result<()> {
+        todo!()
+    }
+
+    async fn push_msg_queue(
+        &self,
+        d_receiver: &Device,
+        a_receiever: &Account,
+        msg: &Envelope,
+    ) -> Result<()> {
+        self.mail_queues
+            .lock()
+            .await
+            .get_mut(d_receiver)
+            .ok_or(anyhow!(format!(
+                "Device with id {} does not exist for user {}",
+                d_receiver.device_id,
+                a_receiever.aci.clone().unwrap()
+            )))
+            .map(|deque| deque.push_back(msg.clone()))
+    }
+    async fn pop_msg_queue(
+        &self,
+        d_receiever: &Device,
+        a_receiver: &Account,
+    ) -> Result<Vec<Envelope>> {
+        todo!()
+    }
+    async fn store_key_bundle(
+        &self,
+        data: DevicePreKeyBundle,
+        owner: &Device,
+        account: &Account,
+    ) -> Result<()> {
+        todo!()
+    }
+    async fn store_one_time_pre_keys(
+        &self,
+        otpks: Vec<UploadSignedPreKey>,
+        d_owner: &Device,
+        a_owner: &Account,
+    ) -> Result<()> {
+        todo!()
+    }
+
+    async fn get_one_time_pre_key_count(&self, user: &UserID) -> Result<u32> {
+        todo!()
+        /*
+        database
+        .keys
+        .get(&usr_id)
+        .and_then(|device_map| device_map.get(&device_id))
+        .and_then(|key_map| key_map.get(&PreKey::OneTime))
+        .and_then(|key_list| Some(key_list.len()))
+        .ok_or_else(|| anyhow::anyhow!("Could not get one time pre key count"))
+        */
+    }
+
+    async fn add_device(&self, owner: &Account, device: Device) -> Result<()> {
+        todo!()
+        /*
         self.devices
             .lock()
             .await
@@ -133,63 +218,22 @@ impl SignalDatabase for InMemorySignalDatabase {
                 Ok(())
             }
         }
-    }
-
-    async fn get_devices(&self, owner: &User) -> Result<Vec<Device>, Error> {
-        todo!()
-    }
-
-    async fn delete_device(&self, owner: &User, id: i32) -> Result<(), Error> {
-        todo!()
-    }
-
-    async fn push_msg_queue(&self, reciver: &Device, msg: Envelope) -> Result<(), Error> {
-        self.mail_queues
-            .lock()
-            .await
-            .get_mut(reciver)
-            .ok_or(format!(
-                "Device with id {} does not exist for user {}",
-                reciver.id, reciver.owner
-            ))
-            .map(|deque| deque.push_back(msg))
-    }
-
-    async fn pop_msg_queue(&self, reciver: &Device) -> Result<Vec<Envelope>, Error> {
-        todo!()
-    }
-
-    async fn store_key_bundle(&self, data: PreKeyBundle, owner: &Device) -> Result<(), Error> {
-        todo!()
-    }
-
-    async fn get_key_bundle(&self, owner: &Device) -> Result<PreKeyBundle, Error> {
-        todo!()
-    }
-
-    async fn store_one_time_pre_keys(
-        &self,
-        otpks: Vec<UploadSignedPreKey>,
-        owner: &Device,
-    ) -> Result<(), Error> {
-        todo!()
-    }
-
-    async fn get_one_time_pre_key(&self, owner: &Device) -> Result<UploadSignedPreKey, Error> {
-        todo!()
-    }
-
-    async fn get_one_time_pre_key_count(&self, user: &UserID) -> Result<u32, Error> {
-        todo!()
-        /*
-        database
-        .keys
-        .get(&usr_id)
-        .and_then(|device_map| device_map.get(&device_id))
-        .and_then(|key_map| key_map.get(&PreKey::OneTime))
-        .and_then(|key_list| Some(key_list.len()))
-        .ok_or_else(|| anyhow::anyhow!("Could not get one time pre key count"))
         */
+    }
+
+    async fn get_key_bundle(
+        &self,
+        d_owner: &Device,
+        a_owner: &Account,
+    ) -> Result<DevicePreKeyBundle> {
+        todo!()
+    }
+    async fn get_one_time_pre_key(
+        &self,
+        d_owner: &Device,
+        a_owner: &Account,
+    ) -> Result<UploadSignedPreKey> {
+        todo!()
     }
 }
 
@@ -199,6 +243,7 @@ impl InMemorySignalDatabase {
             mail_queues: Arc::new(Mutex::new(HashMap::new())),
             devices: Arc::new(Mutex::new(HashMap::new())),
             keys: Arc::new(Mutex::new(HashMap::new())),
+            accounts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
