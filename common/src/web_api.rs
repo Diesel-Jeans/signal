@@ -1,3 +1,4 @@
+use libsignal_protocol::IdentityKey;
 use serde::{Deserialize, Serialize};
 
 /// All information required to create an account.
@@ -39,4 +40,30 @@ pub struct UploadKeys {
     pq_pre_keys: Option<UploadSignedPreKey>,
     pq_last_resort_pre_key: Option<UploadSignedPreKey>,
     signed_pre_key: Option<UploadSignedPreKey>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevicePreKeyBundle {
+    pub aci_signed_pre_key: UploadSignedPreKey,
+    pub pni_signed_pre_key: UploadSignedPreKey,
+    pub aci_pq_last_resort_pre_key: UploadSignedPreKey,
+    pub pni_pq_last_resort_pre_key: UploadSignedPreKey,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Device {
+    pub device_id: u32,
+    pub name: String,
+    pub last_seen: u32,
+    pub created: u32,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct Account {
+    pub aci: Option<String>,
+    pub pni: Option<String>,
+    pub auth_token: String,
+    pub identity_key: IdentityKey,
 }
