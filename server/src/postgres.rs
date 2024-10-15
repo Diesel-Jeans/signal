@@ -1,13 +1,11 @@
-use crate::{
-    database::{DeviceID, SignalDatabase, UserID},
-    server::ServerState,
-};
+use crate::{database::SignalDatabase, server::ServerState};
 use anyhow::{anyhow, bail, Result};
 use axum::{async_trait, extract};
 use common::{
     signal_protobuf::Envelope,
     web_api::{Account, Device, DevicePreKeyBundle, UploadSignedPreKey},
 };
+use libsignal_core::DeviceId;
 use libsignal_protocol::{IdentityKey, PublicKey};
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 
@@ -178,7 +176,7 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn delete_device(&self, owner: &Account, device_id: DeviceID) -> Result<()> {
+    async fn delete_device(&self, owner: &Account, device_id: DeviceId) -> Result<()> {
         sqlx::query!(
             r#"
         DELETE FROM
@@ -204,7 +202,7 @@ impl SignalDatabase for PostgresDatabase {
         .map(|_| ())
         .map_err(|err| err.into())
     }
-    async fn get_device(&self, owner: &Account, device_id: DeviceID) -> Result<Device> {
+    async fn get_device(&self, owner: &Account, device_id: DeviceId) -> Result<Device> {
         sqlx::query!(
             r#"
         SELECT
@@ -582,7 +580,7 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn get_one_time_pre_key_count(&self, user: &UserID) -> Result<u32> {
+    async fn get_one_time_pre_key_count(&self, account: &Account) -> Result<u32> {
         todo!()
     }
 }

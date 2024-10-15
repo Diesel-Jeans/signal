@@ -1,13 +1,8 @@
-use axum::async_trait;
-
 use anyhow::Result;
+use axum::async_trait;
 use common::signal_protobuf::Envelope;
 use common::web_api::{Account, Device, DevicePreKeyBundle, UploadSignedPreKey};
-pub type Username = String;
-pub type DeviceID = u32;
-pub type UserID = u32;
-
-pub type PreKeyBundle = String;
+use libsignal_core::DeviceId;
 
 #[async_trait]
 pub trait SignalDatabase: Clone {
@@ -29,9 +24,9 @@ pub trait SignalDatabase: Clone {
 
     async fn get_devices(&self, owner: &Account) -> Result<Vec<Device>>;
 
-    async fn get_device(&self, owner: &Account, device_id: DeviceID) -> Result<Device>;
+    async fn get_device(&self, owner: &Account, device_id: DeviceId) -> Result<Device>;
 
-    async fn delete_device(&self, owner: &Account, id: DeviceID) -> Result<()>;
+    async fn delete_device(&self, owner: &Account, id: DeviceId) -> Result<()>;
 
     async fn push_msg_queue(
         &self,
@@ -55,7 +50,7 @@ pub trait SignalDatabase: Clone {
         d_owner: &Device,
         a_owner: &Account,
     ) -> Result<DevicePreKeyBundle>;
-    async fn get_one_time_pre_key_count(&self, user: &UserID) -> Result<u32>;
+    async fn get_one_time_pre_key_count(&self, account: &Account) -> Result<u32>;
     async fn store_one_time_pre_keys(
         &self,
         otpks: Vec<UploadSignedPreKey>,

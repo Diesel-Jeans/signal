@@ -1,5 +1,5 @@
 use crate::api_error::ApiError;
-use crate::database::{DeviceID, SignalDatabase, UserID};
+use crate::database::SignalDatabase;
 use crate::in_memory_db::InMemorySignalDatabase;
 use crate::postgres::PostgresDatabase;
 use anyhow::{bail, Result};
@@ -14,7 +14,7 @@ use axum::{async_trait, debug_handler, Json, Router};
 use common::pre_key::PreKey;
 use common::signal_protobuf::Envelope;
 use common::web_api::{Account, CreateAccountOptions, Device, UploadKeys, UploadSignedPreKey};
-use libsignal_core::{DeviceId, ProtocolAddress};
+use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use libsignal_protocol::{kem, PreKeyBundleContent, PublicKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
+use uuid::uuid;
 
 enum PublicKeyType {
     Kem(kem::PublicKey),
@@ -53,8 +54,8 @@ impl PublicKeyType {
 // instead of the sugested u64.
 async fn handle_post_keycheck<T: SignalDatabase>(
     database: T,
-    usr_id: UserID,
-    device_id: DeviceID,
+    usr_id: ServiceId,
+    device_id: DeviceId,
     usr_digest: [u8; 32],
 ) -> Result<bool> {
     todo!()
@@ -219,11 +220,14 @@ async fn put_messages_endpoint(
             status_code: StatusCode::BAD_REQUEST,
         })
         .map(|pos| address.split_at(pos))?;
-    let device_id: DeviceID = dev_id[1..].parse().map_err(|e| ApiError {
-        message: format!("Could not parse device_id: {}.", e),
-        error_code: None,
-        status_code: StatusCode::BAD_REQUEST,
-    })?;
+    let device_id: DeviceId = dev_id[1..]
+        .parse::<u32>()
+        .map_err(|e| ApiError {
+            message: format!("Could not parse device_id: {}.", e),
+            error_code: None,
+            status_code: StatusCode::BAD_REQUEST,
+        })?
+        .into();
 
     let address = ProtocolAddress::new(user_id.to_owned(), DeviceId::from(device_id.clone()));
     // TODO: This assumes that everyone uses ACI
@@ -341,10 +345,11 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 mod server_tests {
     use super::*;
     use super::{handle_put_messages, SignalServerState};
-    use crate::database::{SignalDatabase, UserID};
+    use crate::database::SignalDatabase;
     use libsignal_protocol::*;
     use rand::rngs::OsRng;
     use sha2::{Digest, Sha256};
+    use uuid::Uuid;
 
     /*
     #[tokio::test]
@@ -477,31 +482,55 @@ mod server_tests {
         );
     }*/
 
+    fn create_bob() -> Account {
+        let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
+        Account {
+            aci: Some(Uuid::new_v4().to_string()),
+            pni: None,
+            auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
+                .to_owned(),
+            identity_key: id_key.identity_key().clone(),
+        }
+    }
+
+    fn create_alice() -> Account {
+        let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
+        Account {
+            aci: Some(Uuid::new_v4().to_string()),
+            pni: None,
+            auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
+                .to_owned(),
+            identity_key: id_key.identity_key().clone(),
+        }
+    }
+
     #[tokio::test]
-    async fn send_messages_adds_message_to_queue() {
-        let destination = Device {
+    async fn handle_put_messages_adds_message_to_queue() {
+        let state = SignalServerState::<InMemorySignalDatabase>::new().await;
+        let bob = create_bob();
+        let bob_device = Device {
             device_id: 0,
-            name: "bob".to_owned(),
+            name: "bob-device".to_owned(),
             last_seen: 0,
             created: 0,
         };
-        let other = Device {
+        let alice = create_alice();
+        let alice_device = Device {
             device_id: 0,
-            name: "alice".to_owned(),
+            name: "alice-device".to_owned(),
             last_seen: 0,
             created: 0,
         };
-        /*
-        let state = SignalServerState::new();
-        state.database().add_user("bob", "1234").await;
+        state.database().add_account(bob.clone()).await;
         state
             .database()
-            .add_device(&destination.owner, destination.clone())
+            .add_device(&bob, bob_device.clone())
             .await
             .unwrap();
+        state.database().add_account(alice.clone()).await;
         state
             .database()
-            .add_device(&other.owner, other)
+            .add_device(&alice, alice_device.clone())
             .await
             .unwrap();
         let message = common::signal_protobuf::Envelope {
@@ -520,20 +549,25 @@ mod server_tests {
             report_spam_token: None,
             shared_mrm_key: None,
         };
-        handle_put_messages(state.clone(), destination.clone(), message.clone()).await;
+        handle_put_messages(
+            state.clone(),
+            bob.clone(),
+            bob_device.clone(),
+            message.clone(),
+        )
+        .await;
 
-        assert!(
-            message
-                == state
-                    .database()
-                    .mail_queues
-                    .lock()
-                    .await
-                    .get_mut(&destination)
-                    .unwrap()
-                    .pop_front()
-                    .unwrap()
+        assert_eq!(
+            message,
+            state
+                .database()
+                .mail_queues
+                .lock()
+                .await
+                .get_mut(&bob_device)
+                .unwrap()
+                .pop_front()
+                .unwrap()
         );
-        */
     }
 }
