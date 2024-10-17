@@ -1,11 +1,11 @@
 use crate::{account::Account, database::SignalDatabase};
 use anyhow::{anyhow, bail, Result};
-use axum::{async_trait, extract};
+use axum::async_trait;
 use common::{
     signal_protobuf::Envelope,
-    web_api::{Device, DevicePreKeyBundle, UploadSignedPreKey},
+    web_api::{DevicePreKeyBundle, UploadSignedPreKey},
 };
-use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
+use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{IdentityKey, PublicKey};
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 
@@ -50,7 +50,7 @@ impl SignalDatabase for PostgresDatabase {
     }
 
     async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
-        let (aci, pni) = parse_service_id(service_id);
+        let (id_str, id) = parse_to_specific_service_id(service_id);
 
         sqlx::query!(
             r#"
@@ -59,11 +59,10 @@ impl SignalDatabase for PostgresDatabase {
             FROM
                 accounts
             WHERE
-                COALESCE(aci, '') = COALESCE($1, '')
-                OR COALESCE(pni, '') = COALESCE($2, '')
+                $1 = $2
             "#,
-            aci,
-            pni,
+            id_str,
+            id,
         )
         .fetch_one(&self.pool)
         .await
@@ -79,7 +78,7 @@ impl SignalDatabase for PostgresDatabase {
     }
 
     async fn update_account_aci(&self, service_id: &ServiceId, new_aci: Aci) -> Result<()> {
-        let (id_str, id) = pasrse_to_specific_service_id(service_id);
+        let (id_str, id) = parse_to_specific_service_id(service_id);
 
         sqlx::query!(
             r#"
@@ -92,7 +91,7 @@ impl SignalDatabase for PostgresDatabase {
             "#,
             id_str,
             id,
-            Some(new_aci.service_id_string())
+            new_aci.service_id_string()
         )
         .execute(&self.pool)
         .await
@@ -101,7 +100,7 @@ impl SignalDatabase for PostgresDatabase {
     }
 
     async fn update_account_pni(&self, service_id: &ServiceId, new_pni: Pni) -> Result<()> {
-        let (id_str, id) = pasrse_to_specific_service_id(service_id);
+        let (id_str, id) = parse_to_specific_service_id(service_id);
 
         sqlx::query!(
             r#"
@@ -114,7 +113,7 @@ impl SignalDatabase for PostgresDatabase {
         "#,
             id_str,
             id,
-            Some(new_pni.service_id_string())
+            new_pni.service_id_string()
         )
         .execute(&self.pool)
         .await
@@ -123,7 +122,7 @@ impl SignalDatabase for PostgresDatabase {
     }
 
     async fn delete_account(&self, service_id: &ServiceId) -> Result<()> {
-        let (id_str, id) = pasrse_to_specific_service_id(service_id);
+        let (id_str, id) = parse_to_specific_service_id(service_id);
 
         sqlx::query!(
             r#"
@@ -148,7 +147,7 @@ impl SignalDatabase for PostgresDatabase {
     ) -> Result<()> {
         for msg in messages {
             let data = bincode::serialize(&msg)?;
-            let (id_str, id) = pasrse_to_specific_service_id_from_protocol_address(&address)?;
+            let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
 
             sqlx::query!(
                 r#"
@@ -175,7 +174,7 @@ impl SignalDatabase for PostgresDatabase {
     }
 
     async fn pop_msg_queue(&self, address: ProtocolAddress) -> Result<Vec<Envelope>> {
-        let (id_str, id) = pasrse_to_specific_service_id_from_protocol_address(&address)?;
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
 
         sqlx::query!(
             r#"
@@ -212,7 +211,7 @@ impl SignalDatabase for PostgresDatabase {
         data: DevicePreKeyBundle,
         address: ProtocolAddress,
     ) -> Result<()> {
-        let (id_str, id) = pasrse_to_specific_service_id_from_protocol_address(&address)?;
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
         let mut tx = self.pool.begin().await?;
 
         sqlx::query!(
@@ -296,7 +295,7 @@ impl SignalDatabase for PostgresDatabase {
     }
 
     async fn get_key_bundle(&self, address: ProtocolAddress) -> Result<DevicePreKeyBundle> {
-        let (id_str, id) = pasrse_to_specific_service_id_from_protocol_address(&address)?;
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
 
         sqlx::query!(
         r#"
@@ -355,7 +354,7 @@ impl SignalDatabase for PostgresDatabase {
     .map_err(|err| err.into())
     }
 
-    async fn get_one_time_pre_key_count(&self, account: &ServiceId) -> Result<u32> {
+    async fn get_one_time_pre_key_count(&self, service_id: &ServiceId) -> Result<u32> {
         todo!()
     }
 
@@ -364,7 +363,7 @@ impl SignalDatabase for PostgresDatabase {
         otpks: Vec<UploadSignedPreKey>,
         owner: ProtocolAddress,
     ) -> Result<()> {
-        let (id_str, id) = pasrse_to_specific_service_id_from_protocol_address(&owner)?;
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&owner)?;
 
         for otpk in otpks {
             match sqlx::query!(
@@ -380,7 +379,7 @@ impl SignalDatabase for PostgresDatabase {
                 "#,
                 id_str,
                 id,
-                owner.name().to_string(),
+                owner.device_id().to_string(),
                 otpk.key_id.to_string(),
                 &*otpk.public_key,
                 &*otpk.signature
@@ -397,7 +396,7 @@ impl SignalDatabase for PostgresDatabase {
     }
 
     async fn get_one_time_pre_key(&self, owner: ProtocolAddress) -> Result<UploadSignedPreKey> {
-        let (id_str, id) = pasrse_to_specific_service_id_from_protocol_address(&owner)?;
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&owner)?;
 
         sqlx::query!(
             r#"
@@ -445,20 +444,20 @@ fn parse_service_id(service_id: &ServiceId) -> (Option<String>, Option<String>) 
     }
 }
 
-fn pasrse_to_specific_service_id(service_id: &ServiceId) -> (String, String) {
+fn parse_to_specific_service_id(service_id: &ServiceId) -> (String, String) {
     match parse_service_id(service_id) {
         (None, Some(id)) => ("pni".into(), id),
         (Some(id), None) => ("aci".into(), id),
-        _ => panic!("NOT POSSINLBE!"),
+        _ => panic!("NOT POSSIBLE!"),
     }
 }
 
-fn pasrse_to_specific_service_id_from_protocol_address(
+fn parse_to_specific_service_id_from_protocol_address(
     protocol_address: &ProtocolAddress,
 ) -> Result<(String, String)> {
-    Ok(pasrse_to_specific_service_id(
+    Ok(parse_to_specific_service_id(
         &ServiceId::parse_from_service_id_string(protocol_address.name()).ok_or(anyhow!(
-            "Could not parse protocal address name to service id"
+            "Could not parse protocol address name to service id"
         ))?,
     ))
 }

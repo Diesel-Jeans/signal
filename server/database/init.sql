@@ -7,13 +7,6 @@ CREATE TABLE accounts (
     identity_key    BYTEA NOT NULL
 );
 
--- CREATE TABLE devices (
---     id          INTEGER PRIMARY KEY NOT NULL GENERATED ALWAYS AS IDENTITY,
---     device_id   TEXT NOT NULL,
---     owner       INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
---     UNIQUE(device_id, owner)
--- );
-
 CREATE TABLE msq_queue (
     id          INTEGER PRIMARY KEY NOT NULL GENERATED ALWAYS AS IDENTITY,
     a_receiver  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -68,10 +61,6 @@ CREATE TABLE one_time_pre_key_store (
     UNIQUE(d_owner, key_id)
 );
 
--- DATA
--- salt = 14
--- SHA256 hash -> salt + auth_token
-
 INSERT INTO
     accounts (aci, pni, auth_token, identity_key)
 VALUES
@@ -82,23 +71,3 @@ INSERT INTO
 VALUES
     ('alice', NULL, '212835c5decc07f75ab30ea7cff49fb7101ef9c7814fd40fa8084748799e5c55', '\x414c4943454b4559'::bytea); -- auth_token = AAAAAA
 
-
--- INSERT INTO
---     devices (device_id, owner)
--- SELECT
---     '0', id
--- FROM
---     accounts
--- WHERE
---     aci = 'bob'
---     AND pni IS NULL;
-
--- INSERT INTO
---     devices (device_id, owner)
--- SELECT
---     '0', id
--- FROM
---     accounts
--- WHERE
---     aci = 'alice'
---     AND pni IS NULL;

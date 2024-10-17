@@ -2,8 +2,8 @@ use crate::account::Account;
 use anyhow::Result;
 use axum::async_trait;
 use common::signal_protobuf::Envelope;
-use common::web_api::{Device, DevicePreKeyBundle, UploadSignedPreKey};
-use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
+use common::web_api::{DevicePreKeyBundle, UploadSignedPreKey};
+use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 
 /// Represents a database connection that can store objects related to the signal protocol.
 #[async_trait]
@@ -52,7 +52,7 @@ pub trait SignalDatabase: Clone {
     /// Get how many keys are left until a last resort key is used instead of
     /// a one time prekey. More keys should be uploaded when this value is below
     /// some threshold.
-    async fn get_one_time_pre_key_count(&self, account: &ServiceId) -> Result<u32>;
+    async fn get_one_time_pre_key_count(&self, service_id: &ServiceId) -> Result<u32>;
 
     /// Store new one time prekeys to avoid running out.
     async fn store_one_time_pre_keys(

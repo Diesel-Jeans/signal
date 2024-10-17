@@ -2,31 +2,19 @@ use crate::api_error::ApiError;
 use crate::database::SignalDatabase;
 use crate::in_memory_db::InMemorySignalDatabase;
 use crate::postgres::PostgresDatabase;
-use anyhow::{bail, Result};
-use axum::extract::{FromRef, FromRequestParts, Path, State};
+use anyhow::Result;
+use axum::extract::{Path, State};
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
-use axum::http::request::Parts;
-use axum::http::{Method, Response, StatusCode};
-use axum::response::IntoResponse;
+use axum::http::{Method, StatusCode};
 use axum::routing::{delete, get, post, put};
-use axum::{async_trait, debug_handler, Json, Router};
-use common::pre_key::PreKey;
+use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
-use common::web_api::{CreateAccountOptions, Device, UploadKeys, UploadSignedPreKey};
+use common::web_api::CreateAccountOptions;
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
-use libsignal_protocol::{kem, PreKeyBundleContent, PublicKey};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Pool, Postgres};
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt::format;
-use std::sync::Arc;
+use libsignal_protocol::{kem, PublicKey};
+use std::env;
 use std::time::Duration;
-use std::{env, string};
-use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
-use uuid::uuid;
 
 enum PublicKeyType {
     Kem(kem::PublicKey),
@@ -48,11 +36,6 @@ impl PublicKeyType {
             panic!("dev_err: expected an ec key, got a kem key")
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Msg {
-    message: String,
 }
 
 #[derive(Clone, Debug)]
@@ -89,18 +72,14 @@ async fn handle_put_messages<T: SignalDatabase>(
     payload: Envelope,
 ) -> Result<(), ApiError> {
     println!("Received message");
-    if let Err(result) = state
+    state
         .database()
         .push_message_queue(address, vec![payload])
         .await
-    {
-        Err(ApiError {
+        .map_err(|_| ApiError {
             message: "Could not push the message to message queue.".to_owned(),
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
         })
-    } else {
-        Ok(())
-    }
 }
 
 async fn handle_get_messages<T: SignalDatabase>(
@@ -173,6 +152,9 @@ async fn handle_post_keycheck<T: SignalDatabase>(
     */
 }
 
+/// A protocol address is represented in string form as
+/// <user_id>.<device_id>. This function takes this string and
+/// produces a [ProtocolAddress].
 fn parse_protocol_address(string: String) -> Result<ProtocolAddress, ApiError> {
     let (user_id, dev_id) = string
         .find(".")
@@ -207,15 +189,13 @@ async fn put_messages_endpoint(
     Json(payload): Json<Envelope>, // TODO: Multiple messages could be sent at one time
 ) -> Result<(), ApiError> {
     let address = parse_protocol_address(address)?;
-    handle_put_messages(state, address, payload).await;
-    Ok(())
+    handle_put_messages(state, address, payload).await
 }
 
 /// Handler for the GET v1/messages endpoint.
 #[debug_handler]
 async fn get_messages_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
-    let address = todo!("Find the protocol address from the authentication.");
-    handle_get_messages(state, address);
+    // TODO: Call `handle_get_messages`
 }
 
 /// Handler for the PUT v1/registration endpoint.
@@ -304,9 +284,8 @@ mod server_tests {
     use super::{handle_put_messages, SignalServerState};
     use crate::account::Account;
     use crate::database::SignalDatabase;
+    use common::web_api::Device;
     use libsignal_protocol::*;
-    use rand::rngs::OsRng;
-    use sha2::{Digest, Sha256};
     use uuid::Uuid;
 
     fn create_bob() -> Account {
@@ -355,7 +334,7 @@ mod server_tests {
             alice.service_id().service_id_string(),
             alice_device.device_id(),
         );
-        state.database().add_account(bob.clone()).await;
+        state.database().add_account(bob.clone()).await.unwrap();
 
         let message = common::signal_protobuf::Envelope {
             r#type: None,
@@ -373,7 +352,9 @@ mod server_tests {
             report_spam_token: None,
             shared_mrm_key: None,
         };
-        handle_put_messages(state.clone(), bob_address.clone(), message.clone()).await;
+        handle_put_messages(state.clone(), bob_address.clone(), message.clone())
+            .await
+            .unwrap();
 
         assert_eq!(
             message,

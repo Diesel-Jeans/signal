@@ -1,10 +1,13 @@
+use core::fmt;
+
 use axum::{
-    http::{header, Response, StatusCode},
+    http::{header, StatusCode},
     response::IntoResponse,
     Json,
 };
 use serde_json::json;
 
+#[derive(Debug, Clone)]
 pub struct ApiError {
     pub status_code: StatusCode,
     pub message: String,
@@ -19,5 +22,11 @@ impl IntoResponse for ApiError {
             Json(json!({"StatusCode": status_code.as_u16(), "Message": self.message})),
         )
             .into_response()
+    }
+}
+
+impl fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "API Error {}: {}", self.status_code, self.message)
     }
 }

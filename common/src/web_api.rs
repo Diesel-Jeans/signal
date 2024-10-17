@@ -1,4 +1,3 @@
-use anyhow::{anyhow, bail, Error};
 use libsignal_protocol::{DeviceId, IdentityKey, ServiceId};
 use serde::{Deserialize, Serialize};
 

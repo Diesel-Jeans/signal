@@ -1,15 +1,12 @@
 use crate::account::Account;
 use crate::database::SignalDatabase;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use axum::async_trait;
 use common::pre_key::PreKey;
 use common::signal_protobuf::Envelope;
 use common::web_api::{Device, DevicePreKeyBundle, UploadSignedPreKey};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
-use libsignal_protocol::{IdentityKey, PublicKey};
-use std::collections::{hash_map::Entry, HashMap, HashSet, VecDeque};
-use std::default;
-use std::fmt::format;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -86,16 +83,17 @@ impl InMemorySignalDatabase {
 #[async_trait]
 impl SignalDatabase for InMemorySignalDatabase {
     async fn add_account(&self, account: Account) -> Result<()> {
+        let service_id = account.service_id();
+        self.accounts
+            .lock()
+            .await
+            .entry(service_id)
+            .or_insert(account);
         self.devices
             .lock()
             .await
-            .entry(account.service_id())
+            .entry(service_id)
             .or_insert_with(Vec::new);
-        assert!(self
-            .devices
-            .lock()
-            .await
-            .contains_key(&account.service_id()));
         Ok(())
     }
     async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
@@ -144,7 +142,7 @@ impl SignalDatabase for InMemorySignalDatabase {
         todo!()
     }
 
-    async fn get_one_time_pre_key_count(&self, account: &ServiceId) -> Result<u32> {
+    async fn get_one_time_pre_key_count(&self, service_id: &ServiceId) -> Result<u32> {
         todo!()
         /*
         database

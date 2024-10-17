@@ -1,7 +1,5 @@
 use crate::contact_manager::Contact;
-use async_std::fs::write;
 use http::StatusCode;
-use libsignal_protocol::*;
 use std::fmt::Display;
 use std::io::{Error, ErrorKind};
 use std::time::Duration;
@@ -32,9 +30,9 @@ impl Display for ReqType {
             "{}",
             match self {
                 ReqType::Get => "GET",
-                ReqType::Post(value) => "POST",
-                ReqType::Put(value) => "PUT",
-                ReqType::Delete(value) => "DELETE",
+                ReqType::Post(_) => "POST",
+                ReqType::Put(_) => "PUT",
+                ReqType::Delete(_) => "DELETE",
             }
         )
     }

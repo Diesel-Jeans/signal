@@ -1,8 +1,5 @@
 use crate::contact_manager::ContactManager;
-use crate::encryption::encrypt;
 use crate::server::{Server, ServerAPI};
-use surf::http::mime::JSON;
-use tokio_tungstenite::tungstenite::http::response;
 
 pub struct Client {
     contact_manager: ContactManager,
