@@ -1,8 +1,9 @@
 use anyhow::Result;
 use axum::async_trait;
 use common::signal_protobuf::Envelope;
-use common::web_api::{Account, Device, DevicePreKeyBundle, UploadSignedPreKey};
+use common::web_api::{Device, DevicePreKeyBundle, UploadSignedPreKey};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
+use crate::account::Account;
 
 /// Represents a database connection that can store objects related to the signal protocol.
 #[async_trait]
@@ -18,25 +19,16 @@ pub trait SignalDatabase: Clone {
     async fn get_account(&self, service_id: &ServiceId) -> Result<Account>;
 
     /// Add an ACI to an account overriding the existing ACI if any.
-    async fn update_account_aci(&self, old_service_id: ServiceId, new_aci: Aci) -> Result<()>;
+    async fn update_account_aci(&self, service_id: &ServiceId, new_aci: Aci) -> Result<()>;
 
     /// Add an PNI to an account overriding the existing PNI if any.
-    async fn update_account_pni(&self, old_service_id: ServiceId, new_pni: Pni) -> Result<()>;
+    async fn update_account_pni(&self, service_id: &ServiceId, new_pni: Pni) -> Result<()>;
 
     /// Delete the account associated with the given [ServiceId].
     async fn delete_account(&self, service_id: &ServiceId) -> Result<()>;
 
-    /// Get all devices for the user.
-    async fn get_devices(&self, owner: &ServiceId) -> Result<Vec<Device>>;
-
-    /// Get a single device with the given [DeviceId].
-    async fn get_device(&self, owner: &ServiceId, device_id: DeviceId) -> Result<Device>;
-
-    /// Delete a device.
-    async fn delete_device(&self, address: ProtocolAddress) -> Result<()>;
-
     /// Send a message to a given [ProtocolAddress].
-    async fn push_msg_queue(&self, address: ProtocolAddress, msg: &Envelope) -> Result<()>;
+    async fn push_msg_queue(&self, address: ProtocolAddress, msgs: Vec<&Envelope>) -> Result<()>;
 
     /// Retreive a message that was sent to the given [ProtocolAddress].
     async fn pop_msg_queue(&self, address: ProtocolAddress) -> Result<Vec<Envelope>>;
@@ -46,7 +38,7 @@ pub trait SignalDatabase: Clone {
     async fn store_key_bundle(
         &self,
         data: DevicePreKeyBundle,
-        owner_address: ProtocolAddress,
+        address: ProtocolAddress,
     ) -> Result<()>;
 
     /// Get the keys that are needed to start a conversation with the device that
@@ -62,16 +54,13 @@ pub trait SignalDatabase: Clone {
     async fn store_one_time_pre_keys(
         &self,
         otpks: Vec<UploadSignedPreKey>,
-        owner_address: ProtocolAddress,
+        owner: ProtocolAddress,
     ) -> Result<()>;
-
-    /// Add a device to an account.
-    async fn add_device(&self, owner: &ServiceId, device: Device) -> Result<()>;
 
     /// Get a one time prekey so that you can start a conversation with the
     /// device that is associated with the given [ProtocolAddress].
     async fn get_one_time_pre_key(
         &self,
-        owner_address: ProtocolAddress,
+        owner: ProtocolAddress,
     ) -> Result<UploadSignedPreKey>;
 }
