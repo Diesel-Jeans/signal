@@ -1,6 +1,5 @@
 use crate::contact_manager::Device;
 use crate::key_management::bundle::PrimitiveKeyBundleContent;
-use libsignal_protocol::*;
 use serde::*;
 use serde_json::*;
 use std::fs;

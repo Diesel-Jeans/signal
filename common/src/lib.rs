@@ -1,3 +1,4 @@
+#![allow(unused)]
 pub mod web_api;
 
 pub mod signal_protobuf {

@@ -4,6 +4,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Envelope",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
-        .compile(&["signal.proto"], &["proto"])?;
+        .compile_protos(&["signal.proto"], &["proto"])?;
     Ok(())
 }
