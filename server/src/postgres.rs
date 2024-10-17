@@ -1,11 +1,11 @@
-use crate::{database::SignalDatabase, server::ServerState};
+use crate::database::SignalDatabase;
 use anyhow::{anyhow, bail, Result};
 use axum::{async_trait, extract};
 use common::{
     signal_protobuf::Envelope,
     web_api::{Account, Device, DevicePreKeyBundle, UploadSignedPreKey},
 };
-use libsignal_core::DeviceId;
+use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{IdentityKey, PublicKey};
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 
@@ -33,8 +33,8 @@ impl SignalDatabase for PostgresDatabase {
     async fn add_account(&self, account: Account) -> Result<()> {
         sqlx::query!(
             r#"
-        INSERT INTO
-            accounts (aci, pni, auth_token, identity_key)
+            INSERT INTO
+                accounts (aci, pni, auth_token, identity_key)
         VALUES
             ($1, $2, $3, $4)
         "#,
@@ -49,16 +49,16 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn get_account(&self, aci: Option<String>, pni: Option<String>) -> Result<Account> {
+    async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
         sqlx::query!(
             r#"
-        SELECT 
-            aci, pni, auth_token, identity_key
-        FROM
-            accounts
-        WHERE
-            COALESCE(aci, '') = COALESCE($1, '')
-            AND COALESCE(pni, '') = COALESCE($2, '')
+            SELECT 
+                aci, pni, auth_token, identity_key
+            FROM
+                accounts
+            WHERE
+                COALESCE(aci, '') = COALESCE($1, '')
+                AND COALESCE(pni, '') = COALESCE($2, '')
             "#,
             aci,
             pni
@@ -76,11 +76,7 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn update_account_aci(
-        &self,
-        old_aci: Option<String>,
-        new_aci: Option<String>,
-    ) -> Result<()> {
+    async fn update_account_aci(&self, old_service_id: ServiceId, new_aci: Aci) -> Result<()> {
         sqlx::query!(
             r#"
         UPDATE
@@ -99,11 +95,7 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn update_account_pni(
-        &self,
-        old_pni: Option<String>,
-        new_pni: Option<String>,
-    ) -> Result<()> {
+    async fn update_account_pni(&self, old_service_id: ServiceId, new_pni: Pni) -> Result<()> {
         sqlx::query!(
             r#"
         UPDATE
@@ -122,7 +114,7 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn delete_account(&self, aci: Option<String>, pni: Option<String>) -> Result<()> {
+    async fn delete_account(&self, service_id: &ServiceId) -> Result<()> {
         sqlx::query!(
             r#"
         DELETE FROM
@@ -140,7 +132,7 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn get_devices(&self, owner: &Account) -> Result<Vec<Device>> {
+    async fn get_devices(&self, owner: &ServiceId) -> Result<Vec<Device>> {
         sqlx::query!(
             r#"
         SELECT
@@ -176,33 +168,7 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn delete_device(&self, owner: &Account, device_id: DeviceId) -> Result<()> {
-        sqlx::query!(
-            r#"
-        DELETE FROM
-            devices
-        WHERE
-            owner = (
-                SELECT
-                    id
-                FROM
-                    accounts
-                WHERE
-                    COALESCE(aci, '') = COALESCE($1, '')
-                    AND COALESCE(pni, '') = COALESCE($2, '')
-            )
-            AND device_id = $3
-        "#,
-            owner.aci,
-            owner.pni,
-            device_id.to_string()
-        )
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
-        .map_err(|err| err.into())
-    }
-    async fn get_device(&self, owner: &Account, device_id: DeviceId) -> Result<Device> {
+    async fn get_device(&self, owner: &ServiceId, device_id: DeviceId) -> Result<Device> {
         sqlx::query!(
             r#"
         SELECT
@@ -235,13 +201,34 @@ impl SignalDatabase for PostgresDatabase {
         })
         .map_err(|err| err.into())
     }
+    async fn delete_device(&self, address: ProtocolAddress) -> Result<()> {
+        sqlx::query!(
+            r#"
+        DELETE FROM
+            devices
+        WHERE
+            owner = (
+                SELECT
+                    id
+                FROM
+                    accounts
+                WHERE
+                    COALESCE(aci, '') = COALESCE($1, '')
+                    AND COALESCE(pni, '') = COALESCE($2, '')
+            )
+            AND device_id = $3
+        "#,
+            owner.aci,
+            owner.pni,
+            device_id.to_string()
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| err.into())
+    }
 
-    async fn push_msg_queue(
-        &self,
-        d_receiver: &Device,
-        a_receiver: &Account,
-        msg: &Envelope,
-    ) -> Result<()> {
+    async fn push_msg_queue(&self, address: ProtocolAddress, msg: &Envelope) -> Result<()> {
         let data = bincode::serialize(msg)?;
 
         sqlx::query!(
@@ -275,11 +262,7 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn pop_msg_queue(
-        &self,
-        d_receiever: &Device,
-        a_receiver: &Account,
-    ) -> Result<Vec<Envelope>> {
+    async fn pop_msg_queue(&self, address: ProtocolAddress) -> Result<Vec<Envelope>> {
         sqlx::query!(
             r#"
         SELECT
@@ -315,8 +298,7 @@ impl SignalDatabase for PostgresDatabase {
     async fn store_key_bundle(
         &self,
         data: DevicePreKeyBundle,
-        owner: &Device,
-        account: &Account,
+        owner_address: ProtocolAddress,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
@@ -401,11 +383,7 @@ impl SignalDatabase for PostgresDatabase {
         tx.commit().await.map(|_| ()).map_err(|err| err.into())
     }
 
-    async fn get_key_bundle(
-        &self,
-        d_owner: &Device,
-        a_owner: &Account,
-    ) -> Result<DevicePreKeyBundle> {
+    async fn get_key_bundle(&self, address: ProtocolAddress) -> Result<DevicePreKeyBundle> {
         sqlx::query!(
         r#"
         SELECT
@@ -473,11 +451,14 @@ impl SignalDatabase for PostgresDatabase {
     .map_err(|err| err.into())
     }
 
+    async fn get_one_time_pre_key_count(&self, account: &ServiceId) -> Result<u32> {
+        todo!()
+    }
+
     async fn store_one_time_pre_keys(
         &self,
         otpks: Vec<UploadSignedPreKey>,
-        d_owner: &Device,
-        a_owner: &Account,
+        owner_address: ProtocolAddress,
     ) -> Result<()> {
         for otpk in otpks {
             match sqlx::query!(
@@ -512,10 +493,32 @@ impl SignalDatabase for PostgresDatabase {
         Ok(())
     }
 
+    async fn add_device(&self, owner: &ServiceId, device: Device) -> Result<()> {
+        sqlx::query!(
+            r#"
+        INSERT INTO
+            devices (device_id, owner)
+        SELECT
+            $3, id
+        FROM
+            accounts
+        WHERE
+            aci = $1
+            AND pni = $2
+        "#,
+            owner.aci,
+            owner.pni,
+            device.device_id.to_string()
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| err.into())
+    }
+
     async fn get_one_time_pre_key(
         &self,
-        d_owner: &Device,
-        a_owner: &Account,
+        owner_address: ProtocolAddress,
     ) -> Result<UploadSignedPreKey> {
         sqlx::query!(
             r#"
@@ -555,32 +558,5 @@ impl SignalDatabase for PostgresDatabase {
             signature: row.signature.into(),
         })
         .map_err(|err| err.into())
-    }
-
-    async fn add_device(&self, owner: &Account, device: Device) -> Result<()> {
-        sqlx::query!(
-            r#"
-        INSERT INTO
-            devices (device_id, owner)
-        SELECT
-            $3, id
-        FROM
-            accounts
-        WHERE
-            aci = $1
-            AND pni = $2
-        "#,
-            owner.aci,
-            owner.pni,
-            device.device_id.to_string()
-        )
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
-        .map_err(|err| err.into())
-    }
-
-    async fn get_one_time_pre_key_count(&self, account: &Account) -> Result<u32> {
-        todo!()
     }
 }

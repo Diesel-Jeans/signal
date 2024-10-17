@@ -1,22 +1,12 @@
 use crate::database::SignalDatabase;
-use anyhow::anyhow;
-use anyhow::bail;
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use axum::async_trait;
 use common::pre_key::PreKey;
 use common::signal_protobuf::Envelope;
-use common::web_api::Account;
-use common::web_api::Device;
-use common::web_api::DevicePreKeyBundle;
-use common::web_api::UploadSignedPreKey;
-use libsignal_core::DeviceId;
-use libsignal_core::ServiceId;
-use libsignal_protocol::IdentityKey;
-use libsignal_protocol::PublicKey;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::collections::VecDeque;
+use common::web_api::{Account, Device, DevicePreKeyBundle, UploadSignedPreKey};
+use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
+use libsignal_protocol::{IdentityKey, PublicKey};
+use std::collections::{hash_map::Entry, HashMap, HashSet, VecDeque};
 use std::default;
 use std::fmt::format;
 use std::sync::Arc;
@@ -24,11 +14,11 @@ use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct InMemorySignalDatabase {
-    pub mail_queues: Arc<Mutex<HashMap<Device, VecDeque<Envelope>>>>,
+    pub mail_queues: Arc<Mutex<HashMap<ProtocolAddress, VecDeque<Envelope>>>>,
     pub devices: Arc<Mutex<HashMap<ServiceId, Vec<Device>>>>,
     pub keys:
         Arc<Mutex<HashMap<ServiceId, HashMap<DeviceId, HashMap<PreKey, Vec<UploadSignedPreKey>>>>>>,
-    pub accounts: Arc<Mutex<HashMap<String, Account>>>,
+    pub accounts: Arc<Mutex<HashMap<ServiceId, Account>>>,
 }
 /*
 impl InMemorySignalDatabase {
@@ -107,91 +97,64 @@ impl SignalDatabase for InMemorySignalDatabase {
             .contains_key(&account.service_id()));
         Ok(())
     }
-    async fn get_account(&self, aci: Option<String>, pni: Option<String>) -> Result<Account> {
-        let id = aci
-            .or(pni)
-            .ok_or_else(|| anyhow!("No user id was supplied."))?;
-
+    async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
         self.accounts
             .lock()
             .await
-            .get(&id)
-            .ok_or_else(|| anyhow!("No user exists with ID: {}", id))
+            .get(&service_id)
+            .ok_or_else(|| anyhow!("No user exists with ID"))
             .map(Clone::clone)
     }
-    async fn update_account_aci(
-        &self,
-        old_aci: Option<String>,
-        new_aci: Option<String>,
-    ) -> Result<()> {
+    async fn update_account_aci(&self, old_service_id: ServiceId, new_aci: Aci) -> Result<()> {
         todo!()
     }
-    async fn update_account_pni(
-        &self,
-        old_pni: Option<String>,
-        new_pni: Option<String>,
-    ) -> Result<()> {
+    async fn update_account_pni(&self, old_service_id: ServiceId, new_pni: Pni) -> Result<()> {
         todo!()
     }
 
-    async fn delete_account(&self, aci: Option<String>, pni: Option<String>) -> Result<()> {
+    async fn delete_account(&self, service_id: &ServiceId) -> Result<()> {
         todo!()
     }
 
-    async fn get_devices(&self, owner: &Account) -> Result<Vec<Device>> {
+    async fn get_devices(&self, owner: &ServiceId) -> Result<Vec<Device>> {
         todo!()
     }
 
-    async fn get_device(&self, owner: &Account, device_id: DeviceId) -> Result<Device> {
+    async fn get_device(&self, owner: &ServiceId, device_id: DeviceId) -> Result<Device> {
         todo!()
     }
 
-    async fn delete_device(&self, owner: &Account, id: DeviceId) -> Result<()> {
+    async fn delete_device(&self, address: ProtocolAddress) -> Result<()> {
         todo!()
     }
 
-    async fn push_msg_queue(
-        &self,
-        d_receiver: &Device,
-        a_receiever: &Account,
-        msg: &Envelope,
-    ) -> Result<()> {
+    async fn push_msg_queue(&self, address: ProtocolAddress, msg: &Envelope) -> Result<()> {
         self.mail_queues
             .lock()
             .await
-            .get_mut(d_receiver)
+            .get_mut(&address)
             .ok_or(anyhow!(format!(
                 "Device with id {} does not exist for user {}",
-                d_receiver.device_id,
-                a_receiever.aci.clone().unwrap()
+                address.device_id(),
+                address.name()
             )))
             .map(|deque| deque.push_back(msg.clone()))
     }
-    async fn pop_msg_queue(
-        &self,
-        d_receiever: &Device,
-        a_receiver: &Account,
-    ) -> Result<Vec<Envelope>> {
+    async fn pop_msg_queue(&self, address: ProtocolAddress) -> Result<Vec<Envelope>> {
         todo!()
     }
     async fn store_key_bundle(
         &self,
         data: DevicePreKeyBundle,
-        owner: &Device,
-        account: &Account,
+        owner_address: ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
-    async fn store_one_time_pre_keys(
-        &self,
-        otpks: Vec<UploadSignedPreKey>,
-        d_owner: &Device,
-        a_owner: &Account,
-    ) -> Result<()> {
+    async fn get_key_bundle(&self, address: ProtocolAddress) -> Result<DevicePreKeyBundle> {
         todo!()
     }
 
-    async fn get_one_time_pre_key_count(&self, account: &Account) -> Result<u32> {
+    async fn get_one_time_pre_key_count(&self, account: &ServiceId) -> Result<u32> {
         todo!()
         /*
         database
@@ -204,20 +167,27 @@ impl SignalDatabase for InMemorySignalDatabase {
         */
     }
 
-    async fn add_device(&self, owner: &Account, device: Device) -> Result<()> {
-        let id = owner.service_id();
+    async fn store_one_time_pre_keys(
+        &self,
+        otpks: Vec<UploadSignedPreKey>,
+        owner_address: ProtocolAddress,
+    ) -> Result<()> {
+        todo!()
+    }
+
+    async fn add_device(&self, owner: &ServiceId, device: Device) -> Result<()> {
         self.devices
             .lock()
             .await
-            .get_mut(&id)
+            .get_mut(&owner)
             .ok_or(anyhow!("User does not exist."))
             .map(|list| list.push(device.clone()))?;
 
         // Create a message queue for the given device.
-        let id = device.device_id();
-        match self.mail_queues.lock().await.entry(device) {
+        let address = ProtocolAddress::new(owner.service_id_string(), device.device_id());
+        match self.mail_queues.lock().await.entry(address.clone()) {
             Entry::Occupied(occupied_entry) => {
-                bail!("Could not add a message queue for device {} because a message queue already exists for this device.", id)
+                bail!("Could not add a message queue for device {} because a message queue already exists for this device.", address)
             }
             Entry::Vacant(vacant_entry) => {
                 vacant_entry.insert(VecDeque::new());
@@ -225,18 +195,9 @@ impl SignalDatabase for InMemorySignalDatabase {
             }
         }
     }
-
-    async fn get_key_bundle(
-        &self,
-        d_owner: &Device,
-        a_owner: &Account,
-    ) -> Result<DevicePreKeyBundle> {
-        todo!()
-    }
     async fn get_one_time_pre_key(
         &self,
-        d_owner: &Device,
-        a_owner: &Account,
+        owner_address: ProtocolAddress,
     ) -> Result<UploadSignedPreKey> {
         todo!()
     }

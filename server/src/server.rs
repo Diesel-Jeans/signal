@@ -6,8 +6,7 @@ use anyhow::{bail, Result};
 use axum::extract::{FromRef, FromRequestParts, Path, State};
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
 use axum::http::request::Parts;
-use axum::http::Method;
-use axum::http::{Response, StatusCode};
+use axum::http::{Method, Response, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
 use axum::{async_trait, debug_handler, Json, Router};
@@ -21,8 +20,10 @@ use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt::format;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{env, string};
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 use uuid::uuid;
@@ -47,6 +48,70 @@ impl PublicKeyType {
             panic!("dev_err: expected an ec key, got a kem key")
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Msg {
+    message: String,
+}
+
+#[derive(Clone, Debug)]
+struct SignalServerState<T: SignalDatabase> {
+    db: T,
+}
+
+impl<T: SignalDatabase> SignalServerState<T> {
+    #[allow(dead_code)]
+    fn database(&self) -> T {
+        self.db.clone()
+    }
+}
+
+impl SignalServerState<InMemorySignalDatabase> {
+    async fn new() -> Self {
+        Self {
+            db: InMemorySignalDatabase::new(),
+        }
+    }
+}
+
+impl SignalServerState<PostgresDatabase> {
+    async fn new() -> Self {
+        Self {
+            db: PostgresDatabase::connect().await.unwrap(),
+        }
+    }
+}
+
+async fn handle_put_messages<T: SignalDatabase>(
+    state: SignalServerState<T>,
+    address: ProtocolAddress,
+    payload: Envelope,
+) -> Result<(), ApiError> {
+    println!("Received message");
+    if let Err(result) = state.database().push_msg_queue(address, &payload).await {
+        Err(ApiError {
+            message: format!("Could not push the message to message queue."),
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+async fn handle_get_messages<T: SignalDatabase>(
+    state: SignalServerState<T>,
+    address: ProtocolAddress,
+) {
+    println!("Get messages")
+}
+
+async fn handle_put_registration<T: SignalDatabase>(
+    State(state): State<SignalServerState<T>>,
+    Path(address): Path<String>,
+    Json(options): Json<CreateAccountOptions>,
+) {
+    println!("Register client");
 }
 
 // The Signal endpoint /v2/keys/check says that a u64 id is needed, however their ids, such as
@@ -104,105 +169,33 @@ async fn handle_post_keycheck<T: SignalDatabase>(
     */
 }
 
-#[derive(Clone)]
-pub struct ServerState {
-    pub db: Arc<Mutex<InMemorySignalDatabase>>,
-
-    pub pool: Pool<Postgres>,
-}
-
-impl ServerState {
-    async fn new() -> Result<ServerState> {
-        dotenv::dotenv().expect("Unable to load environment variables from .env file");
-        let db_url = std::env::var("DATABASE_URL").expect("Unable to read DATABASE_URL env var");
-
-        let pool = PgPoolOptions::new()
-            .max_connections(100)
-            .connect(&db_url)
-            .await
-            .expect("Unable to connect to Postgres");
-
-        Ok(ServerState {
-            db: Arc::new(Mutex::new(InMemorySignalDatabase::new())),
-            pool,
+fn parse_protocol_address(string: String) -> Result<ProtocolAddress, ApiError> {
+    let (user_id, dev_id) = string
+        .find(".")
+        .ok_or(ApiError {
+            message: "Could not parse address. Address did not contain '.'".to_owned(),
+            status_code: StatusCode::BAD_REQUEST,
         })
-    }
+        .map(|pos| string.split_at(pos))?;
+    let device_id: DeviceId = dev_id[1..]
+        .parse::<u32>()
+        .map_err(|e| ApiError {
+            message: format!("Could not parse device_id: {}.", e),
+            status_code: StatusCode::BAD_REQUEST,
+        })?
+        .into();
+
+    Ok(ProtocolAddress::new(
+        user_id.to_owned(),
+        DeviceId::from(device_id.clone()),
+    ))
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Msg {
-    message: String,
-}
-
-#[derive(Clone, Debug)]
-struct SignalServerState<T: SignalDatabase> {
-    db: T,
-}
-
-impl<T: SignalDatabase> SignalServerState<T> {
-    #[allow(dead_code)]
-    fn database(&self) -> T {
-        self.db.clone()
-    }
-}
-
-impl SignalServerState<InMemorySignalDatabase> {
-    async fn new() -> Self {
-        Self {
-            db: InMemorySignalDatabase::new(),
-        }
-    }
-}
-
-impl SignalServerState<PostgresDatabase> {
-    async fn new() -> Self {
-        Self {
-            db: PostgresDatabase::connect().await.unwrap(),
-        }
-    }
-}
-
-async fn handle_put_messages<T: SignalDatabase>(
-    state: SignalServerState<T>,
-    account: Account,
-    device: Device,
-    payload: Envelope,
-) -> impl IntoResponse {
-    println!("Received message");
-    if let Err(result) = state
-        .database()
-        .push_msg_queue(&device, &account, &payload)
-        .await
-    {
-        println!(
-            "An error occurred while trying to push message to database: {}",
-            result
-        )
-    }
-    Response::new("Message sent!".to_string())
-}
-
-async fn handle_get_messages<T: SignalDatabase>(
-    State(state): State<SignalServerState<InMemorySignalDatabase>>,
-    Path(address): Path<String>,
-    Json(payload): Json<Envelope>,
-) {
-}
-
-async fn handle_register_account<T: SignalDatabase>(
-    State(state): State<SignalServerState<T>>,
-    Path(address): Path<String>,
-    Json(payload): Json<UploadKeys>,
-) {
-    println!("Publish bundle");
-}
-
-async fn handle_put_registration<T: SignalDatabase>(
-    State(state): State<SignalServerState<T>>,
-    Path(address): Path<String>,
-    Json(options): Json<CreateAccountOptions>,
-) {
-    println!("Register client");
+fn parse_service_id(string: String) -> Result<ServiceId, ApiError> {
+    ServiceId::parse_from_service_id_string(&string).ok_or_else(|| ApiError {
+        message: format!("Could not parse service id"),
+        status_code: StatusCode::BAD_REQUEST,
+    })
 }
 
 /// Handler for the PUT v1/messages/{address} endpoint.
@@ -212,55 +205,16 @@ async fn put_messages_endpoint(
     Path(address): Path<String>,
     Json(payload): Json<Envelope>, // TODO: Multiple messages could be sent at one time
 ) -> Result<(), ApiError> {
-    let (user_id, dev_id) = address
-        .find(".")
-        .ok_or(ApiError {
-            message: "Could not parse address. Address did not contain '.'".to_owned(),
-            error_code: None,
-            status_code: StatusCode::BAD_REQUEST,
-        })
-        .map(|pos| address.split_at(pos))?;
-    let device_id: DeviceId = dev_id[1..]
-        .parse::<u32>()
-        .map_err(|e| ApiError {
-            message: format!("Could not parse device_id: {}.", e),
-            error_code: None,
-            status_code: StatusCode::BAD_REQUEST,
-        })?
-        .into();
-
-    let address = ProtocolAddress::new(user_id.to_owned(), DeviceId::from(device_id.clone()));
-    // TODO: This assumes that everyone uses ACI
-    let account = state
-        .database()
-        .get_account(Some(address.name().to_owned()), None)
-        .await
-        .map_err(|err| ApiError {
-            message: format!("Could not find the account '{}': {}.", address.name(), err),
-            error_code: None,
-            status_code: StatusCode::BAD_REQUEST,
-        })?;
-    let device = state
-        .database()
-        .get_device(&account, device_id)
-        .await
-        .map_err(|_| ApiError {
-            message: format!(
-                "Could not find device {} for the user {}",
-                device_id, user_id,
-            ),
-            error_code: None,
-            status_code: StatusCode::BAD_REQUEST,
-        })?;
-
-    handle_put_messages(state, account, device, payload).await;
+    let address = parse_protocol_address(address)?;
+    handle_put_messages(state, address, payload).await;
     Ok(())
 }
 
 /// Handler for the GET v1/messages endpoint.
 #[debug_handler]
 async fn get_messages_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
-    // TODO: Call `handle_get_messages`
+    let address = todo!("Find the protocol address from the authentication.");
+    handle_get_messages(state, address);
 }
 
 /// Handler for the PUT v1/registration endpoint.
@@ -326,7 +280,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/v1/messages", get(get_messages_endpoint))
         .route("/v1/messages/:destination", put(put_messages_endpoint))
-        .route("/v1/registration/", post(handle_register_account))
+        .route("/v1/registration/", post(put_registration_endpoint))
         .route("/v2/keys", get(get_keys_endpoint))
         .route("/v2/keys/check", post(post_keycheck_endpoint))
         .route("/v2/keys", put(put_keys_endpoint))
@@ -336,7 +290,9 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(state)
         .layer(cors);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:50051").await?;
+    let address = env::var("SERVER_ADDRESS")?;
+    let port = env::var("SERVER_PORT")?;
+    let listener = tokio::net::TcpListener::bind(format!("{}:{}", address, port)).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -351,9 +307,171 @@ mod server_tests {
     use sha2::{Digest, Sha256};
     use uuid::Uuid;
 
-    /*
+    fn create_bob() -> Account {
+        let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
+        Account {
+            aci: Some(Uuid::new_v4().to_string()),
+            pni: None,
+            auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
+                .to_owned(),
+            identity_key: id_key.identity_key().clone(),
+        }
+    }
+
+    fn create_alice() -> Account {
+        let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
+        Account {
+            aci: Some(Uuid::new_v4().to_string()),
+            pni: None,
+            auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
+                .to_owned(),
+            identity_key: id_key.identity_key().clone(),
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_put_messages_adds_message_to_queue() {
+        let state = SignalServerState::<InMemorySignalDatabase>::new().await;
+        let bob = create_bob();
+        let bob_device = Device {
+            device_id: 0,
+            name: "bob_device".to_owned(),
+            last_seen: 0,
+            created: 0,
+        };
+        let bob_address =
+            ProtocolAddress::new(bob.service_id().service_id_string(), bob_device.device_id());
+
+        let alice = create_alice();
+        let alice_device = Device {
+            device_id: 0,
+            name: "alice_device".to_owned(),
+            last_seen: 0,
+            created: 0,
+        };
+        let alice_address = ProtocolAddress::new(
+            alice.service_id().service_id_string(),
+            alice_device.device_id(),
+        );
+        state.database().add_account(bob.clone()).await;
+        state
+            .database()
+            .add_device(&bob.service_id(), bob_device.clone())
+            .await
+            .unwrap();
+        state.database().add_account(alice.clone()).await;
+        state
+            .database()
+            .add_device(&alice.service_id(), alice_device.clone())
+            .await
+            .unwrap();
+        let message = common::signal_protobuf::Envelope {
+            r#type: None,
+            source_service_id: None,
+            source_device: None,
+            client_timestamp: None,
+            content: None,
+            server_guid: None,
+            server_timestamp: None,
+            ephemeral: None,
+            destination_service_id: None,
+            urgent: None,
+            updated_pni: None,
+            story: None,
+            report_spam_token: None,
+            shared_mrm_key: None,
+        };
+        handle_put_messages(state.clone(), bob_address.clone(), message.clone()).await;
+
+        assert_eq!(
+            message,
+            state
+                .database()
+                .mail_queues
+                .lock()
+                .await
+                .get_mut(&bob_address)
+                .unwrap()
+                .pop_front()
+                .unwrap()
+        );
+    }
+
+    #[ignore = "Not implemented"]
+    #[tokio::test]
+    async fn handle_get_messages_pops_message_queue() {
+        todo!()
+    }
+
+    #[ignore = "Not implemented"]
+    #[tokio::test]
+    async fn handle_register_account_registers_account() {
+        todo!()
+    }
+
+    #[ignore = "Not implemented"]
+    #[tokio::test]
+    async fn handle_get_keys_gets_keys() {
+        todo!()
+        /*
+        let database = Arc::new(Mutex::new(InMemorySignalDatabase::new()));
+        let usr_id: UserID = 0u32;
+        let device_id: DeviceID = 0u32;
+
+        let mut database_lock = database.lock().await;
+        database_lock
+            .keys
+            .lock()
+            .await
+            .insert(usr_id, HashMap::new());
+        database_lock
+            .keys
+            .lock()
+            .await
+            .get_mut(&usr_id)
+            .unwrap()
+            .insert(device_id, HashMap::new());
+
+        let mut key_map = database_lock
+            .keys
+            .lock()
+            .await
+            .get_mut(&usr_id)
+            .unwrap()
+            .get_mut(&device_id)
+            .unwrap()
+            .clone();
+
+        let j = 10;
+        let mut i = 0;
+        while j > i {
+            key_map
+                .entry(PreKey::OneTime)
+                .or_insert_with(Vec::new)
+                .push(UploadSignedPreKey {
+                    key_id: 0,
+                    public_key: Box::new([0]),
+                    signature: Box::new([0]),
+                });
+            i = i + 1;
+        }
+
+        drop(database_lock);
+
+        assert_eq!(
+            get_onetime_prekey_count(database, usr_id, device_id)
+                .await
+                .unwrap(),
+            j
+        );
+         */
+    }
+
+    #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_post_keycheck_test() {
+        todo!()
+        /*
         let database = InMemorySignalDatabase::new();
         let usr_id: UserID = 0u32;
         let device_id: DeviceID = 0u32;
@@ -425,149 +543,30 @@ mod server_tests {
                 .unwrap()
         );
         assert_ne!(vec![0; 32].as_slice(), usr_digest);
-    }
-    */
-    // TODO: This should test GET keys endpoint.
-    /*#[tokio::test]
-    async fn get_keys_test() {
-        let database = Arc::new(Mutex::new(InMemorySignalDatabase::new()));
-        let usr_id: UserID = 0u32;
-        let device_id: DeviceID = 0u32;
-
-        let mut database_lock = database.lock().await;
-        database_lock
-            .keys
-            .lock()
-            .await
-            .insert(usr_id, HashMap::new());
-        database_lock
-            .keys
-            .lock()
-            .await
-            .get_mut(&usr_id)
-            .unwrap()
-            .insert(device_id, HashMap::new());
-
-        let mut key_map = database_lock
-            .keys
-            .lock()
-            .await
-            .get_mut(&usr_id)
-            .unwrap()
-            .get_mut(&device_id)
-            .unwrap()
-            .clone();
-
-        let j = 10;
-        let mut i = 0;
-        while j > i {
-            key_map
-                .entry(PreKey::OneTime)
-                .or_insert_with(Vec::new)
-                .push(UploadSignedPreKey {
-                    key_id: 0,
-                    public_key: Box::new([0]),
-                    signature: Box::new([0]),
-                });
-            i = i + 1;
-        }
-
-        drop(database_lock);
-
-        assert_eq!(
-            get_onetime_prekey_count(database, usr_id, device_id)
-                .await
-                .unwrap(),
-            j
-        );
-    }*/
-
-    fn create_bob() -> Account {
-        let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
-        Account {
-            aci: Some(Uuid::new_v4().to_string()),
-            pni: None,
-            auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
-                .to_owned(),
-            identity_key: id_key.identity_key().clone(),
-        }
+         */
     }
 
-    fn create_alice() -> Account {
-        let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
-        Account {
-            aci: Some(Uuid::new_v4().to_string()),
-            pni: None,
-            auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
-                .to_owned(),
-            identity_key: id_key.identity_key().clone(),
-        }
-    }
-
+    #[ignore = "Not implemented"]
     #[tokio::test]
-    async fn handle_put_messages_adds_message_to_queue() {
-        let state = SignalServerState::<InMemorySignalDatabase>::new().await;
-        let bob = create_bob();
-        let bob_device = Device {
-            device_id: 0,
-            name: "bob-device".to_owned(),
-            last_seen: 0,
-            created: 0,
-        };
-        let alice = create_alice();
-        let alice_device = Device {
-            device_id: 0,
-            name: "alice-device".to_owned(),
-            last_seen: 0,
-            created: 0,
-        };
-        state.database().add_account(bob.clone()).await;
-        state
-            .database()
-            .add_device(&bob, bob_device.clone())
-            .await
-            .unwrap();
-        state.database().add_account(alice.clone()).await;
-        state
-            .database()
-            .add_device(&alice, alice_device.clone())
-            .await
-            .unwrap();
-        let message = common::signal_protobuf::Envelope {
-            r#type: None,
-            source_service_id: None,
-            source_device: None,
-            client_timestamp: None,
-            content: None,
-            server_guid: None,
-            server_timestamp: None,
-            ephemeral: None,
-            destination_service_id: None,
-            urgent: None,
-            updated_pni: None,
-            story: None,
-            report_spam_token: None,
-            shared_mrm_key: None,
-        };
-        handle_put_messages(
-            state.clone(),
-            bob.clone(),
-            bob_device.clone(),
-            message.clone(),
-        )
-        .await;
+    async fn handle_() {
+        todo!()
+    }
 
-        assert_eq!(
-            message,
-            state
-                .database()
-                .mail_queues
-                .lock()
-                .await
-                .get_mut(&bob_device)
-                .unwrap()
-                .pop_front()
-                .unwrap()
-        );
+    #[ignore = "Not implemented"]
+    #[tokio::test]
+    async fn handle_delete_account_deletes_account() {
+        todo!()
+    }
+
+    #[ignore = "Not implemented"]
+    #[tokio::test]
+    async fn handle_post_link_device_registers_new_device() {
+        todo!()
+    }
+
+    #[ignore = "Not implemented"]
+    #[tokio::test]
+    async fn handle_delete_device_deletes_device() {
+        todo!()
     }
 }
