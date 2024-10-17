@@ -1,4 +1,4 @@
-use crate::{database::SignalDatabase, account::Account};
+use crate::{account::Account, database::SignalDatabase};
 use anyhow::{anyhow, bail, Result};
 use axum::{async_trait, extract};
 use common::{
@@ -51,7 +51,7 @@ impl SignalDatabase for PostgresDatabase {
 
     async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
         let (aci, pni) = parse_service_id(service_id);
-        
+
         sqlx::query!(
             r#"
             SELECT 
@@ -141,9 +141,13 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn push_msg_queue(&self, address: ProtocolAddress, msgs: Vec<&Envelope>) -> Result<()> {
-        for msg in msgs {
-            let data = bincode::serialize(msg)?;
+    async fn push_message_queue(
+        &self,
+        address: ProtocolAddress,
+        messages: Vec<Envelope>,
+    ) -> Result<()> {
+        for msg in messages {
+            let data = bincode::serialize(&msg)?;
             let (id_str, id) = pasrse_to_specific_service_id_from_protocol_address(&address)?;
 
             sqlx::query!(
@@ -392,10 +396,7 @@ impl SignalDatabase for PostgresDatabase {
         Ok(())
     }
 
-    async fn get_one_time_pre_key(
-        &self,
-        owner: ProtocolAddress,
-    ) -> Result<UploadSignedPreKey> {
+    async fn get_one_time_pre_key(&self, owner: ProtocolAddress) -> Result<UploadSignedPreKey> {
         let (id_str, id) = pasrse_to_specific_service_id_from_protocol_address(&owner)?;
 
         sqlx::query!(
@@ -437,7 +438,6 @@ impl SignalDatabase for PostgresDatabase {
     }
 }
 
-
 fn parse_service_id(service_id: &ServiceId) -> (Option<String>, Option<String>) {
     match service_id {
         ServiceId::Aci(_) => (Some(service_id.service_id_string()), None),
@@ -449,10 +449,16 @@ fn pasrse_to_specific_service_id(service_id: &ServiceId) -> (String, String) {
     match parse_service_id(service_id) {
         (None, Some(id)) => ("pni".into(), id),
         (Some(id), None) => ("aci".into(), id),
-        _ => panic!("NOT POSSINLBE!")
+        _ => panic!("NOT POSSINLBE!"),
     }
 }
 
-fn pasrse_to_specific_service_id_from_protocol_address(protocol_address: &ProtocolAddress) -> Result<(String, String)> {
-    Ok(pasrse_to_specific_service_id(&ServiceId::parse_from_service_id_string(protocol_address.name()).ok_or(anyhow!("Could not parse protocal address name to service id"))?))
+fn pasrse_to_specific_service_id_from_protocol_address(
+    protocol_address: &ProtocolAddress,
+) -> Result<(String, String)> {
+    Ok(pasrse_to_specific_service_id(
+        &ServiceId::parse_from_service_id_string(protocol_address.name()).ok_or(anyhow!(
+            "Could not parse protocal address name to service id"
+        ))?,
+    ))
 }

@@ -12,7 +12,7 @@ use axum::routing::{delete, get, post, put};
 use axum::{async_trait, debug_handler, Json, Router};
 use common::pre_key::PreKey;
 use common::signal_protobuf::Envelope;
-use common::web_api::{Account, CreateAccountOptions, Device, UploadKeys, UploadSignedPreKey};
+use common::web_api::{CreateAccountOptions, Device, UploadKeys, UploadSignedPreKey};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use libsignal_protocol::{kem, PreKeyBundleContent, PublicKey};
 use serde::{Deserialize, Serialize};
@@ -89,9 +89,13 @@ async fn handle_put_messages<T: SignalDatabase>(
     payload: Envelope,
 ) -> Result<(), ApiError> {
     println!("Received message");
-    if let Err(result) = state.database().push_msg_queue(address, &payload).await {
+    if let Err(result) = state
+        .database()
+        .push_message_queue(address, vec![payload])
+        .await
+    {
         Err(ApiError {
-            message: format!("Could not push the message to message queue."),
+            message: "Could not push the message to message queue.".to_owned(),
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
         })
     } else {
@@ -185,15 +189,12 @@ fn parse_protocol_address(string: String) -> Result<ProtocolAddress, ApiError> {
         })?
         .into();
 
-    Ok(ProtocolAddress::new(
-        user_id.to_owned(),
-        DeviceId::from(device_id.clone()),
-    ))
+    Ok(ProtocolAddress::new(user_id.to_owned(), device_id))
 }
 
 fn parse_service_id(string: String) -> Result<ServiceId, ApiError> {
     ServiceId::parse_from_service_id_string(&string).ok_or_else(|| ApiError {
-        message: format!("Could not parse service id"),
+        message: "Could not parse service id".to_owned(),
         status_code: StatusCode::BAD_REQUEST,
     })
 }
@@ -301,6 +302,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 mod server_tests {
     use super::*;
     use super::{handle_put_messages, SignalServerState};
+    use crate::account::Account;
     use crate::database::SignalDatabase;
     use libsignal_protocol::*;
     use rand::rngs::OsRng;
@@ -354,17 +356,7 @@ mod server_tests {
             alice_device.device_id(),
         );
         state.database().add_account(bob.clone()).await;
-        state
-            .database()
-            .add_device(&bob.service_id(), bob_device.clone())
-            .await
-            .unwrap();
-        state.database().add_account(alice.clone()).await;
-        state
-            .database()
-            .add_device(&alice.service_id(), alice_device.clone())
-            .await
-            .unwrap();
+
         let message = common::signal_protobuf::Envelope {
             r#type: None,
             source_service_id: None,
