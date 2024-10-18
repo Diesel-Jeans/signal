@@ -8,6 +8,8 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 
+use crate::pre_key;
+
 /// All information required to create an account.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -291,6 +293,13 @@ pub struct UploadSignedPreKey {
     pub signature: Box<[u8]>,  // TODO: Make this a PublicKey and implement Serialize
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadPreKey {
+    pub key_id: u32,
+    pub public_key: Box<[u8]>,
+}
+
 /// Used to upload a new prekeys.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -325,21 +334,54 @@ impl UploadKeys {
 pub struct DevicePreKeyBundle {
     pub aci_signed_pre_key: UploadSignedPreKey,
     pub pni_signed_pre_key: UploadSignedPreKey,
-    pub aci_pq_last_resort_pre_key: UploadSignedPreKey,
-    pub pni_pq_last_resort_pre_key: UploadSignedPreKey,
+    pub aci_pq_pre_key: UploadSignedPreKey,
+    pub pni_pq_pre_key: UploadSignedPreKey,
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Device {
-    pub device_id: u32,
-    pub name: String,
-    pub last_seen: u32,
-    pub created: u32,
+pub struct SetKeyRequest {
+    pub pre_key: Option<UploadPreKey>,
+    pub signed_pre_key: Option<UploadSignedPreKey>,
+    pub pq_pre_key: Option<UploadSignedPreKey>,
 }
 
-impl Device {
-    pub fn device_id(&self) -> DeviceId {
-        self.device_id.into()
+#[derive(Debug)]
+pub struct PreKeyResponse {
+    identity_key: IdentityKey,
+    keys: Vec<PreKeyResponseItem>,
+}
+
+impl PreKeyResponse {
+    pub fn new(identity_key: IdentityKey, keys: Vec<PreKeyResponseItem>) -> Self {
+        Self { identity_key, keys }
+    }
+}
+
+#[derive(Debug)]
+pub struct PreKeyResponseItem {
+    device_id: DeviceId, // Make a version which is serializable, then implement serde on the
+    // object
+    registration_id: u32,
+    pre_key: UploadPreKey,
+    pq_pre_key: UploadSignedPreKey,
+    signed_pre_key: UploadSignedPreKey,
+}
+
+impl PreKeyResponseItem {
+    pub fn new(
+        device_id: DeviceId,
+        registration_id: u32,
+        pre_key: UploadPreKey,
+        pq_pre_key: UploadSignedPreKey,
+        signed_pre_key: UploadSignedPreKey,
+    ) -> Self {
+        Self {
+            device_id,
+            registration_id,
+            pre_key,
+            pq_pre_key,
+            signed_pre_key,
+        }
     }
 }

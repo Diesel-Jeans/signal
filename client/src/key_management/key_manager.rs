@@ -67,20 +67,13 @@ impl KeyManager {
 
                 Ok((KeyType::KeyPair(signed_pre_key_pair), Some(signature)))
             }
-            PreKeyType::OneTime => {
-                let onetime_pre_key_pair = KeyPair::generate(&mut rng);
+            PreKeyType::OneTime | PreKeyType::Identity => {
+                let pre_key_pair = KeyPair::generate(&mut rng);
 
-                self.store_ec_key(store, &key_type, &onetime_pre_key_pair, None)
+                self.store_ec_key(store, &key_type, &pre_key_pair, None)
                     .await?;
 
-                Ok((KeyType::KeyPair(onetime_pre_key_pair), None))
-            }
-            PreKeyType::Identity => {
-                let identity_key = KeyPair::generate(&mut rng);
-
-                self.store_ec_key(store, &key_type, &identity_key, None);
-
-                Ok((KeyType::KeyPair(identity_key), None))
+                Ok((KeyType::KeyPair(pre_key_pair), None))
             }
         }
     }
