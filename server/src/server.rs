@@ -138,8 +138,7 @@ async fn redirect_http_to_https(addr: SocketAddr, http: u16, https: u16) -> Resu
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
-    axum::serve(listener, redirect.into_make_service())
-        .await?;
+    axum::serve(listener, redirect.into_make_service()).await?;
     Ok(())
 }
 
@@ -304,11 +303,12 @@ async fn create_websocket_endpoint(
     ws.on_upgrade(move |socket| {
         let mut socket_manager = state.socket_manager.clone();
         async move {
-            socket_manager.handle_socket(/*authenticated_device,*/ socket, addr).await;
+            socket_manager
+                .handle_socket(/*authenticated_device,*/ socket, addr)
+                .await;
         }
     })
 }
-
 
 /// To add a new endpoint:
 ///  * create an async router function: `<method>_<endpoint_name>_endpoint`.

@@ -57,11 +57,7 @@ impl SocketManager {
     }
 
     // only use this
-    async fn ws_send(
-        &self,
-        who: &SocketAddr,
-        message: Message,
-    ) -> Option<Result<(), axum::Error>> {
+    async fn ws_send(&self, who: &SocketAddr, message: Message) -> Option<Result<(), axum::Error>> {
         match self.get_ws(who).await {
             Some(x) => Some(x.lock().await.send(message).await),
             None => None,
@@ -77,7 +73,7 @@ impl SocketManager {
         /* authenticated_device should be put into the socket_manager,
         we should probably have a representation like in the real server */
         self.add_ws(who, socket).await;
-    
+
         while let Some(msg_res) = self.ws_recv(&who).await {
             let msg = match msg_res {
                 Ok(x) => x,
@@ -86,7 +82,7 @@ impl SocketManager {
                     continue;
                 }
             };
-    
+
             match msg {
                 Message::Binary(b) => self.on_ws_binary(who, b).await,
                 Message::Text(t) => self.on_ws_text(who, t).await,
