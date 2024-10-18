@@ -126,7 +126,7 @@ mod test {
         let _ = cm.add_contact(&charlie);
 
         match cm.get_contact(&charlie) {
-            Ok(c) => assert!(c.uuid == charlie && c.devices.len() == 0),
+            Ok(c) => assert!(c.uuid == charlie && c.devices.is_empty()),
             Err(x) => assert!(false, "{}", x),
         };
     }

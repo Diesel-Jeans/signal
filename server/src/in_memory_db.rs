@@ -2,7 +2,7 @@ use crate::account::Account;
 use crate::database::SignalDatabase;
 use anyhow::{anyhow, Result};
 use axum::async_trait;
-use common::pre_key::PreKey;
+use common::pre_key::PreKeyType;
 use common::signal_protobuf::Envelope;
 use common::web_api::{Device, DevicePreKeyBundle, UploadSignedPreKey};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
@@ -14,8 +14,9 @@ use tokio::sync::Mutex;
 pub struct InMemorySignalDatabase {
     pub mail_queues: Arc<Mutex<HashMap<ProtocolAddress, VecDeque<Envelope>>>>,
     pub devices: Arc<Mutex<HashMap<ServiceId, Vec<Device>>>>,
-    pub keys:
-        Arc<Mutex<HashMap<ServiceId, HashMap<DeviceId, HashMap<PreKey, Vec<UploadSignedPreKey>>>>>>,
+    pub keys: Arc<
+        Mutex<HashMap<ServiceId, HashMap<DeviceId, HashMap<PreKeyType, Vec<UploadSignedPreKey>>>>>,
+    >,
     pub accounts: Arc<Mutex<HashMap<ServiceId, Account>>>,
 }
 /*
@@ -100,9 +101,9 @@ impl SignalDatabase for InMemorySignalDatabase {
         self.accounts
             .lock()
             .await
-            .get(&service_id)
+            .get(service_id)
             .ok_or_else(|| anyhow!("No user exists with ID"))
-            .map(Clone::clone)
+            .cloned()
     }
     async fn update_account_aci(&self, service_id: &ServiceId, new_aci: Aci) -> Result<()> {
         todo!()
