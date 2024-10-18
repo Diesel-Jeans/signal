@@ -26,7 +26,7 @@ impl KeyManager {
     }
 
     fn get_new_key_id(&mut self, key_type: &PreKey) -> u32 {
-        let id = self.key_incrementer_map.get(key_type).unwrap().clone();
+        let id = *self.key_incrementer_map.get(key_type).unwrap();
         *self.key_incrementer_map.get_mut(key_type).unwrap() += 1u32;
         id
     }
@@ -54,7 +54,7 @@ impl KeyManager {
             PreKey::Kyber => {
                 let kyper_pre_key_pair = kem::KeyPair::generate(kem::KeyType::Kyber1024);
                 let signature = self
-                    .compute_signature(&mut rng, &store, kyper_pre_key_pair.public_key.serialize())
+                    .compute_signature(&mut rng, store, kyper_pre_key_pair.public_key.serialize())
                     .await?;
                 let id = self.get_new_key_id(&key_type);
 
@@ -81,7 +81,7 @@ impl KeyManager {
             PreKey::Signed => {
                 let signed_pre_key_pair = KeyPair::generate(&mut rng);
                 let signature = self
-                    .compute_signature(&mut rng, &store, signed_pre_key_pair.public_key.serialize())
+                    .compute_signature(&mut rng, store, signed_pre_key_pair.public_key.serialize())
                     .await?;
                 let id = self.get_new_key_id(&key_type);
 

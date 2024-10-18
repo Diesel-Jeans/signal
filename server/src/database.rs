@@ -42,12 +42,12 @@ pub trait SignalDatabase: Clone {
     async fn store_key_bundle(
         &self,
         data: DevicePreKeyBundle,
-        address: ProtocolAddress,
+        address: &ProtocolAddress,
     ) -> Result<()>;
 
     /// Get the keys that are needed to start a conversation with the device that
     /// corrosponds to the given [ProtocolAddress].
-    async fn get_key_bundle(&self, address: ProtocolAddress) -> Result<DevicePreKeyBundle>;
+    async fn get_key_bundle(&self, address: &ProtocolAddress) -> Result<DevicePreKeyBundle>;
 
     /// Get how many keys are left until a last resort key is used instead of
     /// a one time prekey. More keys should be uploaded when this value is below
@@ -63,5 +63,5 @@ pub trait SignalDatabase: Clone {
 
     /// Get a one time prekey so that you can start a conversation with the
     /// device that is associated with the given [ProtocolAddress].
-    async fn get_one_time_pre_key(&self, owner: ProtocolAddress) -> Result<UploadSignedPreKey>;
+    async fn get_one_time_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadSignedPreKey>;
 }

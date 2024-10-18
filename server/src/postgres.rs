@@ -209,9 +209,9 @@ impl SignalDatabase for PostgresDatabase {
     async fn store_key_bundle(
         &self,
         data: DevicePreKeyBundle,
-        address: ProtocolAddress,
+        address: &ProtocolAddress,
     ) -> Result<()> {
-        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(address)?;
         let mut tx = self.pool.begin().await?;
 
         sqlx::query!(
@@ -294,8 +294,8 @@ impl SignalDatabase for PostgresDatabase {
         tx.commit().await.map(|_| ()).map_err(|err| err.into())
     }
 
-    async fn get_key_bundle(&self, address: ProtocolAddress) -> Result<DevicePreKeyBundle> {
-        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
+    async fn get_key_bundle(&self, address: &ProtocolAddress) -> Result<DevicePreKeyBundle> {
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(address)?;
 
         sqlx::query!(
         r#"
@@ -395,8 +395,8 @@ impl SignalDatabase for PostgresDatabase {
         Ok(())
     }
 
-    async fn get_one_time_pre_key(&self, owner: ProtocolAddress) -> Result<UploadSignedPreKey> {
-        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&owner)?;
+    async fn get_one_time_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadSignedPreKey> {
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(owner)?;
 
         sqlx::query!(
             r#"
