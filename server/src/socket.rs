@@ -1,35 +1,38 @@
-use tokio::sync::{Mutex, RwLock};
-use std::{collections::HashMap, sync::Arc};
+use axum::extract::ws::{Message, WebSocket};
 use std::net::SocketAddr;
-use axum::extract::ws::{WebSocket, Message};
-
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::{Mutex, RwLock};
 
 type SocketMap = Arc<RwLock<HashMap<SocketAddr, Arc<Mutex<WebSocket>>>>>;
 
 #[derive(Clone, Debug)]
 pub struct SocketManager {
-    sockets: SocketMap
+    sockets: SocketMap,
 }
 
 /*
-All ws should happen here, take in other managers or classes 
-if you need to do something on ws binary or text 
+All ws should happen here, take in other managers or classes
+if you need to do something on ws binary or text
 */
 
 impl SocketManager {
-    pub fn new() -> Self{
+    pub fn new() -> Self {
         Self {
-            sockets: Arc::new(RwLock::new(HashMap::new()))
+            sockets: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub async fn on_ws_binary(&mut self, who: SocketAddr, bytes: Vec<u8>){
+    pub async fn on_ws_binary(&mut self, who: SocketAddr, bytes: Vec<u8>) {
         println!("BINARY: {}", String::from_utf8(bytes).unwrap());
     }
 
-    pub async fn on_ws_text(&mut self, who: SocketAddr, text: String){
+    pub async fn on_ws_text(&mut self, who: SocketAddr, text: String) {
         println!("TEXT: {}", text);
-        self.ws_send(&who, Message::Binary(format!("hello {}", who).as_bytes().to_vec())).await;
+        self.ws_send(
+            &who,
+            Message::Binary(format!("hello {}", who).as_bytes().to_vec()),
+        )
+        .await;
     }
 
     pub async fn add_ws(&self, who: SocketAddr, socket: WebSocket) {
@@ -46,18 +49,22 @@ impl SocketManager {
     }
 
     // do not use this, unless is socket_handler
-    pub async fn ws_recv(&self, who: &SocketAddr) -> Option<Result<Message, axum::Error>>{
+    pub async fn ws_recv(&self, who: &SocketAddr) -> Option<Result<Message, axum::Error>> {
         match self.get_ws(who).await {
             Some(x) => x.lock().await.recv().await,
-            None => None
+            None => None,
         }
     }
 
     // only use this
-    pub async fn ws_send(&self, who: &SocketAddr, message: Message) -> Option<Result<(), axum::Error>>{
+    pub async fn ws_send(
+        &self,
+        who: &SocketAddr,
+        message: Message,
+    ) -> Option<Result<(), axum::Error>> {
         match self.get_ws(who).await {
             Some(x) => Some(x.lock().await.send(message).await),
-            None => None
+            None => None,
         }
     }
 }

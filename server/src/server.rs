@@ -3,13 +3,13 @@ use crate::database::SignalDatabase;
 use crate::in_memory_db::InMemorySignalDatabase;
 use crate::postgres::PostgresDatabase;
 use anyhow::Result;
-use axum::extract::{Path, State, Host, connect_info::ConnectInfo};
+use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
+use axum::handler::HandlerWithoutStateExt;
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
 use axum::http::{Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::handler::HandlerWithoutStateExt;
+use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
-use axum::routing::{delete, get, post, put, any};
 use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
 use common::web_api::CreateAccountOptions;
@@ -20,9 +20,9 @@ use std::fmt::format;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
 
-use axum_server::tls_rustls::RustlsConfig;
-use axum_extra::{headers, TypedHeader};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum_extra::{headers, TypedHeader};
+use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
@@ -53,7 +53,7 @@ impl PublicKeyType {
 #[derive(Clone, Debug)]
 struct SignalServerState<T: SignalDatabase> {
     db: T,
-    socket_manager: SocketManager
+    socket_manager: SocketManager,
 }
 
 impl<T: SignalDatabase> SignalServerState<T> {
@@ -67,7 +67,7 @@ impl SignalServerState<InMemorySignalDatabase> {
     async fn new() -> Self {
         Self {
             db: InMemorySignalDatabase::new(),
-            socket_manager: SocketManager::new()
+            socket_manager: SocketManager::new(),
         }
     }
 }
@@ -76,7 +76,7 @@ impl SignalServerState<PostgresDatabase> {
     async fn new() -> Self {
         Self {
             db: PostgresDatabase::connect().await.unwrap(),
-            socket_manager: SocketManager::new()
+            socket_manager: SocketManager::new(),
         }
     }
 }
@@ -112,7 +112,6 @@ async fn handle_put_registration<T: SignalDatabase>(
     println!("Register client");
 }
 
-
 // redirect from http to https
 async fn redirect_http_to_https(addr: SocketAddr, http: u16, https: u16) {
     fn make_https(host: String, uri: Uri, http: u16, https: u16) -> Result<Uri, BoxError> {
@@ -133,9 +132,7 @@ async fn redirect_http_to_https(addr: SocketAddr, http: u16, https: u16) {
     let redirect = move |Host(host): Host, uri: Uri| async move {
         match make_https(host, uri, http, https) {
             Ok(uri) => Ok(Redirect::permanent(&uri.to_string())),
-            Err(_) => {
-                Err(StatusCode::BAD_REQUEST)
-            }
+            Err(_) => Err(StatusCode::BAD_REQUEST),
         }
     };
 
@@ -145,7 +142,6 @@ async fn redirect_http_to_https(addr: SocketAddr, http: u16, https: u16) {
         .await
         .unwrap();
 }
-
 
 // The Signal endpoint /v2/keys/check says that a u64 id is needed, however their ids, such as
 // KyperPreKeyID only supports u32. Here only a u32 is used and therefore only a 4 byte size
@@ -297,8 +293,8 @@ async fn create_websocket_endpoint(
     /*authenticated_device: ???, */
     ws: WebSocketUpgrade,
     user_agent: Option<TypedHeader<headers::UserAgent>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>
-) -> impl IntoResponse{
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> impl IntoResponse {
     let user_agent = if let Some(TypedHeader(user_agent)) = user_agent {
         user_agent.to_string()
     } else {
@@ -309,11 +305,12 @@ async fn create_websocket_endpoint(
 }
 // helper func for create_websocket_endpoint
 async fn handle_socket(
-    mut state: SignalServerState<PostgresDatabase>, 
+    mut state: SignalServerState<PostgresDatabase>,
     /*authenticated_device: ???, */
-    mut socket: WebSocket, 
-    who: SocketAddr) {
-    /* authenticated_device should be put into the socket_manager, 
+    mut socket: WebSocket,
+    who: SocketAddr,
+) {
+    /* authenticated_device should be put into the socket_manager,
     we should probably have a representation like in the real server */
     state.socket_manager.add_ws(who, socket).await;
 
@@ -322,7 +319,7 @@ async fn handle_socket(
             Ok(x) => x,
             Err(y) => {
                 println!("handle_socket ERROR: {}", y);
-                continue
+                continue;
             }
         };
 
@@ -345,10 +342,10 @@ async fn handle_socket(
 ///  * add the router function to the axum router below.
 ///  * call the handler function from the router function to handle the request.
 pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
-    rustls::crypto::ring::default_provider().install_default()
+    rustls::crypto::ring::default_provider()
+        .install_default()
         .expect("Failed to install rustls crypto provider");
-    let config = RustlsConfig::from_pem_file("cert/server.crt", "cert/server.key")
-        .await?;
+    let config = RustlsConfig::from_pem_file("cert/server.crt", "cert/server.key").await?;
 
     let cors = CorsLayer::new()
         .allow_methods([
@@ -362,12 +359,10 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
 
-
     let state = SignalServerState::<PostgresDatabase>::new().await;
 
-
     let app = Router::new()
-        .route("/", get(|| async {"Hello from Signal Server"}))
+        .route("/", get(|| async { "Hello from Signal Server" }))
         .route("/v1/messages", get(get_messages_endpoint))
         .route("/v1/messages/:destination", put(put_messages_endpoint))
         .route("/v1/registration/", post(put_registration_endpoint))
@@ -389,7 +384,11 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let https_addr = SocketAddr::from_str(format!("{}:{}", address, https_port).as_str())?;
 
     // we should probably sometime in future a proxy or something to redirect instead
-    tokio::spawn(redirect_http_to_https(http_addr, http_port.parse()?, https_port.parse()?));
+    tokio::spawn(redirect_http_to_https(
+        http_addr,
+        http_port.parse()?,
+        https_port.parse()?,
+    ));
 
     axum_server::bind_rustls(https_addr, config)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
