@@ -69,28 +69,40 @@ impl KeyManager {
         }
 
         let mut keys = Vec::new();
+        let mut last_service_id = None;
         for (address, registration_id) in address_and_registration_ids {
+            let service_id =
+                ServiceId::parse_from_service_id_string(address.name()).ok_or_else(|| {
+                    ApiError {
+                        status_code: StatusCode::BAD_REQUEST,
+                        message: format!("Invalid name in protocol address: {}", address.name()),
+                    }
+                })?;
             keys.push(
                 get_key(
                     database,
-                    service_id,
+                    &service_id,
                     address.device_id(),
                     registration_id,
                     address,
                 )
                 .await?,
-            )
+            );
+            last_service_id = Some(service_id);
         }
 
         let account = database
-            .get_account(service_id)
+            .get_account(&last_service_id.ok_or_else(|| ApiError {
+                status_code: StatusCode::BAD_REQUEST,
+                message: "You must request atleast one device".into(),
+            })?)
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
                 message: "Could not fetch user account".into(),
             })?;
 
-        let identity_key = match service_id {
+        let identity_key = match last_service_id.unwrap() {
             ServiceId::Aci(_) => account.aci_identity_key(),
             ServiceId::Pni(_) => account.pni_identity_key(),
         };
@@ -104,13 +116,16 @@ impl KeyManager {
     pub async fn handle_post_keycheck<S: SignalDatabase>(
         &self,
         database: &S,
-        service_id: &ServiceId,
-        address: ProtocolAddress,
+        address: ProtocolAddress, // Should instead take an Authenticated Device when implemented
         usr_digest: [u8; 32],
     ) -> Result<bool, ApiError> {
-        let mut digest = Sha256::new();
+        let service_id =
+            ServiceId::parse_from_service_id_string(address.name()).ok_or_else(|| ApiError {
+                status_code: todo!(),
+                message: format!("Bad protocol address: {}", address),
+            })?;
         let account = database
-            .get_account(service_id)
+            .get_account(&service_id)
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
@@ -124,6 +139,7 @@ impl KeyManager {
                 message: "Could not fetch user key bundle".into(),
             })?;
 
+        let mut digest = Sha256::new();
         match service_id {
             ServiceId::Aci(_) => {
                 digest.update(

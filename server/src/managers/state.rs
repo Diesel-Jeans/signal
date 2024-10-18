@@ -167,7 +167,7 @@ impl<T: SignalDatabase> SignalServerState<T> {
         usr_digest: [u8; 32],
     ) -> Result<bool, ApiError> {
         self.key_manager
-            .handle_post_keycheck(&self.db, service_id, address, usr_digest)
+            .handle_post_keycheck(&self.db, address, usr_digest)
             .await
     }
 

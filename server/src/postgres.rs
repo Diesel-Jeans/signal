@@ -548,7 +548,7 @@ impl SignalDatabase for PostgresDatabase {
                 owner.device_id().to_string(),
                 otpk.key_id.to_string(),
                 &*otpk.public_key,
-                &*otpk.signature
+                &*otpk.signature,
             )
             .execute(&self.pool)
             .await
