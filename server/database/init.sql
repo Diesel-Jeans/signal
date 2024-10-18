@@ -65,7 +65,6 @@ CREATE TABLE one_time_pre_key_store (
     owner     INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
     key_id      TEXT NOT NULL,
     public_key  bytea NOT NULL,
-    signature   bytea NOT NULL,
     UNIQUE(owner, key_id)
 );
 
