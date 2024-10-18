@@ -388,7 +388,7 @@ mod server_tests {
             pni: None,
             auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
                 .to_owned(),
-            identity_key: id_key.identity_key().clone(),
+            identity_key: *id_key.identity_key(),
         }
     }
 
@@ -399,7 +399,7 @@ mod server_tests {
             pni: None,
             auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
                 .to_owned(),
-            identity_key: id_key.identity_key().clone(),
+            identity_key: *id_key.identity_key(),
         }
     }
 

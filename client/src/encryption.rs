@@ -125,11 +125,11 @@ pub(crate) mod test {
             .get(&0)
             .unwrap();
 
-        let bob_msg = decrypt(&mut bob_store, &mut rng, alice_device, &to_bob_msg)
+        let bob_msg = decrypt(&mut bob_store, &mut rng, alice_device, to_bob_msg)
             .await
             .unwrap();
 
-        assert!(String::from_utf8(bob_msg).unwrap() == "Hello Bob".to_string())
+        assert!(String::from_utf8(bob_msg).unwrap() == *"Hello Bob")
     }
 
     pub async fn create_pre_key_bundle<R: Rng + CryptoRng>(
