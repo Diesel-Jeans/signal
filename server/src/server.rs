@@ -301,40 +301,14 @@ async fn create_websocket_endpoint(
         String::from("Unknown browser")
     };
     println!("`{user_agent}` at {addr} connected.");
-    ws.on_upgrade(move |socket| handle_socket(state, /*authenticated_device,*/ socket, addr))
-}
-// helper func for create_websocket_endpoint
-async fn handle_socket(
-    mut state: SignalServerState<PostgresDatabase>,
-    /*authenticated_device: ???, */
-    mut socket: WebSocket,
-    who: SocketAddr,
-) {
-    /* authenticated_device should be put into the socket_manager,
-    we should probably have a representation like in the real server */
-    state.socket_manager.add_ws(who, socket).await;
-
-    while let Some(msg_res) = state.socket_manager.ws_recv(&who).await {
-        let msg = match msg_res {
-            Ok(x) => x,
-            Err(y) => {
-                println!("handle_socket ERROR: {}", y);
-                continue;
-            }
-        };
-
-        match msg {
-            Message::Binary(b) => state.socket_manager.on_ws_binary(who, b).await,
-            Message::Text(t) => state.socket_manager.on_ws_text(who, t).await,
-            Message::Close(_) => {
-                println!("handle_socket: '{}' disconnected", who);
-                state.socket_manager.remove_ws(&who).await;
-                break;
-            }
-            _ => {}
+    ws.on_upgrade(move |socket| {
+        let mut socket_manager = state.socket_manager.clone();
+        async move {
+            socket_manager.handle_socket(/*authenticated_device,*/ socket, addr).await;
         }
-    }
+    })
 }
+
 
 /// To add a new endpoint:
 ///  * create an async router function: `<method>_<endpoint_name>_endpoint`.
