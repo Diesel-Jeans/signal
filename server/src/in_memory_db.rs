@@ -134,11 +134,11 @@ impl SignalDatabase for InMemorySignalDatabase {
     async fn store_key_bundle(
         &self,
         data: DevicePreKeyBundle,
-        owner_address: ProtocolAddress,
+        owner_address: &ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
-    async fn get_key_bundle(&self, address: ProtocolAddress) -> Result<DevicePreKeyBundle> {
+    async fn get_key_bundle(&self, address: &ProtocolAddress) -> Result<DevicePreKeyBundle> {
         todo!()
     }
 
@@ -165,7 +165,7 @@ impl SignalDatabase for InMemorySignalDatabase {
 
     async fn get_one_time_pre_key(
         &self,
-        owner_address: ProtocolAddress,
+        owner_address: &ProtocolAddress,
     ) -> Result<UploadSignedPreKey> {
         todo!()
     }

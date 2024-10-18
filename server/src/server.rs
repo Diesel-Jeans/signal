@@ -9,34 +9,13 @@ use axum::http::{Method, StatusCode};
 use axum::routing::{delete, get, post, put};
 use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
-use common::web_api::CreateAccountOptions;
+use common::web_api::{CreateAccountOptions, DevicePreKeyBundle, UploadKeys};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use libsignal_protocol::{kem, PublicKey};
+use sha2::{Digest, Sha256};
 use std::env;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
-
-enum PublicKeyType {
-    Kem(kem::PublicKey),
-    Ec(PublicKey),
-}
-
-impl PublicKeyType {
-    fn expect_kem(self) -> kem::PublicKey {
-        if let PublicKeyType::Kem(key) = self {
-            key
-        } else {
-            panic!("dev_err: expected a kem key, got an ec key")
-        }
-    }
-    fn expect_ec(self) -> PublicKey {
-        if let PublicKeyType::Ec(key) = self {
-            key
-        } else {
-            panic!("dev_err: expected an ec key, got a kem key")
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 struct SignalServerState<T: SignalDatabase> {
@@ -97,59 +76,77 @@ async fn handle_put_registration<T: SignalDatabase>(
     println!("Register client");
 }
 
+async fn handle_put_keys<T: SignalDatabase>(
+    database: T,
+    address: &ProtocolAddress,
+    bundle: DevicePreKeyBundle,
+) -> Result<()> {
+    todo!();
+    database.store_key_bundle(bundle, address);
+}
+
+async fn handle_get_keys<T: SignalDatabase>(
+    database: T,
+    service_id: &ServiceId,
+    address: ProtocolAddress,
+    is_aci: bool,
+) -> Result<UploadKeys> {
+    let account = database.get_account(service_id);
+    let prekey = database.get_one_time_pre_key(&address);
+    let bundle = database.get_key_bundle(&address).await?;
+    let (pq_last_resort_pre_key, signed_pre_key) = if is_aci {
+        (bundle.aci_pq_last_resort_pre_key, bundle.aci_signed_pre_key)
+    } else {
+        (bundle.pni_pq_last_resort_pre_key, bundle.pni_signed_pre_key)
+    };
+
+    Ok(UploadKeys::new(
+        account.await?.identity_key.public_key().serialize(),
+        Some(prekey.await?),
+        None,
+        Some(pq_last_resort_pre_key),
+        Some(signed_pre_key),
+    ))
+}
+
 // The Signal endpoint /v2/keys/check says that a u64 id is needed, however their ids, such as
 // KyperPreKeyID only supports u32. Here only a u32 is used and therefore only a 4 byte size
 // instead of the sugested u64.
 async fn handle_post_keycheck<T: SignalDatabase>(
     database: T,
-    usr_id: ServiceId,
-    device_id: DeviceId,
+    service_id: &ServiceId,
+    address: ProtocolAddress,
     usr_digest: [u8; 32],
+    is_aci: bool,
 ) -> Result<bool> {
-    todo!()
-    /*
-    if let Some(keys) = database
-        .lock()
-        .await
-        .keys
-        .lock()
-        .await
-        .get(&usr_id)
-        .and_then(|usr_map| usr_map.get(&device_id))
-    {
-        fn get_pre_key<'a>(
-            key_type: &PreKey,
-            table: &'a HashMap<PreKey, Vec<UploadSignedPreKey>>,
-        ) -> Result<&'a UploadSignedPreKey> {
-            if let Some(key) = table.get(key_type) {
-                if key.len() <= 1 {
-                    Ok(&key[0])
-                } else {
-                    bail!("There are too many keys of type: {:?}.", key_type)
-                }
-            } else {
-                bail!("There is no {:?} key for user", key_type)
-            }
-        }
+    let account = database.get_account(service_id);
+    let bundle = database.get_key_bundle(&address);
+    let mut digest = Sha256::new();
 
-        let identity_key_upload = get_pre_key(&PreKey::Identity, keys)?;
-        let signed_key_upload = get_pre_key(&PreKey::Signed, keys)?;
-        let kyper_key_update = get_pre_key(&PreKey::Kyber, keys)?;
+    digest.update(
+        account
+            .await?
+            .identity_key
+            .public_key()
+            .public_key_bytes()?,
+    );
 
-        let mut digest = Sha256::new();
-        digest.update(&identity_key_upload.public_key);
-        digest.update(&signed_key_upload.key_id.to_be_bytes());
-        digest.update(signed_key_upload.public_key.to_owned());
-        digest.update(&kyper_key_update.key_id.to_be_bytes());
-        digest.update(kyper_key_update.public_key.to_owned());
-
-        let server_digest: [u8; 32] = digest.finalize().into();
-
-        Ok(server_digest == usr_digest)
+    let bundle = bundle.await?;
+    if is_aci {
+        digest.update(&bundle.aci_signed_pre_key.key_id.to_be_bytes());
+        digest.update(bundle.aci_signed_pre_key.public_key.to_owned());
+        digest.update(&bundle.aci_pq_last_resort_pre_key.key_id.to_be_bytes());
+        digest.update(bundle.aci_pq_last_resort_pre_key.public_key.to_owned());
     } else {
-        bail!("Client has no keys")
+        digest.update(&bundle.pni_signed_pre_key.key_id.to_be_bytes());
+        digest.update(bundle.pni_signed_pre_key.public_key.to_owned());
+        digest.update(&bundle.pni_pq_last_resort_pre_key.key_id.to_be_bytes());
+        digest.update(bundle.pni_pq_last_resort_pre_key.public_key.to_owned());
     }
-    */
+
+    let server_digest: [u8; 32] = digest.finalize().into();
+
+    Ok(server_digest == usr_digest)
 }
 
 /// A protocol address is represented in string form as
@@ -205,7 +202,7 @@ async fn put_registration_endpoint(State(state): State<SignalServerState<Postgre
 }
 
 /// Handler for the GET v2/keys endpoint.
-#[debug_handler]
+//#[debug_handler]
 async fn get_keys_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
     // TODO: Call `handle_get_keys`
 }
@@ -280,6 +277,8 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod server_tests {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use super::{handle_put_messages, SignalServerState};
     use crate::account::Account;
@@ -385,11 +384,14 @@ mod server_tests {
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_get_keys_gets_keys() {
-        todo!()
+        todo!();
         /*
         let database = Arc::new(Mutex::new(InMemorySignalDatabase::new()));
-        let usr_id: UserID = 0u32;
-        let device_id: DeviceID = 0u32;
+        let is_aci = true;
+        let usr_id =
+            ServiceId::parse_from_service_id_string("8c78cd2a-16ff-427d-83dc-1a5e36ce713d")
+                .unwrap();
+        let address = ProtocolAddress::new("04899A85-4C9E-44CC-8428-A02AB69335F1".into(), 0.into());
 
         let mut database_lock = database.lock().await;
         database_lock
@@ -437,7 +439,7 @@ mod server_tests {
                 .unwrap(),
             j
         );
-         */
+        */
     }
 
     #[ignore = "Not implemented"]
