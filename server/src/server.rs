@@ -112,15 +112,15 @@ async fn handle_put_registration<T: SignalDatabase>(
     println!("Register client");
 }
 
-// redirect from http to https
-async fn redirect_http_to_https(addr: SocketAddr, http: u16, https: u16) {
+// redirect from http to https. this is temporary
+async fn redirect_http_to_https(addr: SocketAddr, http: u16, https: u16) -> Result<(), BoxError> {
     fn make_https(host: String, uri: Uri, http: u16, https: u16) -> Result<Uri, BoxError> {
         let mut parts = uri.into_parts();
 
         parts.scheme = Some(axum::http::uri::Scheme::HTTPS);
 
         if parts.path_and_query.is_none() {
-            parts.path_and_query = Some("/".parse().unwrap());
+            parts.path_and_query = Some("/".parse()?);
         }
 
         let https_host = host.replace(&http.to_string(), &https.to_string());
@@ -136,11 +136,11 @@ async fn redirect_http_to_https(addr: SocketAddr, http: u16, https: u16) {
         }
     };
 
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr).await?;
 
     axum::serve(listener, redirect.into_make_service())
-        .await
-        .unwrap();
+        .await?;
+    Ok(())
 }
 
 // The Signal endpoint /v2/keys/check says that a u64 id is needed, however their ids, such as
