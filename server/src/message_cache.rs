@@ -66,7 +66,6 @@ impl RedisPubSubMessageListener {
 
 impl MessageCache {
     pub async fn connect() -> Result<MessageCache> {
-        dotenv::dotenv().expect("Unable to load environment variables from ..env file");
         let redis_url = std::env::var("REDIS_URL").expect("Unable to read REDIS_URL .env var");
         let mut redis_config = Config::from_url(redis_url);
         let redis_pool: deadpool_redis::Pool = redis_config.create_pool(Some(Runtime::Tokio1))?;
