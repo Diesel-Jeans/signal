@@ -66,6 +66,7 @@ impl RedisPubSubMessageListener {
 
 impl MessageCache {
     pub async fn connect() -> Result<MessageCache> {
+        dotenv::dotenv().expect("Unable to load environment variables from ..env file");
         let redis_url = std::env::var("REDIS_URL").expect("Unable to read REDIS_URL .env var");
         let mut redis_config = Config::from_url(redis_url);
         let redis_pool: deadpool_redis::Pool = redis_config.create_pool(Some(Runtime::Tokio1))?;
@@ -139,13 +140,13 @@ impl MessageCache {
 
         cmd("EXPIRE")
             .arg(queue_key.clone())
-            .arg(20)
+            .arg(2678400)
             .query_async::<()>(&mut conn)
             .await?;
 
         cmd("EXPIRE")
             .arg(queue_metadata_key.clone())
-            .arg(20)
+            .arg(2678400)
             .query_async::<()>(&mut conn)
             .await?;
 
@@ -310,8 +311,8 @@ mod message_cache_tests {
     #[tokio::test]
     async fn test_message_cache_insert() {
         let message_cache = MessageCache::connect().await.unwrap();
-
-        message_cache
+        let mut conn = message_cache.pool.get().await.unwrap();
+        let message_id = message_cache
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(),
                 2,
@@ -319,5 +320,14 @@ mod message_cache_tests {
                 "1337".to_string(),
             )
             .await;
+        match message_id  {
+            Ok(message_id) => {assert_eq!("Hello this is a test of the insert() function".to_string(), cmd("ZRANGEBYSCORE")
+                .arg(MessageCache::get_message_queue_key("b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(), 2)) // Your queue_key here
+                .arg(message_id.clone()) // Use the specific message_id
+                .arg(message_id.clone()) // The same ID for filtering
+                .query_async::<String>(&mut conn)
+                .await.unwrap())}
+            Err(_) => { assert!(false) }
+        }
     }
 }
