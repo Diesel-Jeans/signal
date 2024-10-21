@@ -1,4 +1,4 @@
-use crate::message_cache::MessageCache;
+use crate::message_cache::{MessageCache, PubSubConnection};
 use anyhow::{bail, Result};
 use axum::extract::{Path, State};
 use axum::handler::Handler;
@@ -18,9 +18,12 @@ use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc};
 use std::time::Duration;
-use tokio::sync::Mutex;
+use redis::PubSub;
+//use deadpool_redis::redis::PushKind::Message;
+use tokio::sync::{mpsc, Mutex};
+use tokio::task;
 use tower_http::cors::CorsLayer;
 type Username = String;
 type DeviceID = u32;
@@ -261,18 +264,14 @@ async fn keys_check(
 
 #[derive(Clone)]
 pub(crate) struct ServerState {
-    pub(crate) redis: deadpool_redis::Pool,
     pub db: Arc<Mutex<InMemorySignalDatabase>>,
     pub pool: Pool<Postgres>,
+    pub message_cache: MessageCache,
 }
 
 impl ServerState {
     async fn new() -> Result<ServerState> {
         dotenv::dotenv().expect("Unable to load environment variables from ..env file");
-        let redis_url = std::env::var("REDIS_URL").expect("Unable to read REDIS_URL .env var");
-        let mut redis_config = Config::from_url(redis_url);
-        let redis_pool: deadpool_redis::Pool = redis_config.create_pool(Some(Runtime::Tokio1))?;
-
         let db_url = std::env::var("DATABASE_URL").expect("Unable to read DATABASE_URL .env var");
         let pool = PgPoolOptions::new()
             .max_connections(100)
@@ -282,8 +281,8 @@ impl ServerState {
 
         Ok(ServerState {
             db: Arc::new(Mutex::new(InMemorySignalDatabase::new())),
-            redis: redis_pool,
             pool,
+            message_cache: MessageCache::connect().await?,
         })
     }
 }
@@ -298,11 +297,9 @@ async fn handle_send_message(
     Path(address): Path<String>,
     Json(payload): Json<Msg>,
 ) {
-    let mut connection = state.redis.get().await.unwrap();
     let addr = address.as_str();
 
-    MessageCache::insert(
-        &mut connection,
+    state.message_cache.insert(
         "b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(),
         2,
         "Hello this is a test of the insert() function".to_string(),
@@ -347,15 +344,7 @@ async fn handle_delete_device() {
     println!("Delete device");
 }
 
-async fn set_redis_config(conn: &mut Connection) {
-    cmd("CONFIG")
-        .arg("SET")
-        .arg("notify-keyspace-events")
-        .arg("Ex")
-        .query_async::<()>(conn)
-        .await
-        .unwrap()
-}
+
 
 pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let cors = CorsLayer::new()
@@ -370,11 +359,6 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
     let server = ServerState::new().await?;
-    let redis_client = redis::Client::open(std::env::var("REDIS_URL")?)?;
-    let conn = redis_client.get_connection()?;
-    tokio::spawn(MessageCache::listen_for_expirations(conn));
-    let mut conn = server.redis.get().await.unwrap();
-    set_redis_config(&mut conn).await;
     let app = Router::new()
         .route("/message/:address", put(handle_send_message))
         .route("/bundle/:address", post(handle_publish_bundle))
