@@ -313,25 +313,30 @@ mod message_cache_tests {
         let mut conn = message_cache.pool.get().await.unwrap();
         let message_id = message_cache
             .insert(
-                "b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(),
-                2,
-                "Hello this is a test of the insert() function".to_string(),
-                "1337".to_string(),
+                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                1,
+                "Hello this is a test of the insert()".to_string(),
+                "123456".to_string(),
             )
             .await
             .unwrap();
+
+        let result = cmd("ZRANGEBYSCORE")
+            .arg(MessageCache::get_message_queue_key(
+                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                1,
+            ))
+            .arg(message_id.clone())
+            .arg(message_id.clone())
+            .query_async::<Vec<String>>(&mut conn)
+            .await
+            .unwrap();
+
+        println!("Redis returned: {result:?}");
+
         assert_eq!(
             "Hello this is a test of the insert() function".to_string(),
-            cmd("ZRANGEBYSCORE")
-                .arg(MessageCache::get_message_queue_key(
-                    "b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(),
-                    2
-                )) // Your queue_key here
-                .arg(message_id.clone()) // Use the specific message_id
-                .arg(message_id.clone()) // The same ID for filtering
-                .query_async::<Vec<String>>(&mut conn)
-                .await
-                .unwrap()[0]
+            result[0]
         )
     }
 }
