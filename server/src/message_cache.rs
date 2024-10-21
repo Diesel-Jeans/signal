@@ -318,26 +318,20 @@ mod message_cache_tests {
                 "Hello this is a test of the insert() function".to_string(),
                 "1337".to_string(),
             )
-            .await;
-        match message_id {
-            Ok(message_id) => {
-                assert_eq!(
-                    "Hello this is a test of the insert() function".to_string(),
-                    cmd("ZRANGEBYSCORE")
-                        .arg(MessageCache::get_message_queue_key(
-                            "b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(),
-                            2
-                        )) // Your queue_key here
-                        .arg(message_id.clone()) // Use the specific message_id
-                        .arg(message_id.clone()) // The same ID for filtering
-                        .query_async::<String>(&mut conn)
-                        .await
-                        .unwrap()
-                )
-            }
-            Err(_) => {
-                assert!(false)
-            }
-        }
+            .await
+            .unwrap();
+        assert_eq!(
+            "Hello this is a test of the insert() function".to_string(),
+            cmd("ZRANGEBYSCORE")
+                .arg(MessageCache::get_message_queue_key(
+                    "b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(),
+                    2
+                )) // Your queue_key here
+                .arg(message_id.clone()) // Use the specific message_id
+                .arg(message_id.clone()) // The same ID for filtering
+                .query_async::<Vec<String>>(&mut conn)
+                .await
+                .unwrap()[0]
+        )
     }
 }
