@@ -20,13 +20,13 @@ use std::fmt::format;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
 
+use crate::message_cache::MessageCache;
+use crate::socket::SocketManager;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use crate::message_cache::MessageCache;
-use crate::socket::SocketManager;
 
 enum PublicKeyType {
     Kem(kem::PublicKey),
@@ -91,12 +91,14 @@ async fn handle_put_messages<T: SignalDatabase>(
 ) -> Result<(), ApiError> {
     println!("Received message");
 
-    state.message_cache.insert(
-        "b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(),
-        2,
-        "Hello this is a test of the insert() function".to_string(),
-        "1337".to_string(),
-    )
+    state
+        .message_cache
+        .insert(
+            "b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(),
+            2,
+            "Hello this is a test of the insert() function".to_string(),
+            "1337".to_string(),
+        )
         .await;
 
     state
