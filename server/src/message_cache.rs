@@ -315,7 +315,7 @@ mod message_cache_tests {
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
                 1,
-                "Hello this is a test of the insert()".to_string(),
+                "Hello this is a test of insert()".to_string(),
                 "123456".to_string(),
             )
             .await
@@ -334,9 +334,6 @@ mod message_cache_tests {
 
         println!("Redis returned: {result:?}");
 
-        assert_eq!(
-            "Hello this is a test of the insert() function".to_string(),
-            result[0]
-        )
+        assert_eq!("Hello this is a test of insert()".to_string(), result[0])
     }
 }
