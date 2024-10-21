@@ -1,10 +1,9 @@
 use anyhow::Result;
 use deadpool_redis::redis::cmd;
-use deadpool_redis::{Config, Connection, Runtime};
+use deadpool_redis::{Config, Runtime};
 use futures_util::task::SpawnExt;
 use futures_util::StreamExt;
-use redis::{Msg, PubSubCommands, RedisError};
-use std::collections::HashMap;
+use redis::{Msg, PubSubCommands};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -65,8 +64,11 @@ impl RedisPubSubMessageListener {
 }
 
 impl MessageCache {
-    pub async fn connect() -> Result<MessageCache> {
+    pub async fn setup() -> Result<MessageCache> {
         dotenv::dotenv().expect("Unable to load environment variables from ..env file");
+        Self::connect().await
+    }
+    pub async fn connect() -> Result<MessageCache> {
         let redis_url = std::env::var("REDIS_URL").expect("Unable to read REDIS_URL .env var");
         let mut redis_config = Config::from_url(redis_url);
         let redis_pool: deadpool_redis::Pool = redis_config.create_pool(Some(Runtime::Tokio1))?;
