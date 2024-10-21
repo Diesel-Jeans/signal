@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::client::Client;
 
 mod client;

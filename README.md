@@ -4,7 +4,7 @@
 
 Make sure you have `docker-compose` installed!
 
-1. Go into the server folder and start the docker-compose
+1. Go into the server folder, add an .env file with the database URL in it like "DATABASE_URL=URL", and run the docker-compose
 
 ```zsh
 docker-compose up

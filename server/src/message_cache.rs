@@ -21,7 +21,7 @@ pub struct RedisPubSubMessageListener {
     event_receiver: Arc<Mutex<Receiver<String>>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MessageCache {
     pool: deadpool_redis::Pool,
     //hashmap: HashMap<String, dyn MessageAvailabilityListener>,
