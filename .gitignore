@@ -1,7 +1,8 @@
 **/target/
 .idea/
 client/device_info.json
-.env
+server/.env
+client/.env
 server/cert/rootCA.crt
 server/cert/server.crt
 server/cert/server.key
