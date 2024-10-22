@@ -1,3 +1,4 @@
+use anyhow::Result;
 use libsignal_core::{Aci, DeviceId, Pni, ServiceId};
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
@@ -51,6 +52,48 @@ impl Account {
             aci_identity_key,
         }
     }
+
+    pub fn from_db(
+        pni: Pni,
+        aci: Aci,
+        pni_identity_key: IdentityKey,
+        aci_identity_key: IdentityKey,
+        devices: Vec<Device>,
+    ) -> Self {
+        Self {
+            pni,
+            aci,
+            pni_identity_key,
+            aci_identity_key,
+            devices,
+        }
+    }
+
+    pub fn pni(&self) -> Pni {
+        self.pni
+    }
+
+    pub fn aci(&self) -> Aci {
+        self.aci
+    }
+
+    pub fn aci_identity_key(&self) -> IdentityKey {
+        self.aci_identity_key
+    }
+
+    pub fn pni_identity_key(&self) -> IdentityKey {
+        self.pni_identity_key
+    }
+
+    pub fn devices(&self) -> Vec<Device> {
+        self.devices
+    }
+
+    pub fn add_device(&self, device: Device) -> Result<()> {
+        // Do some check to see if device is not in devices
+        self.devices.push(device);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -59,15 +102,26 @@ pub struct Device {
     name: String,
     last_seen: u32,
     created: u32,
+    auth_token: String,
+    salt: String,
 }
 
 impl Device {
-    pub fn new(device_id: DeviceId, name: String, last_seen: u32, created: u32) -> Self {
+    pub fn new(
+        device_id: DeviceId,
+        name: String,
+        last_seen: u32,
+        created: u32,
+        auth_token: String,
+        salt: String,
+    ) -> Self {
         Self {
             device_id,
             name,
             last_seen,
             created,
+            auth_token,
+            salt,
         }
     }
     pub fn device_id(&self) -> DeviceId {
@@ -81,5 +135,13 @@ impl Device {
     }
     pub fn created(&self) -> u32 {
         self.created
+    }
+
+    pub fn auth_token(&self) -> String {
+        self.auth_token
+    }
+
+    pub fn salt(&self) -> String {
+        self.salt
     }
 }
