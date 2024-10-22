@@ -306,6 +306,7 @@ pub trait MessageAvailabilityListener {
 #[cfg(test)]
 mod message_cache_tests {
     use super::*;
+    use serial_test::serial;
     use uuid::Uuid;
 
     fn generate_uuid() -> String {
@@ -313,13 +314,18 @@ mod message_cache_tests {
         guid.to_string()
     }
 
+    async fn teardown(mut con: deadpool_redis::Connection) {
+        cmd("FLUSHALL").query_async::<()>(&mut con).await.unwrap();
+    }
+
     #[tokio::test]
+    #[serial]
     async fn test_message_cache_insert() {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
         let message_id = message_cache
             .insert(
-                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                "b0231ab5-4c7e-40ea-a544-f925c5051".to_string(),
                 1,
                 "Hello this is a test of insert()".to_string(),
                 generate_uuid(),
@@ -329,7 +335,7 @@ mod message_cache_tests {
 
         let result = cmd("ZRANGEBYSCORE")
             .arg(MessageCache::get_message_queue_key(
-                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                "b0231ab5-4c7e-40ea-a544-f925c5051".to_string(),
                 1,
             ))
             .arg(message_id.clone())
@@ -339,16 +345,18 @@ mod message_cache_tests {
             .unwrap();
 
         assert_eq!("Hello this is a test of insert()".to_string(), result[0]);
+        teardown(conn).await;
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_message_cache_insert_same_id() {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
         let msg_guid = generate_uuid();
         let message_id = message_cache
             .insert(
-                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                "b0231ab5-4c7e-40ea-a544-f925c5052".to_string(),
                 1,
                 "This is a message".to_string(),
                 msg_guid.clone(),
@@ -359,7 +367,7 @@ mod message_cache_tests {
         // should return the same message id
         let message_id_2 = message_cache
             .insert(
-                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                "b0231ab5-4c7e-40ea-a544-f925c5052".to_string(),
                 1,
                 "This is a different message with same msg_guid".to_string(),
                 msg_guid.clone(),
@@ -371,7 +379,7 @@ mod message_cache_tests {
 
         let result = cmd("ZRANGEBYSCORE")
             .arg(MessageCache::get_message_queue_key(
-                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                "b0231ab5-4c7e-40ea-a544-f925c5052".to_string(),
                 1,
             ))
             .arg(message_id_2.clone())
@@ -381,15 +389,17 @@ mod message_cache_tests {
             .unwrap();
 
         assert_eq!("This is a message", result[0]);
+        teardown(conn).await;
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_message_cache_insert_different_ids() {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
         let message_id = message_cache
             .insert(
-                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                "b0231ab5-4c7e-40ea-a544-f925c5053".to_string(),
                 1,
                 "First message".to_string(),
                 generate_uuid(),
@@ -398,7 +408,7 @@ mod message_cache_tests {
             .unwrap();
         let message_id_2 = message_cache
             .insert(
-                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                "b0231ab5-4c7e-40ea-a544-f925c5053".to_string(),
                 1,
                 "Second message".to_string(),
                 generate_uuid(),
@@ -410,7 +420,7 @@ mod message_cache_tests {
 
         let result_1 = cmd("ZRANGEBYSCORE")
             .arg(MessageCache::get_message_queue_key(
-                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                "b0231ab5-4c7e-40ea-a544-f925c5053".to_string(),
                 1,
             ))
             .arg(message_id.clone())
@@ -421,7 +431,7 @@ mod message_cache_tests {
 
         let result_2 = cmd("ZRANGEBYSCORE")
             .arg(MessageCache::get_message_queue_key(
-                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                "b0231ab5-4c7e-40ea-a544-f925c5053".to_string(),
                 1,
             ))
             .arg(message_id_2.clone())
@@ -431,9 +441,12 @@ mod message_cache_tests {
             .unwrap();
 
         assert_ne!(result_1, result_2);
+
+        teardown(conn).await;
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_message_cache_remove() {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
@@ -456,5 +469,6 @@ mod message_cache_tests {
 
         assert_eq!(removed_messages.len(), 1);
         assert_eq!(removed_messages[0], "This is a test of remove()");
+        teardown(conn).await;
     }
 }
