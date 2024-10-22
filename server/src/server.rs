@@ -6,17 +6,18 @@ use anyhow::Result;
 use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
 use axum::handler::HandlerWithoutStateExt;
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
-use axum::http::{Method, StatusCode, Uri};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
-use common::web_api::CreateAccountOptions;
+use common::signal_protocol_messages::RegistrationRequest;
+use common::web_api::{AuthorizationHeader, CreateAccountOptions};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use libsignal_protocol::{kem, PublicKey};
 use std::env;
-use std::fmt::format;
+use std::fmt::{format, Result};
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
 
@@ -105,11 +106,21 @@ async fn handle_get_messages<T: SignalDatabase>(
 }
 
 async fn handle_put_registration<T: SignalDatabase>(
-    State(state): State<SignalServerState<T>>,
-    Path(address): Path<String>,
-    Json(options): Json<CreateAccountOptions>,
-) {
+    state: SignalServerState<T>,
+    auth_header: AuthorizationHeader,
+    registration: RegistrationRequest,
+) -> Result<(), ApiError> {
     println!("Register client");
+    let account = Account::new();
+    state
+        .database()
+        .add_account(account)
+        .await
+        .map_err(|err| ApiError {
+            message: format!("Could not store user in database: {}", err),
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        })?;
+    Ok(())
 }
 
 // redirect from http to https. this is temporary
@@ -245,8 +256,32 @@ async fn get_messages_endpoint(State(state): State<SignalServerState<PostgresDat
 
 /// Handler for the PUT v1/registration endpoint.
 #[debug_handler]
-async fn put_registration_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
-    // TODO: Call `handle_put_registration`
+async fn put_registration_endpoint(
+    State(state): State<SignalServerState<PostgresDatabase>>,
+    headers: HeaderMap,
+    Json(registration): Json<RegistrationRequest>,
+) -> Result<(), ApiError> {
+    let auth_header = headers
+        .get("Authorization")
+        .ok_or_else(|| ApiError {
+            message: "Missing authorization header".to_owned(),
+            status_code: StatusCode::UNAUTHORIZED,
+        })?
+        .to_str()
+        .map_err(|err| ApiError {
+            message: format!(
+                "Authorization header could not be parsed as string: {}",
+                err
+            ),
+            status_code: StatusCode::UNAUTHORIZED,
+        })?
+        .parse()
+        .map_err(|err| ApiError {
+            message: format!("Authorization header could not be parsed: {}", err),
+            status_code: StatusCode::UNAUTHORIZED,
+        })?;
+
+    handle_put_registration(state, auth_header, registration).await
 }
 
 /// Handler for the GET v2/keys endpoint.
