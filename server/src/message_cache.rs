@@ -4,7 +4,6 @@ use deadpool_redis::{Config, Runtime};
 use futures_util::task::SpawnExt;
 use futures_util::StreamExt;
 use redis::{Msg, PubSubCommands};
-use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -14,10 +13,6 @@ const PERSISTING_KEYSPACE_PREFIX: &str = "__keyspace@0__:user_queue_persisting::
 pub struct PubSubConnection {
     //pub pub_sub: Arc<Mutex<PubSub<'static>>>,
     //pub rx: Receiver<String>,
-}
-
-pub struct RedisPubSubMessageListener {
-    event_receiver: Arc<Mutex<Receiver<String>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -53,14 +48,10 @@ impl PubSubConnection {
                 let channel = message.get_channel_name();
                 let msg = message.get_payload::<String>().unwrap();
                 println!("Got a message, {} : {}", channel, msg);
-                message_tx.send(msg.clone()).await.expect("panic message");
+                // message_tx.send(msg.clone()).await.expect("panic message");
             }
         });
     }
-}
-
-impl RedisPubSubMessageListener {
-    pub async fn listen_to_redis_messages() {}
 }
 
 impl MessageCache {
@@ -162,26 +153,33 @@ impl MessageCache {
         Ok(message_id.clone())
     }
 
-    /*
-    pub async fn remove(&self, user_id: String, device_id: u32, message_guids: Vec<String>) -> Result<Vec<String>> {
+    pub async fn remove(
+        &self,
+        user_id: String,
+        device_id: u32,
+        message_guids: Vec<String>,
+    ) -> Result<Vec<String>> {
         let mut conn = self.pool.get().await.unwrap();
         let queue_key: String = MessageCache::get_message_queue_key(user_id.clone(), device_id);
-        let queue_metadata_key: String = MessageCache::get_message_queue_metadata_key(user_id.clone(), device_id);
+        let queue_metadata_key: String =
+            MessageCache::get_message_queue_metadata_key(user_id.clone(), device_id);
+        let queue_total_index_key: String =
+            MessageCache::get_queue_index_key(user_id.clone(), device_id);
         let mut removed_messages: Vec<String> = Vec::new();
 
         for guid in message_guids {
-            let message_id : String = cmd("HGET")
+            let message_id: Option<String> = cmd("HGET")
                 .arg(queue_metadata_key.clone())
                 .arg(guid.clone())
                 .query_async(&mut conn)
                 .await?;
 
-            if message_id.clone() {
+            if let Some(msg_id) = message_id.clone() {
                 // retrieving the message
-                let envelope = cmd("ZRANGE")
+                let envelope: Option<Vec<String>> = cmd("ZRANGE")
                     .arg(queue_key.clone())
-                    .arg(message_id.clone())
-                    .arg(message_id.clone())
+                    .arg(msg_id.clone())
+                    .arg(msg_id.clone())
                     .arg("BYSCORE")
                     .arg("LIMIT")
                     .arg(0)
@@ -192,8 +190,8 @@ impl MessageCache {
                 // delete the message
                 cmd("ZREMRANGEBYSCORE")
                     .arg(queue_key.clone())
-                    .arg(message_id.clone())
-                    .arg(message_id.clone())
+                    .arg(msg_id.clone())
+                    .arg(msg_id.clone())
                     .query_async::<()>(&mut conn)
                     .await?;
 
@@ -204,13 +202,18 @@ impl MessageCache {
                     .query_async::<()>(&mut conn)
                     .await?;
 
-                if envelope {
-                    removed_messages.push(envelope.clone());
+                if let Some(envel) = envelope {
+                    removed_messages.push(envel[0].clone());
                 }
             }
         }
 
-        if cmd("ZCARD").arg(queue_key.clone()).query_async(&mut conn).await.unwrap() == 0{
+        if cmd("ZCARD")
+            .arg(queue_key.clone())
+            .query_async::<u64>(&mut conn)
+            .await?
+            == 0
+        {
             cmd("DEL")
                 .arg(queue_key.clone())
                 .query_async::<()>(&mut conn)
@@ -222,16 +225,15 @@ impl MessageCache {
                 .await?;
 
             cmd("ZREM")
+                .arg(queue_total_index_key.clone())
                 .arg(queue_key.clone())
                 .query_async::<()>(&mut conn)
                 .await?;
         }
 
-        return Ok(removed_messages);
+        Ok(removed_messages)
     }
 
-
-     */
     fn get_message_queue_key(user_id: String, device_id: u32) -> String {
         format!("user_messages::{{{}::{}}}", user_id, device_id)
     }
@@ -265,7 +267,6 @@ impl MessageCache {
             .send(channel.to_string())
             .await
             .unwrap();
-        println!("Unsubscribing to channel: {}", channel);
     }
 
     pub async fn subscribe(&self, channel: &str) {
@@ -273,7 +274,6 @@ impl MessageCache {
             .send(channel.to_string())
             .await
             .unwrap();
-        println!("Subscribing to channel: {}", channel);
     }
 
     fn get_keyspace_channels(queue_name: String) -> Vec<String> {
@@ -306,6 +306,12 @@ pub trait MessageAvailabilityListener {
 #[cfg(test)]
 mod message_cache_tests {
     use super::*;
+    use uuid::Uuid;
+
+    fn generate_uuid() -> String {
+        let guid = Uuid::new_v4();
+        guid.to_string()
+    }
 
     #[tokio::test]
     async fn test_message_cache_insert() {
@@ -316,7 +322,7 @@ mod message_cache_tests {
                 "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
                 1,
                 "Hello this is a test of insert()".to_string(),
-                "123456".to_string(),
+                generate_uuid(),
             )
             .await
             .unwrap();
@@ -332,8 +338,123 @@ mod message_cache_tests {
             .await
             .unwrap();
 
-        println!("Redis returned: {result:?}");
+        assert_eq!("Hello this is a test of insert()".to_string(), result[0]);
+    }
 
-        assert_eq!("Hello this is a test of insert()".to_string(), result[0])
+    #[tokio::test]
+    async fn test_message_cache_insert_same_id() {
+        let message_cache = MessageCache::connect().await.unwrap();
+        let mut conn = message_cache.pool.get().await.unwrap();
+        let msg_guid = generate_uuid();
+        let message_id = message_cache
+            .insert(
+                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                1,
+                "This is a message".to_string(),
+                msg_guid.clone(),
+            )
+            .await
+            .unwrap();
+
+        // should return the same message id
+        let message_id_2 = message_cache
+            .insert(
+                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                1,
+                "This is a different message with same msg_guid".to_string(),
+                msg_guid.clone(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(message_id, message_id_2);
+
+        let result = cmd("ZRANGEBYSCORE")
+            .arg(MessageCache::get_message_queue_key(
+                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                1,
+            ))
+            .arg(message_id_2.clone())
+            .arg(message_id_2.clone())
+            .query_async::<Vec<String>>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_eq!("This is a message", result[0]);
+    }
+
+    #[tokio::test]
+    async fn test_message_cache_insert_different_ids() {
+        let message_cache = MessageCache::connect().await.unwrap();
+        let mut conn = message_cache.pool.get().await.unwrap();
+        let message_id = message_cache
+            .insert(
+                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                1,
+                "First message".to_string(),
+                generate_uuid(),
+            )
+            .await
+            .unwrap();
+        let message_id_2 = message_cache
+            .insert(
+                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                1,
+                "Second message".to_string(),
+                generate_uuid(),
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(message_id, message_id_2);
+
+        let result_1 = cmd("ZRANGEBYSCORE")
+            .arg(MessageCache::get_message_queue_key(
+                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                1,
+            ))
+            .arg(message_id.clone())
+            .arg(message_id.clone())
+            .query_async::<Vec<String>>(&mut conn)
+            .await
+            .unwrap();
+
+        let result_2 = cmd("ZRANGEBYSCORE")
+            .arg(MessageCache::get_message_queue_key(
+                "b0231ab5-4c7e-40ea-a544-f925c505".to_string(),
+                1,
+            ))
+            .arg(message_id_2.clone())
+            .arg(message_id_2.clone())
+            .query_async::<Vec<String>>(&mut conn)
+            .await
+            .unwrap();
+
+        assert_ne!(result_1, result_2);
+    }
+
+    #[tokio::test]
+    async fn test_message_cache_remove() {
+        let message_cache = MessageCache::connect().await.unwrap();
+        let mut conn = message_cache.pool.get().await.unwrap();
+        let user_id = "b0231ab5-4c7e-40ea-a544-f925c5".to_string();
+        let msg_guid = generate_uuid();
+        let message_id = message_cache
+            .insert(
+                user_id.clone(),
+                1,
+                "This is a test of remove()".to_string(),
+                msg_guid.clone(),
+            )
+            .await
+            .unwrap();
+
+        let removed_messages = message_cache
+            .remove(user_id, 1, Vec::from([msg_guid.clone()]))
+            .await
+            .unwrap();
+
+        assert_eq!(removed_messages.len(), 1);
+        assert_eq!(removed_messages[0], "This is a test of remove()");
     }
 }
