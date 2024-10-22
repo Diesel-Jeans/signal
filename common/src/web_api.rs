@@ -1,8 +1,12 @@
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 use anyhow::Error;
 use libsignal_protocol::{DeviceId, IdentityKey, ServiceId};
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{self, MapAccess, Visitor},
+    ser::SerializeStruct,
+    Deserialize, Deserializer, Serialize,
+};
 
 /// All information required to create an account.
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,19 +93,192 @@ impl FromStr for AuthorizationHeader {
 }
 
 /// A request to register an account.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug)]
 pub struct RegistrationRequest {
     session_id: String,
     account_attributes: AccountAttributes,
     require_atomic: bool,
     skip_device_transfer: bool,
-    aci_identity_key: Box<[u8]>,
-    pni_identity_key: Box<[u8]>,
+    aci_identity_key: IdentityKey,
+    pni_identity_key: IdentityKey,
     aci_signed_pre_key: UploadSignedPreKey,
     pni_signed_pre_key: UploadSignedPreKey,
     aci_pq_last_resort_pre_key: UploadSignedPreKey,
     pni_pq_last_resort_pre_key: UploadSignedPreKey,
+}
+
+impl Serialize for RegistrationRequest {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("RegistrationRequest", 10)?;
+        state.serialize_field("sessionId", &self.session_id)?;
+        state.serialize_field("accountAttributes", &self.account_attributes)?;
+        state.serialize_field("requireAtomic", &self.require_atomic)?;
+        state.serialize_field("skipDeviceTransfer", &self.skip_device_transfer)?;
+        state.serialize_field("aciIdentityKey", &(self.aci_identity_key.serialize()))?;
+        state.serialize_field("pniIdentityKey", &(self.pni_identity_key.serialize()))?;
+        state.serialize_field("aciSignedPreKey", &self.aci_signed_pre_key)?;
+        state.serialize_field("pniSignedPreKey", &self.pni_signed_pre_key)?;
+        state.serialize_field("aciPqLastResortPreKey", &self.aci_pq_last_resort_pre_key)?;
+        state.serialize_field("pniPqLastResortPreKey", &self.pni_pq_last_resort_pre_key)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for RegistrationRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Use a visitor to manually handle field deserialization
+        struct RegistrationRequestVisitor;
+
+        impl<'de> Visitor<'de> for RegistrationRequestVisitor {
+            type Value = RegistrationRequest;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct RegistrationRequest")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut session_id = None;
+                let mut account_attributes = None;
+                let mut require_atomic = None;
+                let mut skip_device_transfer = None;
+                let mut aci_identity_key = None;
+                let mut pni_identity_key = None;
+                let mut aci_signed_pre_key = None;
+                let mut pni_signed_pre_key = None;
+                let mut aci_pq_last_resort_pre_key = None;
+                let mut pni_pq_last_resort_pre_key = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        "session_id" => session_id = Some(map.next_value()?),
+                        "account_attributes" => account_attributes = Some(map.next_value()?),
+                        "require_atomic" => require_atomic = Some(map.next_value()?),
+                        "skip_device_transfer" => skip_device_transfer = Some(map.next_value()?),
+                        "aci_identity_key" => aci_identity_key = Some(map.next_value()?),
+                        "pni_identity_key" => pni_identity_key = Some(map.next_value()?),
+                        "aci_signed_pre_key" => aci_signed_pre_key = Some(map.next_value()?),
+                        "pni_signed_pre_key" => pni_signed_pre_key = Some(map.next_value()?),
+                        "aci_pq_last_resort_pre_key" => {
+                            aci_pq_last_resort_pre_key = Some(map.next_value()?)
+                        }
+                        "pni_pq_last_resort_pre_key" => {
+                            pni_pq_last_resort_pre_key = Some(map.next_value()?)
+                        }
+                        _ => {}
+                    }
+                }
+
+                Ok(RegistrationRequest {
+                    session_id: session_id.ok_or_else(|| de::Error::missing_field("session_id"))?,
+                    account_attributes: account_attributes
+                        .ok_or_else(|| de::Error::missing_field("account_attributes"))?,
+                    require_atomic: require_atomic
+                        .ok_or_else(|| de::Error::missing_field("require_atomic"))?,
+                    skip_device_transfer: skip_device_transfer
+                        .ok_or_else(|| de::Error::missing_field("skip_device_transfer"))?,
+                    aci_identity_key: aci_identity_key
+                        .map(IdentityKey::decode)
+                        .ok_or_else(|| de::Error::missing_field("aci_identity_key"))?
+                        .map_err(|_| de::Error::custom("Could not decode aciIdentityKey"))?,
+                    pni_identity_key: pni_identity_key
+                        .map(IdentityKey::decode)
+                        .ok_or_else(|| de::Error::missing_field("pni_identity_key"))?
+                        .map_err(|_| de::Error::custom("Could not decode pniIdentityKey"))?,
+                    aci_signed_pre_key: aci_signed_pre_key
+                        .ok_or_else(|| de::Error::missing_field("aci_signed_pre_key"))?,
+                    pni_signed_pre_key: pni_signed_pre_key
+                        .ok_or_else(|| de::Error::missing_field("pni_signed_pre_key"))?,
+                    aci_pq_last_resort_pre_key: aci_pq_last_resort_pre_key
+                        .ok_or_else(|| de::Error::missing_field("aci_pq_last_resort_pre_key"))?,
+                    pni_pq_last_resort_pre_key: pni_pq_last_resort_pre_key
+                        .ok_or_else(|| de::Error::missing_field("pni_pq_last_resort_pre_key"))?,
+                })
+            }
+        }
+
+        deserializer.deserialize_struct(
+            "RegistrationRequest",
+            &[
+                "session_id",
+                "account_attributes",
+                "require_atomic",
+                "skip_device_transfer",
+                "aci_identity_key",
+                "pni_identity_key",
+                "aci_signed_pre_key",
+                "pni_signed_pre_key",
+                "aci_pq_last_resort_pre_key",
+                "pni_pq_last_resort_pre_key",
+            ],
+            RegistrationRequestVisitor,
+        )
+    }
+}
+impl RegistrationRequest {
+    fn new(
+        session_id: String,
+        account_attributes: AccountAttributes,
+        require_atomic: bool,
+        skip_device_transfer: bool,
+        aci_identity_key: IdentityKey,
+        pni_identity_key: IdentityKey,
+        aci_signed_pre_key: UploadSignedPreKey,
+        pni_signed_pre_key: UploadSignedPreKey,
+        aci_pq_last_resort_pre_key: UploadSignedPreKey,
+        pni_pq_last_resort_pre_key: UploadSignedPreKey,
+    ) -> Self {
+        Self {
+            session_id,
+            account_attributes,
+            require_atomic,
+            skip_device_transfer,
+            aci_identity_key,
+            pni_identity_key,
+            aci_signed_pre_key,
+            pni_signed_pre_key,
+            aci_pq_last_resort_pre_key,
+            pni_pq_last_resort_pre_key,
+        }
+    }
+    pub fn session_id(&self) -> &String {
+        &self.session_id
+    }
+    pub fn account_attributes(&self) -> &AccountAttributes {
+        &self.account_attributes
+    }
+    pub fn require_atomic(&self) -> bool {
+        self.require_atomic
+    }
+    pub fn skip_device_transfer(&self) -> bool {
+        self.skip_device_transfer
+    }
+    pub fn aci_identity_key(&self) -> &IdentityKey {
+        &self.aci_identity_key
+    }
+    pub fn pni_identity_key(&self) -> &IdentityKey {
+        &self.pni_identity_key
+    }
+    pub fn aci_signed_pre_key(&self) -> &UploadSignedPreKey {
+        &self.aci_signed_pre_key
+    }
+    pub fn pni_signed_pre_key(&self) -> &UploadSignedPreKey {
+        &self.pni_signed_pre_key
+    }
+    pub fn aci_pq_last_resort_pre_key(&self) -> &UploadSignedPreKey {
+        &self.aci_pq_last_resort_pre_key
+    }
+    pub fn pni_pq_last_resort_pre_key(&self) -> &UploadSignedPreKey {
+        &self.pni_pq_last_resort_pre_key
+    }
 }
 
 /// Used to upload any type of prekey along with a signature that is used
@@ -110,8 +287,8 @@ pub struct RegistrationRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UploadSignedPreKey {
     pub key_id: u32,
-    pub public_key: Box<[u8]>,
-    pub signature: Box<[u8]>,
+    pub public_key: Box<[u8]>, // TODO: Make this a PublicKey and imlement Serialize
+    pub signature: Box<[u8]>,  // TODO: Make this a PublicKey and imlement Serialize
 }
 
 /// Used to upload a new prekeys.

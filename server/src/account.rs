@@ -125,7 +125,7 @@ impl Device {
         }
     }
     pub fn device_id(&self) -> DeviceId {
-        self.device_id.into()
+        self.device_id
     }
     pub fn name(&self) -> &String {
         &self.name
