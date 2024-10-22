@@ -2,7 +2,7 @@
 .idea/
 client/device_info.json
 server/.env
-client/.env
+client/src/.env
 server/cert/rootCA.crt
 server/cert/server.crt
 server/cert/server.key
