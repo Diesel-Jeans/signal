@@ -12,7 +12,7 @@ use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
-use common::web_api::CreateAccountOptions;
+use common::web_api::{CreateAccountOptions, SignalMessages};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use libsignal_protocol::{kem, PublicKey};
 use std::env;
@@ -26,7 +26,7 @@ use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use crate::socket::SocketManager;
+use crate::socket::{SocketManager, ToEnvelope};
 
 enum PublicKeyType {
     Kem(kem::PublicKey),
@@ -84,17 +84,23 @@ impl SignalServerState<PostgresDatabase> {
 async fn handle_put_messages<T: SignalDatabase>(
     state: SignalServerState<T>,
     address: ProtocolAddress,
-    payload: Envelope,
+    payload: SignalMessages,
 ) -> Result<(), ApiError> {
     println!("Received message");
-    state
-        .database()
-        .push_message_queue(address, vec![payload])
-        .await
-        .map_err(|_| ApiError {
-            message: "Could not push the message to message queue.".to_owned(),
-            status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        })
+    todo!()
+    //let mut envelopes = Vec::new();
+    //for msg in payload.messages{
+    //    envelopes.push(msg.to_envelope());
+    //    
+    //}
+    //state
+    //    .database()
+    //    .push_message_queue(address, vec![payload])
+    //    .await
+    //    .map_err(|_| ApiError {
+    //        message: "Could not push the message to message queue.".to_owned(),
+    //        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+    //    })
 }
 
 async fn handle_get_messages<T: SignalDatabase>(
@@ -231,7 +237,7 @@ fn parse_service_id(string: String) -> Result<ServiceId, ApiError> {
 async fn put_messages_endpoint(
     State(state): State<SignalServerState<PostgresDatabase>>,
     Path(address): Path<String>,
-    Json(payload): Json<Envelope>, // TODO: Multiple messages could be sent at one time
+    Json(payload): Json<SignalMessages>, // TODO: Multiple messages could be sent at one time
 ) -> Result<(), ApiError> {
     let address = parse_protocol_address(address)?;
     handle_put_messages(state, address, payload).await

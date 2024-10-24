@@ -1,5 +1,7 @@
 use libsignal_protocol::{DeviceId, IdentityKey, ServiceId};
+use crate::signal_protobuf::Envelope;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// All information required to create an account.
 #[derive(Debug, Serialize, Deserialize)]
@@ -81,4 +83,21 @@ impl Device {
     pub fn device_id(&self) -> DeviceId {
         self.device_id.into()
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SignalMessages {
+    pub destination: uuid::Uuid,
+    pub timestamp: u64,
+    pub messages: Vec<SignalMessage>,
+    pub online: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SignalMessage {
+    pub r#type: u32,
+    pub destination_device_id: u32,
+    pub destination_registration_id: u32,
+    pub content: String,
 }
