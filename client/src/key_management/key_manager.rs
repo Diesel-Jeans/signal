@@ -103,7 +103,7 @@ impl KeyManager {
         &mut self,
         store: &mut InMemSignalProtocolStore,
         key: &kem::KeyPair,
-        signature: &Box<[u8]>,
+        signature: &[u8],
     ) -> Result<()> {
         let id = self.get_new_key_id(&PreKeyType::Kyber);
         store
@@ -120,7 +120,7 @@ impl KeyManager {
         store: &mut InMemSignalProtocolStore,
         key_type: &PreKeyType,
         key: &KeyPair,
-        signature: Option<&Box<[u8]>>,
+        signature: Option<&[u8]>,
     ) -> Result<()> {
         let id = self.get_new_key_id(key_type);
         match key_type {
