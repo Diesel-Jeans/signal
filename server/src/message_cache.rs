@@ -245,6 +245,40 @@ impl MessageCache {
         Ok(msg_count > 0)
     }
 
+    pub async fn get_messages_to_persist(
+        &self,
+        user_id: String,
+        device_id: u32,
+        limit: i32,
+    ) -> Result<Vec<Envelope>> {
+        let mut conn = self.pool.get().await.unwrap();
+
+        let messages = cmd("ZRANGE")
+            .arg(MessageCache::get_message_queue_key(user_id, device_id))
+            .arg(0)
+            .arg(limit)
+            .query_async::<Vec<Vec<u8>>>(&mut conn)
+            .await?;
+
+        println!("{:?}", messages);
+
+        let valid_envelopes: Vec<Envelope> = messages
+            .into_iter()
+            .filter_map(|m| {
+                // println!("m: {:?}", m);
+                match bincode::deserialize(&m) {
+                    Result::Ok(envelope) => Some(envelope),
+                    Result::Err(e) => {
+                        println!("Deserialization failed: {:?}", e);
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        Ok(valid_envelopes)
+    }
+
     fn get_message_queue_key(user_id: String, device_id: u32) -> String {
         format!("user_messages::{{{}::{}}}", user_id, device_id)
     }
@@ -514,6 +548,38 @@ mod message_cache_tests {
             .unwrap();
 
         assert_eq!(has_messages, true);
+        teardown(conn).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_messages_to_persist() {
+        let message_cache = MessageCache::connect().await.unwrap();
+        let mut conn = message_cache.pool.get().await.unwrap();
+        let user_id = "b0231ab5-4c7e-40ea-a544-f925c5051";
+        let device_id = 1;
+
+        let content = "Hello this is a test of insert()";
+
+        let mut message = Envelope::default();
+        message.content = Some(content.as_bytes().to_vec());
+
+        let message_id = message_cache
+            .insert(
+                user_id.to_string(),
+                device_id,
+                message, 
+                generate_uuid(),
+            )
+            .await
+            .unwrap();
+
+        let envelopes = message_cache
+            .get_messages_to_persist(user_id.to_string(), device_id, -1)
+            .await
+            .unwrap();
+   
+        assert_eq!(envelopes.len(), 1);
         teardown(conn).await;
     }
 }
