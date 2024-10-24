@@ -62,7 +62,6 @@ async fn handle_put_registration<T: SignalDatabase>(
     let phone_number = auth_header.username();
 
     state
-        .account_manager()
         .create_account(
             phone_number.to_owned(),
             registration.account_attributes().to_owned(),
@@ -75,6 +74,10 @@ async fn handle_put_registration<T: SignalDatabase>(
                 0,
                 "no token".to_owned(),
                 "salt".to_owned(),
+                registration.aci_signed_pre_key().to_owned(),
+                registration.pni_signed_pre_key().to_owned(),
+                registration.aci_pq_last_resort_pre_key().to_owned(),
+                registration.pni_pq_last_resort_pre_key().to_owned(),
             ),
         )
         .await

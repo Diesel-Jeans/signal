@@ -1,10 +1,11 @@
--- TABLES
 CREATE TABLE accounts (
     id                INTEGER PRIMARY KEY NOT NULL GENERATED ALWAYS AS IDENTITY,
     aci               VARCHAR(16) NOT NULL UNIQUE,
     pni               VARCHAR(20) NOT NULL UNIQUE,
     aci_identity_key  BYTEA NOT NULL,
-    pni_identity_key  BYTEA NOT NULL
+    pni_identity_key  BYTEA NOT NULL,
+    phone_number      TEXT NOT NULL UNIQUE,
+    account_attr      BYTEA NOT NULL
 );
 
 CREATE TABLE devices (
@@ -60,21 +61,30 @@ CREATE TABLE device_keys (
     pni_pq_last_resort_pre_key  TEXT REFERENCES pni_pq_last_resort_pre_key_store(key_id) ON DELETE CASCADE
 );
 
-CREATE TABLE one_time_pre_key_store (
+CREATE TABLE one_time_ec_pre_key_store (
     id          INTEGER PRIMARY KEY NOT NULL GENERATED ALWAYS AS IDENTITY,
-    owner     INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    owner       INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
     key_id      TEXT NOT NULL,
     public_key  bytea NOT NULL,
     UNIQUE(owner, key_id)
 );
 
-INSERT INTO
-    accounts (aci, pni, aci_identity_key, pni_identity_key)
-VALUES
-    ('bob', 'PNI:1234', '\x053b258970748dff667800108898e390a1dfabd8fa66889748d903c12fbc5c732d'::bytea, 'x1234'::bytea); -- auth_token = BBBBBB
+CREATE TABLE one_time_pq_pre_key_store (
+    id          INTEGER PRIMARY KEY NOT NULL GENERATED ALWAYS AS IDENTITY,
+    owner       INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    key_id      TEXT NOT NULL,
+    public_key  bytea NOT NULL,
+    signature   bytea,
+    UNIQUE(owner, key_id)
+);
 
 INSERT INTO
-    accounts (aci, pni, aci_identity_key, pni_identity_key)
+    accounts (aci, pni, aci_identity_key, pni_identity_key, phone_number, account_attr)
 VALUES
-    ('alice', 'PNI:5678', '\x414c4943454b4559'::bytea, '\x5678'::bytea); -- auth_token = AAAAAA
+    ('bob', 'PNI:1234', '\x053b258970748dff667800108898e390a1dfabd8fa66889748d903c12fbc5c732d'::BYTEA, 'x1234'::BYTEA, '12345678', 'x4865'::BYTEA); -- auth_token = BBBBBB
+
+INSERT INTO
+    accounts (aci, pni, aci_identity_key, pni_identity_key, phone_number, account_attr)
+VALUES
+    ('alice', 'PNI:5678', '\x414c4943454b4559'::BYTEA, '\x5678'::BYTEA, '87654321', 'x4558'::BYTEA); -- auth_token = AAAAAA
 
