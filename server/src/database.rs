@@ -12,7 +12,7 @@ use sqlx::Transaction;
 #[async_trait]
 pub trait SignalDatabase: Clone {
     /// Save a new account to the database.
-    async fn add_account(&self, account: Account) -> Result<()>;
+    async fn add_account(&self, account: &Account) -> Result<()>;
 
     /// Get an account that was saved in the database.
     ///
@@ -22,7 +22,7 @@ pub trait SignalDatabase: Clone {
     async fn get_account(&self, service_id: &ServiceId) -> Result<Account>;
 
     /// Add device
-    async fn add_device(&self, service_id: &ServiceId, device: Device) -> Result<()>;
+    async fn add_device(&self, service_id: &ServiceId, device: &Device) -> Result<()>;
     /// Get all devices owned by account
     async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>>;
     /// Get single device owned by account
@@ -47,7 +47,7 @@ pub trait SignalDatabase: Clone {
     ) -> Result<()>;
 
     /// Retreive a message that was sent to the given [ProtocolAddress].
-    async fn pop_msg_queue(&self, address: ProtocolAddress) -> Result<Vec<Envelope>>;
+    async fn pop_msg_queue(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>>;
 
     /// Stores a single aci signed pre key
     async fn store_aci_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()>;
@@ -65,7 +65,7 @@ pub trait SignalDatabase: Clone {
     /// corrosponds to the given [ProtocolAddress].
     async fn store_key_bundle(
         &self,
-        data: DevicePreKeyBundle,
+        data: &DevicePreKeyBundle,
         address: &ProtocolAddress,
     ) -> Result<()>;
 
@@ -76,16 +76,26 @@ pub trait SignalDatabase: Clone {
     /// Get how many keys are left until a last resort key is used instead of
     /// a one time prekey. More keys should be uploaded when this value is below
     /// some threshold.
-    async fn get_one_time_pre_key_count(&self, service_id: &ServiceId) -> Result<u32>;
+    async fn get_one_time_ec_pre_key_count(&self, service_id: &ServiceId) -> Result<u32>;
+
+    async fn get_one_time_pq_pre_key_count(&self, service_id: &ServiceId) -> Result<u32>;
 
     /// Store new one time prekeys to avoid running out.
-    async fn store_one_time_pre_keys(
+    async fn store_one_time_ec_pre_keys(
         &self,
         otpks: Vec<UploadPreKey>,
-        owner: ProtocolAddress,
+        owner: &ProtocolAddress,
+    ) -> Result<()>;
+
+    async fn store_one_time_pq_pre_keys(
+        &self,
+        otpks: Vec<UploadSignedPreKey>,
+        owner: &ProtocolAddress,
     ) -> Result<()>;
 
     /// Get a one time prekey so that you can start a conversation with the
     /// device that is associated with the given [ProtocolAddress].
-    async fn get_one_time_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadPreKey>;
+    async fn get_one_time_ec_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadPreKey>;
+
+    async fn get_one_time_pq_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadSignedPreKey>;
 }

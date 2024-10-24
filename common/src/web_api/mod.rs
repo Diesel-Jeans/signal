@@ -32,7 +32,7 @@ pub struct CreateAccountOptions {
     pub pni_pq_last_resort_pre_key: UploadSignedPreKey,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceCapabilities {
     storage: bool,
@@ -42,7 +42,7 @@ pub struct DeviceCapabilities {
     versioned_expiration_timer: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountAttributes {
     fetches_messages: bool,
@@ -289,7 +289,7 @@ impl RegistrationRequest {
 
 /// Used to upload any type of prekey along with a signature that is used
 /// to verify the authenticity of the prekey.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadSignedPreKey {
     pub key_id: u32,
