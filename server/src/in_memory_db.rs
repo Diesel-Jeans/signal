@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use axum::async_trait;
 use common::pre_key::PreKeyType;
 use common::signal_protobuf::Envelope;
-use common::web_api::{DevicePreKeyBundle, UploadSignedPreKey};
+use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -164,11 +164,11 @@ impl SignalDatabase for InMemorySignalDatabase {
     async fn store_key_bundle(
         &self,
         data: DevicePreKeyBundle,
-        owner_address: ProtocolAddress,
+        owner_address: &ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
-    async fn get_key_bundle(&self, address: ProtocolAddress) -> Result<DevicePreKeyBundle> {
+    async fn get_key_bundle(&self, address: &ProtocolAddress) -> Result<DevicePreKeyBundle> {
         todo!()
     }
 
@@ -187,16 +187,13 @@ impl SignalDatabase for InMemorySignalDatabase {
 
     async fn store_one_time_pre_keys(
         &self,
-        otpks: Vec<UploadSignedPreKey>,
+        otpks: Vec<UploadPreKey>,
         owner_address: ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
 
-    async fn get_one_time_pre_key(
-        &self,
-        owner_address: ProtocolAddress,
-    ) -> Result<UploadSignedPreKey> {
+    async fn get_one_time_pre_key(&self, owner_address: &ProtocolAddress) -> Result<UploadPreKey> {
         todo!()
     }
 }

@@ -13,9 +13,12 @@ use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
-use common::web_api::{AuthorizationHeader, CreateAccountOptions, RegistrationRequest};
+use common::web_api::{
+    AuthorizationHeader, CreateAccountOptions, DevicePreKeyBundle, RegistrationRequest,
+    SetKeyRequest, UploadKeys,
+};
 use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId};
-use libsignal_protocol::{kem, IdentityKey, PublicKey};
+use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
 use std::env;
 use std::fmt::format;
 use std::time::Duration;
@@ -29,28 +32,6 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 use crate::socket::SocketManager;
-
-enum PublicKeyType {
-    Kem(kem::PublicKey),
-    Ec(PublicKey),
-}
-
-impl PublicKeyType {
-    fn expect_kem(self) -> kem::PublicKey {
-        if let PublicKeyType::Kem(key) = self {
-            key
-        } else {
-            panic!("dev_err: expected a kem key, got an ec key")
-        }
-    }
-    fn expect_ec(self) -> PublicKey {
-        if let PublicKeyType::Ec(key) = self {
-            key
-        } else {
-            panic!("dev_err: expected an ec key, got a kem key")
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 struct SignalServerState<T: SignalDatabase> {
@@ -169,61 +150,6 @@ async fn redirect_http_to_https(addr: SocketAddr, http: u16, https: u16) -> Resu
 
     axum::serve(listener, redirect.into_make_service()).await?;
     Ok(())
-}
-
-// The Signal endpoint /v2/keys/check says that a u64 id is needed, however their ids, such as
-// KyperPreKeyID only supports u32. Here only a u32 is used and therefore only a 4 byte size
-// instead of the sugested u64.
-async fn handle_post_keycheck<T: SignalDatabase>(
-    database: T,
-    usr_id: ServiceId,
-    device_id: DeviceId,
-    usr_digest: [u8; 32],
-) -> Result<bool> {
-    todo!()
-    /*
-    if let Some(keys) = database
-        .lock()
-        .await
-        .keys
-        .lock()
-        .await
-        .get(&usr_id)
-        .and_then(|usr_map| usr_map.get(&device_id))
-    {
-        fn get_pre_key<'a>(
-            key_type: &PreKey,
-            table: &'a HashMap<PreKey, Vec<UploadSignedPreKey>>,
-        ) -> Result<&'a UploadSignedPreKey> {
-            if let Some(key) = table.get(key_type) {
-                if key.len() <= 1 {
-                    Ok(&key[0])
-                } else {
-                    bail!("There are too many keys of type: {:?}.", key_type)
-                }
-            } else {
-                bail!("There is no {:?} key for user", key_type)
-            }
-        }
-
-        let identity_key_upload = get_pre_key(&PreKey::Identity, keys)?;
-        let signed_key_upload = get_pre_key(&PreKey::Signed, keys)?;
-        let kyper_key_update = get_pre_key(&PreKey::Kyber, keys)?;
-
-        let mut digest = Sha256::new();
-        digest.update(&identity_key_upload.public_key);
-        digest.update(&signed_key_upload.key_id.to_be_bytes());
-        digest.update(signed_key_upload.public_key.to_owned());
-        digest.update(&kyper_key_update.key_id.to_be_bytes());
-        digest.update(kyper_key_update.public_key.to_owned());
-
-        let server_digest: [u8; 32] = digest.finalize().into();
-
-        Ok(server_digest == usr_digest)
-    } else {
-        bail!("Client has no keys")
-    }
-    */
 }
 
 /// A protocol address is represented in string form as
@@ -426,11 +352,12 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod server_tests {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use super::{handle_put_messages, SignalServerState};
     use crate::account::Account;
     use crate::database::SignalDatabase;
-    use common::web_api::Device;
     use libsignal_protocol::*;
     use uuid::Uuid;
     /*
@@ -532,11 +459,14 @@ mod server_tests {
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_get_keys_gets_keys() {
-        todo!()
+        todo!();
         /*
         let database = Arc::new(Mutex::new(InMemorySignalDatabase::new()));
-        let usr_id: UserID = 0u32;
-        let device_id: DeviceID = 0u32;
+        let is_aci = true;
+        let usr_id =
+            ServiceId::parse_from_service_id_string("8c78cd2a-16ff-427d-83dc-1a5e36ce713d")
+                .unwrap();
+        let address = ProtocolAddress::new("04899A85-4C9E-44CC-8428-A02AB69335F1".into(), 0.into());
 
         let mut database_lock = database.lock().await;
         database_lock
@@ -584,7 +514,7 @@ mod server_tests {
                 .unwrap(),
             j
         );
-         */
+        */
     }
 
     #[ignore = "Not implemented"]

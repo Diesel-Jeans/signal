@@ -10,6 +10,13 @@ pub struct Account {
     pub pni: Option<String>,
     pub auth_token: String,
     pub identity_key: IdentityKey,
+    pub attributes: AccountAttributes,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct AccountAttributes {
+    pub aci_registration_id: i64,
+    pub pni_registration_id: i64,
 }
 
 impl Account {

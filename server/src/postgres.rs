@@ -9,7 +9,7 @@ use anyhow::{anyhow, bail, Result};
 use axum::async_trait;
 use common::{
     signal_protobuf::Envelope,
-    web_api::{DevicePreKeyBundle, UploadSignedPreKey},
+    web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
 };
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{IdentityKey, PublicKey};
@@ -381,14 +381,14 @@ impl SignalDatabase for PostgresDatabase {
     async fn store_key_bundle(
         &self,
         data: DevicePreKeyBundle,
-        address: ProtocolAddress,
+        address: &ProtocolAddress,
     ) -> Result<()> {
-        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(address)?;
         let mut tx = self.pool.begin().await?;
         let aspk = data.aci_signed_pre_key;
         let pspk = data.pni_signed_pre_key;
-        let apqlrpk = data.aci_pq_last_resort_pre_key;
-        let ppqlrpk = data.pni_pq_last_resort_pre_key;
+        let apqlrpk = data.aci_pq_pre_key;
+        let ppqlrpk = data.pni_pq_pre_key;
 
         store_aci_signed_pre_key(&mut tx, &aspk).await?;
         store_pni_signed_pre_key(&mut tx, &pspk).await?;
@@ -419,8 +419,8 @@ impl SignalDatabase for PostgresDatabase {
         tx.commit().await.map(|_| ()).map_err(|err| err.into())
     }
 
-    async fn get_key_bundle(&self, address: ProtocolAddress) -> Result<DevicePreKeyBundle> {
-        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
+    async fn get_key_bundle(&self, address: &ProtocolAddress) -> Result<DevicePreKeyBundle> {
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(address)?;
 
         sqlx::query!(
         r#"
@@ -464,12 +464,12 @@ impl SignalDatabase for PostgresDatabase {
                 public_key: row.pspk.into(),
                 signature: row.pspk_sig.into()
             },
-            aci_pq_last_resort_pre_key: UploadSignedPreKey {
+            aci_pq_pre_key: UploadSignedPreKey {
                 key_id: row.apqlrpk_id.parse().unwrap(),
                 public_key: row.apqlrpk.into(),
                 signature: row.apqlrpk_sig.into()
             },
-            pni_pq_last_resort_pre_key: UploadSignedPreKey {
+            pni_pq_pre_key: UploadSignedPreKey {
                 key_id: row.ppqlrpk_id.parse().unwrap(),
                 public_key: row.ppqlrpk.into(),
                 signature: row.ppqlrpk_sig.into()
@@ -485,7 +485,7 @@ impl SignalDatabase for PostgresDatabase {
 
     async fn store_one_time_pre_keys(
         &self,
-        otpks: Vec<UploadSignedPreKey>,
+        otpks: Vec<UploadPreKey>,
         owner: ProtocolAddress,
     ) -> Result<()> {
         let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&owner)?;
@@ -494,9 +494,9 @@ impl SignalDatabase for PostgresDatabase {
             match sqlx::query!(
                 r#"
                 INSERT INTO
-                    one_time_pre_key_store (owner, key_id, public_key, signature)
+                    one_time_pre_key_store (owner, key_id, public_key)
                 SELECT
-                    id, $4, $5, $6
+                    id, $4, $5
                 FROM
                     devices
                 WHERE
@@ -515,7 +515,6 @@ impl SignalDatabase for PostgresDatabase {
                 owner.device_id().to_string(),
                 otpk.key_id.to_string(),
                 &*otpk.public_key,
-                &*otpk.signature
             )
             .execute(&self.pool)
             .await
@@ -528,8 +527,8 @@ impl SignalDatabase for PostgresDatabase {
         Ok(())
     }
 
-    async fn get_one_time_pre_key(&self, owner: ProtocolAddress) -> Result<UploadSignedPreKey> {
-        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&owner)?;
+    async fn get_one_time_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadPreKey> {
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(owner)?;
 
         sqlx::query!(
             r#"
@@ -555,10 +554,10 @@ impl SignalDatabase for PostgresDatabase {
                     LIMIT 1
                 )
                 RETURNING
-                    key_id, public_key, signature
+                    key_id, public_key
             )
             SELECT
-                key_id, public_key, signature
+                key_id, public_key
             FROM
                 key
             "#,
@@ -568,10 +567,9 @@ impl SignalDatabase for PostgresDatabase {
         )
         .fetch_one(&self.pool)
         .await
-        .map(|row| UploadSignedPreKey {
+        .map(|row| UploadPreKey {
             key_id: row.key_id.parse().unwrap(),
             public_key: row.public_key.into(),
-            signature: row.signature.into(),
         })
         .map_err(|err| err.into())
     }
