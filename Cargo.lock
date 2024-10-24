@@ -2902,6 +2902,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "axum-server",
+ "base64 0.21.7",
  "bincode",
  "common",
  "deadpool-redis",

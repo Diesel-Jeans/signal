@@ -1,4 +1,5 @@
 use anyhow::Result;
+use common::signal_protobuf::Envelope;
 use deadpool_redis::redis::cmd;
 use deadpool_redis::{Config, Runtime};
 use futures_util::task::SpawnExt;
@@ -6,6 +7,7 @@ use futures_util::StreamExt;
 use redis::{Msg, PubSubCommands};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
+
 const PAGE_SIZE: u32 = 100;
 const QUEUE_KEYSPACE_PREFIX: &str = "__keyspace@0__:user_queue::";
 const PERSISTING_KEYSPACE_PREFIX: &str = "__keyspace@0__:user_queue_persisting::";
@@ -81,15 +83,17 @@ impl MessageCache {
         &self,
         user_id: String,
         device_id: u32,
-        message: String,
+        mut message: Envelope,
         message_guid: String,
     ) -> Result<i64> {
-        let mut conn = self.pool.get().await.unwrap();
+        let mut conn = self.pool.get().await?;
         let queue_key: String = MessageCache::get_message_queue_key(user_id.clone(), device_id);
         let queue_metadata_key: String =
             MessageCache::get_message_queue_metadata_key(user_id.clone(), device_id);
         let queue_total_index_key: String =
             MessageCache::get_queue_index_key(user_id.clone(), device_id);
+        message.server_guid = Option::from(message_guid.clone());
+        let data = bincode::serialize(&message)?;
 
         let message_guid_exists: i32 = cmd("HEXISTS")
             .arg(queue_metadata_key.clone())
@@ -117,7 +121,7 @@ impl MessageCache {
             .arg(queue_key.clone())
             .arg("NX")
             .arg(message_id.clone())
-            .arg(message)
+            .arg(data.clone())
             .query_async::<()>(&mut conn)
             .await?;
 
@@ -158,14 +162,14 @@ impl MessageCache {
         user_id: String,
         device_id: u32,
         message_guids: Vec<String>,
-    ) -> Result<Vec<String>> {
+    ) -> Result<Vec<Envelope>> {
         let mut conn = self.pool.get().await.unwrap();
         let queue_key: String = MessageCache::get_message_queue_key(user_id.clone(), device_id);
         let queue_metadata_key: String =
             MessageCache::get_message_queue_metadata_key(user_id.clone(), device_id);
         let queue_total_index_key: String =
             MessageCache::get_queue_index_key(user_id.clone(), device_id);
-        let mut removed_messages: Vec<String> = Vec::new();
+        let mut removed_messages: Vec<Envelope> = Vec::new();
 
         for guid in message_guids {
             let message_id: Option<String> = cmd("HGET")
@@ -176,7 +180,7 @@ impl MessageCache {
 
             if let Some(msg_id) = message_id.clone() {
                 // retrieving the message
-                let envelope: Option<Vec<String>> = cmd("ZRANGE")
+                let envelope: Option<Vec<Vec<u8>>> = cmd("ZRANGE")
                     .arg(queue_key.clone())
                     .arg(msg_id.clone())
                     .arg(msg_id.clone())
@@ -203,7 +207,7 @@ impl MessageCache {
                     .await?;
 
                 if let Some(envel) = envelope {
-                    removed_messages.push(envel[0].clone());
+                    removed_messages.push(bincode::deserialize(&envel[0])?);
                 }
             }
         }
@@ -245,9 +249,18 @@ impl MessageCache {
         Ok(msg_count > 0)
     }
 
-    pub async fn get_all_messages(&self, user_id: String, device_id: u32) -> Vec<(String, String)> {
-        let all_messages = self.get_items(user_id.clone(), device_id.clone(), -1).await;
-        all_messages
+    pub async fn get_all_messages(&self, user_id: String, device_id: u32) -> Vec<Envelope> {
+        let messages = self.get_items(user_id.clone(), device_id.clone(), -1).await;
+
+        if (messages.is_empty()) {
+            return Vec::new();
+        }
+        let mut envelopes = Vec::new();
+
+        for i in (0..messages.len()).step_by(2) {
+            envelopes.push(bincode::deserialize(&messages[i]).unwrap());
+        }
+        envelopes
     }
 
     async fn get_items(
@@ -255,7 +268,7 @@ impl MessageCache {
         destination_user_id: String,
         dest_device_id: u32,
         after_message_id: i32,
-    ) -> Vec<(String, String)> {
+    ) -> Vec<Vec<u8>> {
         let message_sort = format!("({}", after_message_id);
         let mut con = self.pool.get().await.unwrap();
         let queue_key =
@@ -273,7 +286,7 @@ impl MessageCache {
             return Vec::new();
         }
 
-        let messages = cmd("ZRANGE")
+        let mut messages = cmd("ZRANGE")
             .arg(queue_key.clone())
             .arg(message_sort.clone())
             .arg("+inf")
@@ -282,14 +295,11 @@ impl MessageCache {
             .arg(0)
             .arg(PAGE_SIZE)
             .arg("WITHSCORES")
-            .query_async::<Vec<String>>(&mut con)
+            .query_async::<Vec<Vec<u8>>>(&mut con)
             .await
             .unwrap();
 
-        messages
-            .chunks(2)
-            .map(|chunk| (chunk[0].clone(), chunk[1].clone()))
-            .collect()
+        messages.clone()
     }
 
     fn get_message_queue_key(user_id: String, device_id: u32) -> String {
@@ -376,6 +386,14 @@ mod message_cache_tests {
         guid.to_string()
     }
 
+    fn generate_random_envelope(message: String, uuid: String) -> Envelope {
+        let mut envelope = Envelope::default();
+        let mut data = bincode::serialize(&envelope).unwrap();
+        envelope.content = Option::from(data);
+        envelope.server_guid = Option::from(uuid);
+        envelope
+    }
+
     async fn teardown(mut con: deadpool_redis::Connection) {
         cmd("FLUSHALL").query_async::<()>(&mut con).await.unwrap();
     }
@@ -385,12 +403,15 @@ mod message_cache_tests {
     async fn test_message_cache_insert() {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
+        let uuid = generate_uuid();
+        let mut envelope =
+            generate_random_envelope("Hello this is a test of insert()".to_string(), uuid.clone());
         let message_id = message_cache
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c5051".to_string(),
                 1,
-                "Hello this is a test of insert()".to_string(),
-                generate_uuid(),
+                envelope.clone(),
+                uuid,
             )
             .await
             .unwrap();
@@ -402,11 +423,14 @@ mod message_cache_tests {
             ))
             .arg(message_id.clone())
             .arg(message_id.clone())
-            .query_async::<Vec<String>>(&mut conn)
+            .query_async::<Vec<Vec<u8>>>(&mut conn)
             .await
             .unwrap();
 
-        assert_eq!("Hello this is a test of insert()".to_string(), result[0]);
+        assert_eq!(
+            envelope,
+            bincode::deserialize::<Envelope>(&result[0]).unwrap()
+        );
         teardown(conn).await;
     }
 
@@ -416,11 +440,16 @@ mod message_cache_tests {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
         let msg_guid = generate_uuid();
+        let mut envelope1 =
+            generate_random_envelope("This is a message".to_string(), msg_guid.clone());
+        let envelope2 =
+            generate_random_envelope("This is another message".to_string(), msg_guid.clone());
+
         let message_id = message_cache
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c5052".to_string(),
                 1,
-                "This is a message".to_string(),
+                envelope1.clone(),
                 msg_guid.clone(),
             )
             .await
@@ -431,7 +460,7 @@ mod message_cache_tests {
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c5052".to_string(),
                 1,
-                "This is a different message with same msg_guid".to_string(),
+                envelope2.clone(),
                 msg_guid.clone(),
             )
             .await
@@ -446,11 +475,14 @@ mod message_cache_tests {
             ))
             .arg(message_id_2.clone())
             .arg(message_id_2.clone())
-            .query_async::<Vec<String>>(&mut conn)
+            .query_async::<Vec<Vec<u8>>>(&mut conn)
             .await
             .unwrap();
 
-        assert_eq!("This is a message", result[0]);
+        assert_eq!(
+            envelope1,
+            bincode::deserialize::<Envelope>(&result[0]).unwrap()
+        );
         teardown(conn).await;
     }
 
@@ -459,11 +491,17 @@ mod message_cache_tests {
     async fn test_message_cache_insert_different_ids() {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
+        let uuid1 = generate_uuid();
+        let uuid2 = generate_uuid();
+        let mut envelope1 = generate_random_envelope("First Message".to_string(), uuid1.clone());
+        let mut envelope2 = generate_random_envelope("Second Message".to_string(), uuid2.clone());
+
+        // inserting messages
         let message_id = message_cache
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c5053".to_string(),
                 1,
-                "First message".to_string(),
+                envelope1.clone(),
                 generate_uuid(),
             )
             .await
@@ -472,14 +510,16 @@ mod message_cache_tests {
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c5053".to_string(),
                 1,
-                "Second message".to_string(),
+                envelope2.clone(),
                 generate_uuid(),
             )
             .await
             .unwrap();
 
+        // they are inserted as two different messages
         assert_ne!(message_id, message_id_2);
 
+        // querying the envelopes
         let result_1 = cmd("ZRANGEBYSCORE")
             .arg(MessageCache::get_message_queue_key(
                 "b0231ab5-4c7e-40ea-a544-f925c5053".to_string(),
@@ -487,7 +527,7 @@ mod message_cache_tests {
             ))
             .arg(message_id.clone())
             .arg(message_id.clone())
-            .query_async::<Vec<String>>(&mut conn)
+            .query_async::<Vec<Vec<u8>>>(&mut conn)
             .await
             .unwrap();
 
@@ -498,11 +538,14 @@ mod message_cache_tests {
             ))
             .arg(message_id_2.clone())
             .arg(message_id_2.clone())
-            .query_async::<Vec<String>>(&mut conn)
+            .query_async::<Vec<Vec<u8>>>(&mut conn)
             .await
             .unwrap();
 
-        assert_ne!(result_1, result_2);
+        assert_ne!(
+            bincode::deserialize::<Envelope>(&result_1[0]).unwrap(),
+            bincode::deserialize::<Envelope>(&result_2[0]).unwrap()
+        );
 
         teardown(conn).await;
     }
@@ -514,13 +557,11 @@ mod message_cache_tests {
         let mut conn = message_cache.pool.get().await.unwrap();
         let user_id = "b0231ab5-4c7e-40ea-a544-f925c5".to_string();
         let msg_guid = generate_uuid();
+        let mut envelope =
+            generate_random_envelope("This is a test of remove()".to_string(), msg_guid.clone());
+
         let message_id = message_cache
-            .insert(
-                user_id.clone(),
-                1,
-                "This is a test of remove()".to_string(),
-                msg_guid.clone(),
-            )
+            .insert(user_id.clone(), 1, envelope.clone(), msg_guid.clone())
             .await
             .unwrap();
 
@@ -530,7 +571,7 @@ mod message_cache_tests {
             .unwrap();
 
         assert_eq!(removed_messages.len(), 1);
-        assert_eq!(removed_messages[0], "This is a test of remove()");
+        assert_eq!(removed_messages[0], envelope);
         teardown(conn).await;
     }
 
@@ -540,26 +581,24 @@ mod message_cache_tests {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
         let user_id = "b0231ab5-4c7e-40ea-a544-f925c".to_string();
-
+        let mut envelopes = Vec::new();
         for i in 0..10 {
             let uuid = generate_uuid();
+            let envelope =
+                generate_random_envelope(format!("This is message nr. {}", i + 1), uuid.clone());
             let msg_id = message_cache
-                .insert(
-                    user_id.clone(),
-                    1,
-                    format!("This is message nr. {}", i + 1),
-                    uuid.clone(),
-                )
+                .insert(user_id.clone(), 1, envelope.clone(), uuid.clone())
                 .await
                 .unwrap();
+            envelopes.push(envelope);
         }
 
         //getting those messages
-        let messages = message_cache.get_all_messages(user_id.clone(), 1).await;
+        let mut messages = message_cache.get_all_messages(user_id.clone(), 1).await;
 
         assert_eq!(messages.len(), 10);
-        for i in 0..10 {
-            assert_eq!(messages[i].0, format!("This is message nr. {}", i + 1));
+        for (message, envelope) in messages.into_iter().zip(envelopes.into_iter()) {
+            assert_eq!(message, envelope);
         }
 
         teardown(conn).await;
@@ -572,6 +611,11 @@ mod message_cache_tests {
         let mut conn = message_cache.pool.get().await.unwrap();
         let user_id = "b0231ab5-4c7e-40ea-a544-f925c5051";
         let device_id = 1;
+        let msg_guid = generate_uuid();
+        let envelope = generate_random_envelope(
+            "Hello this is a test of has_messages()".to_string(),
+            msg_guid.clone(),
+        );
 
         let does_not_has_messages = message_cache
             .has_messages(user_id.to_string(), device_id)
@@ -584,8 +628,8 @@ mod message_cache_tests {
             .insert(
                 user_id.to_string(),
                 device_id,
-                "Hello this is a test of insert()".to_string(),
-                generate_uuid(),
+                envelope.clone(),
+                msg_guid.clone(),
             )
             .await
             .unwrap();

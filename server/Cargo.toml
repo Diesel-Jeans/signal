@@ -30,6 +30,7 @@ futures-util = "0.3.30"
 headers = "0.4.0"
 async-std = "1.13.0"
 serial_test = "3.1.1"
+base64 = "0.21.7"
 
 [build-dependencies]
 tonic-build = "0.12.3"
