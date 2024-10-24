@@ -13,7 +13,7 @@ use common::{
 };
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{IdentityKey, PublicKey};
-use sqlx::{postgres::PgPoolOptions, PgConnection, Pool, Postgres, Transaction};
+use sqlx::{postgres::PgPoolOptions, Acquire, PgConnection, Pool, Postgres, Transaction};
 
 #[derive(Clone)]
 pub struct PostgresDatabase {
@@ -44,8 +44,8 @@ impl SignalDatabase for PostgresDatabase {
             VALUES
                 ($1, $2, $3, $4)
             "#,
-            account.aci(),
-            account.pni(),
+            account.aci().service_id_string(),
+            account.pni().service_id_string(),
             &*account.aci_identity_key().serialize(),
             &*account.pni_identity_key().serialize()
         )
@@ -57,7 +57,7 @@ impl SignalDatabase for PostgresDatabase {
 
     async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
         let (id_str, id) = parse_to_specific_service_id(service_id);
-        let devices = self.get_devices(service_id).await?;
+        let devices = self.get_all_devices(service_id).await?;
 
         sqlx::query!(
             r#"
@@ -75,10 +75,10 @@ impl SignalDatabase for PostgresDatabase {
         .await
         .map(|row| {
             Account::from_db(
-                row.aci,
-                row.pni,
-                IdentityKey::new(PublicKey::deserialize(row.aci_identity_key.as_slice())).unwrap(),
-                IdentityKey::new(PublicKey::deserialize(row.pni_identity_key.as_slice())).unwrap(),
+                Pni::parse_from_service_id_string(&row.pni).unwrap(),
+                Aci::parse_from_service_id_string(&row.aci).unwrap(),
+                IdentityKey::new(PublicKey::deserialize(row.aci_identity_key.as_slice()).unwrap()),
+                IdentityKey::new(PublicKey::deserialize(row.pni_identity_key.as_slice()).unwrap()),
                 devices,
             )
         })
@@ -200,11 +200,11 @@ impl SignalDatabase for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map(|rows| {
-            rows.iter()
+            rows.into_iter()
                 .map(|row| {
                     Device::new(
-                        row.device_id.parse().unwrap(),
-                        *str::from_utf8(&*row.name).unwrap(),
+                        row.device_id.parse::<u32>().unwrap().into(),
+                        str::from_utf8(&row.name).unwrap().to_string(),
                         0,
                         0,
                         row.auth_token,
@@ -244,8 +244,8 @@ impl SignalDatabase for PostgresDatabase {
         .await
         .map(|row| {
             Device::new(
-                row.device_id.parse().unwrap(),
-                *str::from_utf8(&*row.name).unwrap(),
+                row.device_id.parse::<u32>().unwrap().into(),
+                str::from_utf8(&row.name).unwrap().to_string(),
                 0,
                 0,
                 row.auth_token,
@@ -343,7 +343,7 @@ impl SignalDatabase for PostgresDatabase {
                     WHERE
                         $1 = $2
                 )
-                AND msq_queue.receiver = $3
+                AND devices.device_id = $3
             "#,
             id_str,
             id,
@@ -358,20 +358,24 @@ impl SignalDatabase for PostgresDatabase {
         })
     }
 
-    async fn store_aci_signed_pre_key(&self, spk: UploadSignedPreKey) -> Result<()> {
-        store_aci_signed_pre_key(&mut self.pool, spk).await?;
+    async fn store_aci_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
+        let pool = &mut self.pool.acquire().await?;
+        store_aci_signed_pre_key(pool, spk).await
     }
 
-    async fn store_pni_signed_pre_key(&self, spk: UploadSignedPreKey) -> Result<()> {
-        store_pni_signed_pre_key(&mut self.pool, spk).await?;
+    async fn store_pni_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
+        let pool = &mut self.pool.acquire().await?;
+        store_pni_signed_pre_key(pool, spk).await
     }
 
-    async fn store_pq_aci_signed_pre_key(&self, pq_spk: UploadSignedPreKey) -> Result<()> {
-        store_pq_aci_signed_pre_key(&mut self.pool, pq_spk).await?;
+    async fn store_pq_aci_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
+        let pool = &mut self.pool.acquire().await?;
+        store_pq_aci_signed_pre_key(pool, pq_spk).await
     }
 
-    async fn store_pq_pni_signed_pre_key(&self, pq_spk: UploadSignedPreKey) -> Result<()> {
-        store_pq_pni_signed_pre_key(&mut self.pool, pq_spk).await?;
+    async fn store_pq_pni_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
+        let pool = &mut self.pool.acquire().await?;
+        store_pq_pni_signed_pre_key(pool, pq_spk).await
     }
 
     async fn store_key_bundle(
@@ -381,11 +385,15 @@ impl SignalDatabase for PostgresDatabase {
     ) -> Result<()> {
         let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
         let mut tx = self.pool.begin().await?;
+        let aspk = data.aci_signed_pre_key;
+        let pspk = data.pni_signed_pre_key;
+        let apqlrpk = data.aci_pq_last_resort_pre_key;
+        let ppqlrpk = data.pni_pq_last_resort_pre_key;
 
-        store_aci_signed_pre_key(&mut *tx, data.aci_signed_pre_key).await?;
-        store_pni_signed_pre_key(&mut *tx, data.pni_signed_pre_key).await?;
-        store_pq_aci_signed_pre_key(&mut *tx, data.aci_pq_last_resort_pre_key).await?;
-        store_pq_pni_signed_pre_key(&mut *tx, data.pni_pq_last_resort_pre_key).await?;
+        store_aci_signed_pre_key(&mut tx, &aspk).await?;
+        store_pni_signed_pre_key(&mut tx, &pspk).await?;
+        store_pq_aci_signed_pre_key(&mut tx, &apqlrpk).await?;
+        store_pq_pni_signed_pre_key(&mut tx, &ppqlrpk).await?;
 
         sqlx::query!(
             r#"
@@ -400,10 +408,10 @@ impl SignalDatabase for PostgresDatabase {
             "#,
             id_str,
             id,
-            data.aci_signed_pre_key.key_id.to_string(),
-            data.pni_signed_pre_key.key_id.to_string(),
-            data.aci_pq_last_resort_pre_key.key_id.to_string(),
-            data.pni_pq_last_resort_pre_key.key_id.to_string()
+            aspk.key_id.to_string(),
+            pspk.key_id.to_string(),
+            apqlrpk.key_id.to_string(),
+            ppqlrpk.key_id.to_string()
         )
         .execute(&mut *tx)
         .await?;
@@ -594,7 +602,7 @@ fn parse_to_specific_service_id_from_protocol_address(
     ))
 }
 
-async fn store_aci_signed_pre_key(tx: &mut PgConnection, spk: UploadSignedPreKey) -> Result<()> {
+async fn store_aci_signed_pre_key(tx: &mut PgConnection, spk: &UploadSignedPreKey) -> Result<()> {
     sqlx::query!(
         r#"
         INSERT INTO
@@ -614,7 +622,7 @@ async fn store_aci_signed_pre_key(tx: &mut PgConnection, spk: UploadSignedPreKey
     .map_err(|err| err.into())
 }
 
-async fn store_pni_signed_pre_key(tx: &mut PgConnection, spk: UploadSignedPreKey) -> Result<()> {
+async fn store_pni_signed_pre_key(tx: &mut PgConnection, spk: &UploadSignedPreKey) -> Result<()> {
     sqlx::query!(
         r#"
         INSERT INTO
@@ -636,7 +644,7 @@ async fn store_pni_signed_pre_key(tx: &mut PgConnection, spk: UploadSignedPreKey
 
 async fn store_pq_aci_signed_pre_key(
     tx: &mut PgConnection,
-    pq_spk: UploadSignedPreKey,
+    pq_spk: &UploadSignedPreKey,
 ) -> Result<()> {
     sqlx::query!(
         r#"
@@ -659,7 +667,7 @@ async fn store_pq_aci_signed_pre_key(
 
 async fn store_pq_pni_signed_pre_key(
     tx: &mut PgConnection,
-    pq_spk: UploadSignedPreKey,
+    pq_spk: &UploadSignedPreKey,
 ) -> Result<()> {
     sqlx::query!(
         r#"

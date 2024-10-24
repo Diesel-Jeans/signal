@@ -1,10 +1,10 @@
-use crate::account::Account;
+use crate::account::{Account, Device};
 use crate::database::SignalDatabase;
 use anyhow::{anyhow, Result};
 use axum::async_trait;
 use common::pre_key::PreKeyType;
 use common::signal_protobuf::Envelope;
-use common::web_api::{Device, DevicePreKeyBundle, UploadSignedPreKey};
+use common::web_api::{DevicePreKeyBundle, UploadSignedPreKey};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -83,8 +83,37 @@ impl InMemorySignalDatabase {
 
 #[async_trait]
 impl SignalDatabase for InMemorySignalDatabase {
+    async fn add_device(&self, service_id: &ServiceId, device: Device) -> Result<()> {
+        todo!()
+    }
+    async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
+        todo!()
+    }
+    async fn get_device(&self, service_id: &ServiceId, device_id: u32) -> Result<Device> {
+        todo!()
+    }
+    async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()> {
+        todo!()
+    }
+    async fn store_aci_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
+        todo!()
+    }
+
+    async fn store_pni_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
+        todo!()
+    }
+
+    async fn store_pq_aci_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
+        todo!()
+    }
+
+    async fn store_pq_pni_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
+        todo!()
+    }
+
     async fn add_account(&self, account: Account) -> Result<()> {
-        let service_id = account.service_id();
+        todo!("Decide whether this should be aci or pni");
+        let service_id = ServiceId::Aci(account.aci());
         self.accounts
             .lock()
             .await

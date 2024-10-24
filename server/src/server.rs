@@ -119,7 +119,14 @@ async fn handle_put_registration<T: SignalDatabase>(
 
     let account = Account::new(
         uuid.into(),
-        Device::new(0u32.into(), "bob_device".to_owned(), 0u32, 0u32),
+        Device::new(
+            0u32.into(),
+            "bob_device".into(),
+            0u32,
+            0u32,
+            "".into(),
+            "".into(),
+        ),
         *registration.pni_identity_key(),
         *registration.aci_identity_key(),
     );

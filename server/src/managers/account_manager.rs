@@ -1,12 +1,19 @@
-#[derive(Debug)]
-pub struct account_manager<db: SignalDatabase> {}
+use crate::database::SignalDatabase;
 
-pub fn create_account() {}
+#[derive(Debug, Clone)]
+pub struct AccountManager {}
 
-pub fn get_account() {}
+impl AccountManager {
+    pub fn new() -> Self {
+        Self {}
+    }
+    pub fn create_account() {}
 
-pub fn update_account_aci() {}
+    pub fn get_account() {}
 
-pub fn update_account_pni() {}
+    pub fn update_account_aci() {}
 
-pub fn delete_account() {}
+    pub fn update_account_pni() {}
+
+    pub fn delete_account() {}
+}

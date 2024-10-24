@@ -50,16 +50,16 @@ pub trait SignalDatabase: Clone {
     async fn pop_msg_queue(&self, address: ProtocolAddress) -> Result<Vec<Envelope>>;
 
     /// Stores a single aci signed pre key
-    async fn store_aci_signed_pre_key(&self, spk: UploadSignedPreKey) -> Result<()>;
+    async fn store_aci_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()>;
 
     /// Stores a single pni signed pre key
-    async fn store_pni_signed_pre_key(&self, spk: UploadSignedPreKey) -> Result<()>;
+    async fn store_pni_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()>;
 
     /// Stores a single pq aci signed pre key
-    async fn store_pq_aci_signed_pre_key(&self, pq_spk: UploadSignedPreKey) -> Result<()>;
+    async fn store_pq_aci_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()>;
 
     /// Stores a single pq pni signed pre key
-    async fn store_pq_pni_signed_pre_key(&self, pq_spk: UploadSignedPreKey) -> Result<()>;
+    async fn store_pq_pni_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()>;
 
     /// Store the keys that are needed to start a conversation with the device that
     /// corrosponds to the given [ProtocolAddress].

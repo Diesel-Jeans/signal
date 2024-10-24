@@ -64,13 +64,13 @@ impl AuthorizationHeader {
         }
     }
     pub fn username(&self) -> &String {
-        return &self.username;
+        &self.username
     }
     pub fn device_id(&self) -> u32 {
-        return self.device_id;
+        self.device_id
     }
     pub fn password(&self) -> &String {
-        return &self.password;
+        &self.password
     }
 }
 
@@ -287,8 +287,8 @@ impl RegistrationRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UploadSignedPreKey {
     pub key_id: u32,
-    pub public_key: Box<[u8]>, // TODO: Make this a PublicKey and imlement Serialize
-    pub signature: Box<[u8]>,  // TODO: Make this a PublicKey and imlement Serialize
+    pub public_key: Box<[u8]>, // TODO: Make this a PublicKey and implement Serialize
+    pub signature: Box<[u8]>,  // TODO: Make this a PublicKey and implement Serialize
 }
 
 /// Used to upload a new prekeys.

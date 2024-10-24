@@ -85,12 +85,12 @@ impl Account {
         self.pni_identity_key
     }
 
-    pub fn devices(&self) -> Vec<Device> {
-        self.devices
+    pub fn devices(&self) -> &Vec<Device> {
+        &self.devices
     }
 
-    pub fn add_device(&self, device: Device) -> Result<()> {
-        // Do some check to see if device is not in devices
+    pub fn add_device(&mut self, device: Device) -> Result<()> {
+        // TODO: Do some check to see if device is not in devices
         self.devices.push(device);
         Ok(())
     }
@@ -137,11 +137,11 @@ impl Device {
         self.created
     }
 
-    pub fn auth_token(&self) -> String {
-        self.auth_token
+    pub fn auth_token(&self) -> &String {
+        &self.auth_token
     }
 
-    pub fn salt(&self) -> String {
-        self.salt
+    pub fn salt(&self) -> &String {
+        &self.salt
     }
 }
