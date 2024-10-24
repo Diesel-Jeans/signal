@@ -7,7 +7,7 @@ use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
 use axum::handler::HandlerWithoutStateExt;
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
 use axum::http::{Method, StatusCode, Uri};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
@@ -16,13 +16,12 @@ use common::web_api::CreateAccountOptions;
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use libsignal_protocol::{kem, PublicKey};
 use std::env;
-use std::fmt::format;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
 
 use crate::message_cache::MessageCache;
 use crate::socket::SocketManager;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::WebSocketUpgrade;
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
@@ -90,16 +89,6 @@ async fn handle_put_messages<T: SignalDatabase>(
     payload: Envelope,
 ) -> Result<(), ApiError> {
     println!("Received message");
-
-    state
-        .message_cache
-        .insert(
-            "b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(),
-            2,
-            "Hello this is a test of the insert() function".to_string(),
-            "1337".to_string(),
-        )
-        .await;
 
     state
         .database()
