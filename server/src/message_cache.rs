@@ -234,6 +234,17 @@ impl MessageCache {
         Ok(removed_messages)
     }
 
+    pub async fn has_messages(&self, user_id: String, device_id: u32) -> Result<bool> {
+        let mut conn = self.pool.get().await.unwrap();
+
+        let msg_count = cmd("ZCARD")
+            .arg(MessageCache::get_message_queue_key(user_id, device_id))
+            .query_async::<u32>(&mut conn)
+            .await?;
+
+        Ok(msg_count > 0)
+    }
+
     pub async fn get_all_messages(&self, user_id: String, device_id: u32) -> Vec<(String, String)> {
         let all_messages = self.get_items(user_id.clone(), device_id.clone(), -1).await;
         all_messages
@@ -551,6 +562,40 @@ mod message_cache_tests {
             assert_eq!(messages[i].0, format!("This is message nr. {}", i + 1));
         }
 
+        teardown(conn).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_has_messages() {
+        let message_cache = MessageCache::connect().await.unwrap();
+        let mut conn = message_cache.pool.get().await.unwrap();
+        let user_id = "b0231ab5-4c7e-40ea-a544-f925c5051";
+        let device_id = 1;
+
+        let does_not_has_messages = message_cache
+            .has_messages(user_id.to_string(), device_id)
+            .await
+            .unwrap();
+
+        assert_eq!(does_not_has_messages, false);
+
+        let message_id = message_cache
+            .insert(
+                user_id.to_string(),
+                device_id,
+                "Hello this is a test of insert()".to_string(),
+                generate_uuid(),
+            )
+            .await
+            .unwrap();
+
+        let has_messages = message_cache
+            .has_messages(user_id.to_string(), device_id)
+            .await
+            .unwrap();
+
+        assert_eq!(has_messages, true);
         teardown(conn).await;
     }
 }
