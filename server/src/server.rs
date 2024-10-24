@@ -2,6 +2,7 @@ use crate::account::{Account, Device};
 use crate::api_error::ApiError;
 use crate::database::SignalDatabase;
 use crate::in_memory_db::InMemorySignalDatabase;
+use crate::managers::state::SignalServerState;
 use crate::postgres::PostgresDatabase;
 use anyhow::Result;
 use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
@@ -13,7 +14,8 @@ use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
-use common::web_api::{AuthorizationHeader, CreateAccountOptions, RegistrationRequest};
+use common::web_api::authorization::BasicAuthorizationHeader;
+use common::web_api::{CreateAccountOptions, RegistrationRequest};
 use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{kem, IdentityKey, PublicKey};
 use std::env;
@@ -52,37 +54,6 @@ impl PublicKeyType {
     }
 }
 
-#[derive(Clone, Debug)]
-struct SignalServerState<T: SignalDatabase> {
-    db: T,
-    socket_manager: SocketManager,
-}
-
-impl<T: SignalDatabase> SignalServerState<T> {
-    #[allow(dead_code)]
-    fn database(&self) -> T {
-        self.db.clone()
-    }
-}
-
-impl SignalServerState<InMemorySignalDatabase> {
-    async fn new() -> Self {
-        Self {
-            db: InMemorySignalDatabase::new(),
-            socket_manager: SocketManager::new(),
-        }
-    }
-}
-
-impl SignalServerState<PostgresDatabase> {
-    async fn new() -> Self {
-        Self {
-            db: PostgresDatabase::connect().await.unwrap(),
-            socket_manager: SocketManager::new(),
-        }
-    }
-}
-
 async fn handle_put_messages<T: SignalDatabase>(
     state: SignalServerState<T>,
     address: ProtocolAddress,
@@ -108,15 +79,17 @@ async fn handle_get_messages<T: SignalDatabase>(
 
 async fn handle_put_registration<T: SignalDatabase>(
     state: SignalServerState<T>,
-    auth_header: AuthorizationHeader,
+    auth_header: BasicAuthorizationHeader,
     registration: RegistrationRequest,
 ) -> Result<(), ApiError> {
     println!("Register client");
+
     let uuid = Uuid::parse_str(auth_header.username()).map_err(|err| ApiError {
         message: format!("Could not parse uuid '{}'", { auth_header.username() }),
         status_code: StatusCode::BAD_REQUEST,
     })?;
 
+    state.account_manager().create_account();
     let account = Account::new(
         uuid.into(),
         Device::new(
