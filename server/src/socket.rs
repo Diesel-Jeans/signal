@@ -7,12 +7,14 @@ use serde::Deserialize;
 use serde_json::json;
 use sha2::digest::consts::False;
 use sha2::digest::typenum::Integer;
+use tonic::ConnectError;
 use uuid::fmt::Braced;
 use std::fmt;
 use std::future::Future;
 use std::net::SocketAddr;
 
 use std::str::FromStr;
+use std::thread::current;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{Mutex, RwLock, MutexGuard};
 
@@ -20,8 +22,14 @@ use common::signal_protobuf::{WebSocketMessage, WebSocketRequestMessage, web_soc
 use common::web_api::{SignalMessage, SignalMessages};
 use prost::{bytes::Bytes, Message as PMessage};
 use url::Url;
+use std::time::{SystemTime, UNIX_EPOCH};
+use rand::Rng;
+use rand::rngs::OsRng;
 
 use crate::account::Account;
+use crate::connection::WebSocketConnection;
+use crate::error::SocketManagerError;
+use crate::query::PutV1MessageParams;
 
 /*const WS_ENDPOINTS: [&str; 24] = [
     "v4/attachments/form/upload",
@@ -63,61 +71,18 @@ impl ToEnvelope for SignalMessage {
 }
 
 #[derive(Debug)]
-enum SocketManagerError {
-    SocketClosed,
-    NoAddress(SocketAddr),
-    Axum(axum::Error)
-}
-
-impl fmt::Display for SocketManagerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SocketManagerError::SocketClosed => write!(f, "Socket was closed"),
-            SocketManagerError::NoAddress(who) =>write!(f, "use_ws ERROR: no address '{}'", who),
-            SocketManagerError::Axum(err) => write!(f, "{}", err)
-        }
-    }
-}
-
-impl std::error::Error for SocketManagerError {}
-
-#[derive(Debug)]
-struct WebSocketConnection {
-    addr: SocketAddr,
-    ws: WebSocket
-}
-
-impl WebSocketConnection {
-    fn new(addr: SocketAddr, ws: WebSocket) -> Self {
-        Self {
-            addr, ws
-        }
-    }
-}
-
-#[derive(Debug)]
-enum SocketState {
+enum ConnectionState {
     Active(WebSocketConnection),
     Closed
 }
 
-type SocketMap = Arc<Mutex<HashMap<SocketAddr, Arc<Mutex<SocketState>>>>>;
+type ConnectionMap = Arc<Mutex<HashMap<SocketAddr, Arc<Mutex<ConnectionState>>>>>;
 
 #[derive(Clone, Debug)]
 pub struct SocketManager {
-    sockets: SocketMap,
+    sockets: ConnectionMap,
 }
 
-#[derive(Deserialize)]
-struct PutV1MessageParams {
-    story: bool
-}
-
-
-/*
-All ws should happen here, take in other managers or classes
-if you need to do something on ws binary or text
-*/
 impl SocketManager {
     pub fn new() -> Self {
         Self {
@@ -139,14 +104,14 @@ impl SocketManager {
                 if let Some(req) = msg.request {
                     self.handle_request(connection, req).await
                 } else {
-                    todo!()
+                    todo!() // TODO: handle not request when type request
                 }
             }
             web_socket_message::Type::Response => {
                 if let Some(res) = msg.response{
                     self.handle_response(connection, res).await
                 } else {
-                    todo!()
+                    todo!() // TODO: handle not response when type response
                 }
             }
             _ => self.close_socket(connection, 1007, "Badly formatted".to_string()).await,
@@ -157,12 +122,13 @@ impl SocketManager {
         let uri = Uri::from_str(req.path()).unwrap();
         let path = uri.path();
 
-        if path.starts_with("/v1/messages"){
+        if path.starts_with("v1/messages"){
             let id = get_path_segment::<String>(path, 2).unwrap();
             let query: Query<PutV1MessageParams> = Query::try_from_uri(&uri).unwrap();
             let json = String::from_utf8(req.body().to_vec()).unwrap();
-            let x = SignalMessages::deserialize(json!(json)).unwrap();
-            
+            let messages = SignalMessages::deserialize(json!(json)).unwrap();
+            todo!(); // TODO: call handle_put_messages
+            //self.send_response(connection, req, status, reason, headers, body);
 
         // add more endpoints below as needed
         } else {
@@ -171,6 +137,41 @@ impl SocketManager {
     }
 
     async fn handle_response(&mut self, connection: &mut WebSocketConnection, res: WebSocketResponseMessage){
+        if let Some(id) = res.id {
+            connection.pending_requests.remove(&id);
+        } else {
+            println!("response to what?")
+        }
+    }
+
+    async fn send_response(&mut self, connection: &mut WebSocketConnection, req: WebSocketRequestMessage, status: u16, reason: String, headers: Vec<String>, body: Option<Vec<u8>>) {
+        todo!()
+    }
+
+    pub async fn send_message(&mut self, who: &SocketAddr, message: Envelope){
+        let state = if let Ok(x) = self.get_ws(&who).await {
+            x
+        } else {
+            return; // socket does not exist
+        };
+        let mut state_g = state.lock().await;
+        if let ConnectionState::Active(ref mut connection) = *state_g {
+            let id = generate_req_id();
+            let body = message.encode_to_vec();
+            let req = WebSocketRequestMessage {
+                verb: Some("PUT".to_string()), 
+                path: Some("/api/v1/message".to_string()),
+                body: Some(body),
+                headers: vec![
+                    "X-Signal-Key: false".to_string(),
+                    format!("X-Signal-Timestamp: {}", current_millis()),
+                ],
+                id: Some(id)
+            };
+            connection.pending_requests.insert(id);
+            connection.ws.send(Message::Binary(req.encode_to_vec())).await;
+
+        }
 
     }
 
@@ -183,11 +184,12 @@ impl SocketManager {
     }
 
     async fn on_ws_text(&mut self, connection: &mut WebSocketConnection, text: String) {
-        println!("TEXT: {}", text);
+        println!("🎵happy happy happy🎵: {}", text);
+        connection.ws.send(Message::Text("OK".to_string())).await;
     }
 
     async fn add_ws(&self, who: SocketAddr, socket: WebSocket) {
-        let state = SocketState::Active(WebSocketConnection::new(who, socket));
+        let state = ConnectionState::Active(WebSocketConnection::new(who, socket));
         self.sockets.lock().await.insert(who, Arc::new(Mutex::new(state)));
     }
 
@@ -205,12 +207,12 @@ impl SocketManager {
             return;
         };
         let mut state_guard = state.lock().await;
-        if let SocketState::Active(connection) = std::mem::replace(&mut *state_guard, SocketState::Closed){
+        if let ConnectionState::Active(connection) = std::mem::replace(&mut *state_guard, ConnectionState::Closed){
             connection.ws.close();
         }
     }
 
-    async fn get_ws(&self, who: &SocketAddr) -> Result<Arc<Mutex<SocketState>>, SocketManagerError>
+    async fn get_ws(&self, who: &SocketAddr) -> Result<Arc<Mutex<ConnectionState>>, SocketManagerError>
     {
         let mut map_guard = self.sockets.lock().await;
         let state = if let Some(x) = map_guard.get_mut(who){
@@ -246,7 +248,7 @@ impl SocketManager {
         };
 
         // this will always check if the state is active, and exit if some other thread has closed the socket
-        while let SocketState::Active(ref mut connection) = *state.lock().await {
+        while let ConnectionState::Active(ref mut connection) = *state.lock().await {
             let msg = match connection.ws.recv().await {
                 Some(Ok(x)) => x,
                 None => break,
@@ -291,4 +293,17 @@ fn get_path_segment<T: FromStr<Err = impl std::fmt::Debug>>(uri: &str, n: usize)
         Ok(x) => Ok(x),
         Err(_) => Err("failed to convert".to_string())
     }
+}
+
+fn current_millis() -> u128{
+    SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis()
+}
+
+fn generate_req_id() -> u64{
+    let mut rng = OsRng;
+    let rand_v: u64 = rng.gen();
+    rand_v
 }

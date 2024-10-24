@@ -1,4 +1,4 @@
-use crate::api_error::ApiError;
+use crate::error::ApiError;
 use crate::database::SignalDatabase;
 use crate::in_memory_db::InMemorySignalDatabase;
 use crate::postgres::PostgresDatabase;
@@ -87,20 +87,10 @@ async fn handle_put_messages<T: SignalDatabase>(
     payload: SignalMessages,
 ) -> Result<(), ApiError> {
     println!("Received message");
+    /* TODO: handle_put_message
+        this depends on ToEnvelope trait being implemented for SignalMessage which depends on Account
+     */
     todo!()
-    //let mut envelopes = Vec::new();
-    //for msg in payload.messages{
-    //    envelopes.push(msg.to_envelope());
-    //    
-    //}
-    //state
-    //    .database()
-    //    .push_message_queue(address, vec![payload])
-    //    .await
-    //    .map_err(|_| ApiError {
-    //        message: "Could not push the message to message queue.".to_owned(),
-    //        status_code: StatusCode::INTERNAL_SERVER_ERROR,
-    //    })
 }
 
 async fn handle_get_messages<T: SignalDatabase>(
@@ -407,66 +397,6 @@ mod server_tests {
                 .to_owned(),
             identity_key: id_key.identity_key().clone(),
         }
-    }
-
-    #[tokio::test]
-    async fn handle_put_messages_adds_message_to_queue() {
-        let state = SignalServerState::<InMemorySignalDatabase>::new().await;
-        let bob = create_bob();
-        let bob_device = Device {
-            device_id: 0,
-            name: "bob_device".to_owned(),
-            last_seen: 0,
-            created: 0,
-        };
-        let bob_address =
-            ProtocolAddress::new(bob.service_id().service_id_string(), bob_device.device_id());
-
-        let alice = create_alice();
-        let alice_device = Device {
-            device_id: 0,
-            name: "alice_device".to_owned(),
-            last_seen: 0,
-            created: 0,
-        };
-        let alice_address = ProtocolAddress::new(
-            alice.service_id().service_id_string(),
-            alice_device.device_id(),
-        );
-        state.database().add_account(bob.clone()).await.unwrap();
-
-        let message = common::signal_protobuf::Envelope {
-            r#type: None,
-            source_service_id: None,
-            source_device: None,
-            client_timestamp: None,
-            content: None,
-            server_guid: None,
-            server_timestamp: None,
-            ephemeral: None,
-            destination_service_id: None,
-            urgent: None,
-            updated_pni: None,
-            story: None,
-            report_spam_token: None,
-            shared_mrm_key: None,
-        };
-        handle_put_messages(state.clone(), bob_address.clone(), message.clone())
-            .await
-            .unwrap();
-
-        assert_eq!(
-            message,
-            state
-                .database()
-                .mail_queues
-                .lock()
-                .await
-                .get_mut(&bob_address)
-                .unwrap()
-                .pop_front()
-                .unwrap()
-        );
     }
 
     #[ignore = "Not implemented"]
