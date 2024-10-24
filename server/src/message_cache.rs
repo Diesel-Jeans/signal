@@ -317,20 +317,9 @@ impl MessageCache {
             .query_async::<Vec<Vec<u8>>>(&mut conn)
             .await?;
 
-        println!("{:?}", messages);
-
         let valid_envelopes: Vec<Envelope> = messages
             .into_iter()
-            .filter_map(|m| {
-                // println!("m: {:?}", m);
-                match bincode::deserialize(&m) {
-                    Result::Ok(envelope) => Some(envelope),
-                    Result::Err(e) => {
-                        println!("Deserialization failed: {:?}", e);
-                        None
-                    }
-                }
-            })
+            .filter_map(|m| bincode::deserialize(&m).ok())
             .collect();
 
         Ok(valid_envelopes)
@@ -685,10 +674,8 @@ mod message_cache_tests {
         let user_id = "b0231ab5-4c7e-40ea-a544-f925c5051";
         let device_id = 1;
 
-        let content = "Hello this is a test of insert()";
-
         let mut message = Envelope::default();
-        message.content = Some(content.as_bytes().to_vec());
+        message.content = Some("Hello this is a test".as_bytes().to_vec());
 
         let message_id = message_cache
             .insert(
