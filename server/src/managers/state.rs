@@ -6,7 +6,7 @@ use crate::{
 use super::{account_manager::AccountManager, key_manager::KeyManager};
 
 #[derive(Clone, Debug)]
-struct SignalServerState<T: SignalDatabase> {
+pub struct SignalServerState<T: SignalDatabase> {
     db: T,
     socket_manager: SocketManager,
     account_manager: AccountManager,
@@ -16,6 +16,15 @@ struct SignalServerState<T: SignalDatabase> {
 impl<T: SignalDatabase> SignalServerState<T> {
     pub(self) fn database(&self) -> T {
         self.db.clone()
+    }
+    pub fn socket_manager(&self) -> &SocketManager {
+        &self.socket_manager
+    }
+    pub fn account_manager(&self) -> &AccountManager {
+        &self.account_manager
+    }
+    pub fn key_manager(&self) -> &KeyManager {
+        &self.key_manager
     }
 }
 

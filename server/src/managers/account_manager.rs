@@ -7,13 +7,13 @@ impl AccountManager {
     pub fn new() -> Self {
         Self {}
     }
-    pub fn create_account() {}
+    pub fn create_account(&self) {}
 
-    pub fn get_account() {}
+    pub fn get_account(&self) {}
 
-    pub fn update_account_aci() {}
+    pub fn update_account_aci(&self) {}
 
-    pub fn update_account_pni() {}
+    pub fn update_account_pni(&self) {}
 
-    pub fn delete_account() {}
+    pub fn delete_account(&self) {}
 }
