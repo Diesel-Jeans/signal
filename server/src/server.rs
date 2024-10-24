@@ -20,13 +20,13 @@ use std::fmt::format;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
 
+use crate::message_cache::MessageCache;
+use crate::socket::SocketManager;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
 use std::str::FromStr;
-
-use crate::socket::SocketManager;
 
 enum PublicKeyType {
     Kem(kem::PublicKey),
@@ -54,6 +54,7 @@ impl PublicKeyType {
 struct SignalServerState<T: SignalDatabase> {
     db: T,
     socket_manager: SocketManager,
+    message_cache: MessageCache,
 }
 
 impl<T: SignalDatabase> SignalServerState<T> {
@@ -68,6 +69,7 @@ impl SignalServerState<InMemorySignalDatabase> {
         Self {
             db: InMemorySignalDatabase::new(),
             socket_manager: SocketManager::new(),
+            message_cache: MessageCache::connect().await.unwrap(),
         }
     }
 }
@@ -77,6 +79,7 @@ impl SignalServerState<PostgresDatabase> {
         Self {
             db: PostgresDatabase::connect().await.unwrap(),
             socket_manager: SocketManager::new(),
+            message_cache: MessageCache::connect().await.unwrap(),
         }
     }
 }
@@ -87,12 +90,23 @@ async fn handle_put_messages<T: SignalDatabase>(
     payload: Envelope,
 ) -> Result<(), ApiError> {
     println!("Received message");
+
+    state
+        .message_cache
+        .insert(
+            "b0231ab5-4c7e-40ea-a544-f925c5054323".to_string(),
+            2,
+            "Hello this is a test of the insert() function".to_string(),
+            "1337".to_string(),
+        )
+        .await;
+
     state
         .database()
         .push_message_queue(address, vec![payload])
         .await
         .map_err(|_| ApiError {
-            message: "Could not push the message to message queue.".to_owned(),
+            message: "Could not push the message to message queue.".to_owned(), // TODO: Write a better error message
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
         })
 }
@@ -332,9 +346,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .max_age(Duration::from_secs(5184000))
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
-
     let state = SignalServerState::<PostgresDatabase>::new().await;
-
     let app = Router::new()
         .route("/", get(|| async { "Hello from Signal Server" }))
         .route("/v1/messages", get(get_messages_endpoint))
