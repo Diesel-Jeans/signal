@@ -53,7 +53,7 @@ impl PublicKeyType {
 }
 
 #[derive(Clone, Debug)]
-struct SignalServerState<T: SignalDatabase> {
+pub struct SignalServerState<T: SignalDatabase> {
     db: T,
     socket_manager: SocketManager,
 }
@@ -129,10 +129,12 @@ async fn handle_put_registration<T: SignalDatabase>(
         ),
         *registration.pni_identity_key(),
         *registration.aci_identity_key(),
+        auth_header.username().to_owned(),
+        registration.account_attributes().to_owned(),
     );
     state
         .database()
-        .add_account(account)
+        .add_account(&account)
         .await
         .map_err(|err| ApiError {
             message: format!("Could not store user in database: {}", err),
@@ -428,9 +430,8 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 mod server_tests {
     use super::*;
     use super::{handle_put_messages, SignalServerState};
-    use crate::account::Account;
+    use crate::account::{Account, Device};
     use crate::database::SignalDatabase;
-    use common::web_api::Device;
     use libsignal_protocol::*;
     use uuid::Uuid;
     /*

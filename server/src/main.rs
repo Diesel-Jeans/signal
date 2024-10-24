@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![allow(unused, clippy::too_many_arguments)]
 mod account;
 mod api_error;
 pub mod database;

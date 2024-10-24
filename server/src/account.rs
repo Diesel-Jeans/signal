@@ -1,4 +1,5 @@
 use anyhow::Result;
+use common::web_api::AccountAttributes;
 use libsignal_core::{Aci, DeviceId, Pni, ServiceId};
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
@@ -35,6 +36,8 @@ pub struct Account {
     aci_identity_key: IdentityKey,
     pni_identity_key: IdentityKey,
     devices: Vec<Device>,
+    phone_number: String,
+    account_attr: AccountAttributes,
 }
 
 impl Account {
@@ -43,6 +46,8 @@ impl Account {
         device: Device,
         pni_identity_key: IdentityKey,
         aci_identity_key: IdentityKey,
+        phone_number: String,
+        account_attr: AccountAttributes,
     ) -> Self {
         Self {
             pni,
@@ -50,6 +55,8 @@ impl Account {
             devices: vec![device],
             pni_identity_key,
             aci_identity_key,
+            phone_number,
+            account_attr,
         }
     }
 
@@ -59,6 +66,8 @@ impl Account {
         pni_identity_key: IdentityKey,
         aci_identity_key: IdentityKey,
         devices: Vec<Device>,
+        phone_number: String,
+        account_attr: AccountAttributes,
     ) -> Self {
         Self {
             pni,
@@ -66,6 +75,8 @@ impl Account {
             pni_identity_key,
             aci_identity_key,
             devices,
+            phone_number,
+            account_attr,
         }
     }
 
@@ -93,6 +104,14 @@ impl Account {
         // TODO: Do some check to see if device is not in devices
         self.devices.push(device);
         Ok(())
+    }
+
+    pub fn phone_number(&self) -> &str {
+        &self.phone_number
+    }
+
+    pub fn account_attr(&self) -> &AccountAttributes {
+        &self.account_attr
     }
 }
 

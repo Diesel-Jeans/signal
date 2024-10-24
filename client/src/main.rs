@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![allow(unused, clippy::too_many_arguments)]
 use crate::client::Client;
 
 mod client;

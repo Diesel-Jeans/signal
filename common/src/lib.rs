@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![allow(unused, clippy::too_many_arguments)]
 pub mod web_api;
 
 pub mod signal_protobuf {

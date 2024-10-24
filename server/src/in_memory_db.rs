@@ -83,7 +83,7 @@ impl InMemorySignalDatabase {
 
 #[async_trait]
 impl SignalDatabase for InMemorySignalDatabase {
-    async fn add_device(&self, service_id: &ServiceId, device: Device) -> Result<()> {
+    async fn add_device(&self, service_id: &ServiceId, device: &Device) -> Result<()> {
         todo!()
     }
     async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
@@ -111,14 +111,14 @@ impl SignalDatabase for InMemorySignalDatabase {
         todo!()
     }
 
-    async fn add_account(&self, account: Account) -> Result<()> {
+    async fn add_account(&self, account: &Account) -> Result<()> {
         todo!("Decide whether this should be aci or pni");
         let service_id = ServiceId::Aci(account.aci());
         self.accounts
             .lock()
             .await
             .entry(service_id)
-            .or_insert(account);
+            .or_insert(account.clone());
         self.devices
             .lock()
             .await
@@ -158,17 +158,17 @@ impl SignalDatabase for InMemorySignalDatabase {
             .extend(messages);
         Ok(())
     }
-    async fn pop_msg_queue(&self, address: ProtocolAddress) -> Result<Vec<Envelope>> {
+    async fn pop_msg_queue(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
         todo!()
     }
     async fn store_key_bundle(
         &self,
-        data: DevicePreKeyBundle,
-        owner_address: ProtocolAddress,
+        data: &DevicePreKeyBundle,
+        owner_address: &ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
-    async fn get_key_bundle(&self, address: ProtocolAddress) -> Result<DevicePreKeyBundle> {
+    async fn get_key_bundle(&self, address: &ProtocolAddress) -> Result<DevicePreKeyBundle> {
         todo!()
     }
 
@@ -188,14 +188,14 @@ impl SignalDatabase for InMemorySignalDatabase {
     async fn store_one_time_pre_keys(
         &self,
         otpks: Vec<UploadSignedPreKey>,
-        owner_address: ProtocolAddress,
+        owner_address: &ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
 
     async fn get_one_time_pre_key(
         &self,
-        owner_address: ProtocolAddress,
+        owner_address: &ProtocolAddress,
     ) -> Result<UploadSignedPreKey> {
         todo!()
     }

@@ -1,6 +1,3 @@
-use core::str;
-use std::option;
-
 use crate::{
     account::{Account, Device},
     database::SignalDatabase,
@@ -14,6 +11,7 @@ use common::{
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{IdentityKey, PublicKey};
 use sqlx::{postgres::PgPoolOptions, Acquire, PgConnection, Pool, Postgres, Transaction};
+use std::option;
 
 #[derive(Clone)]
 pub struct PostgresDatabase {
@@ -36,18 +34,21 @@ impl PostgresDatabase {
 
 #[async_trait]
 impl SignalDatabase for PostgresDatabase {
-    async fn add_account(&self, account: Account) -> Result<()> {
+    async fn add_account(&self, account: &Account) -> Result<()> {
+        let data = bincode::serialize(account.account_attr())?;
         sqlx::query!(
             r#"
             INSERT INTO
-                accounts (aci, pni, aci_identity_key, pni_identity_key)
+                accounts (aci, pni, aci_identity_key, pni_identity_key, phone_number, account_attr)
             VALUES
-                ($1, $2, $3, $4)
+                ($1, $2, $3, $4, $5, $6)
             "#,
             account.aci().service_id_string(),
             account.pni().service_id_string(),
             &*account.aci_identity_key().serialize(),
-            &*account.pni_identity_key().serialize()
+            &*account.pni_identity_key().serialize(),
+            account.phone_number(),
+            data
         )
         .execute(&self.pool)
         .await
@@ -62,7 +63,7 @@ impl SignalDatabase for PostgresDatabase {
         sqlx::query!(
             r#"
             SELECT 
-                aci, pni, aci_identity_key, pni_identity_key
+                aci, pni, aci_identity_key, pni_identity_key, phone_number, account_attr
             FROM
                 accounts
             WHERE
@@ -80,6 +81,8 @@ impl SignalDatabase for PostgresDatabase {
                 IdentityKey::new(PublicKey::deserialize(row.aci_identity_key.as_slice()).unwrap()),
                 IdentityKey::new(PublicKey::deserialize(row.pni_identity_key.as_slice()).unwrap()),
                 devices,
+                row.phone_number,
+                bincode::deserialize(&row.account_attr).unwrap(),
             )
         })
         .map_err(|err| err.into())
@@ -148,7 +151,7 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn add_device(&self, service_id: &ServiceId, device: Device) -> Result<()> {
+    async fn add_device(&self, service_id: &ServiceId, device: &Device) -> Result<()> {
         let (id_str, id) = parse_to_specific_service_id(service_id);
 
         sqlx::query!(
@@ -204,7 +207,7 @@ impl SignalDatabase for PostgresDatabase {
                 .map(|row| {
                     Device::new(
                         row.device_id.parse::<u32>().unwrap().into(),
-                        str::from_utf8(&row.name).unwrap().to_string(),
+                        std::str::from_utf8(&row.name).unwrap().to_string(),
                         0,
                         0,
                         row.auth_token,
@@ -245,7 +248,7 @@ impl SignalDatabase for PostgresDatabase {
         .map(|row| {
             Device::new(
                 row.device_id.parse::<u32>().unwrap().into(),
-                str::from_utf8(&row.name).unwrap().to_string(),
+                std::str::from_utf8(&row.name).unwrap().to_string(),
                 0,
                 0,
                 row.auth_token,
@@ -324,8 +327,8 @@ impl SignalDatabase for PostgresDatabase {
         Ok(())
     }
 
-    async fn pop_msg_queue(&self, address: ProtocolAddress) -> Result<Vec<Envelope>> {
-        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
+    async fn pop_msg_queue(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(address)?;
 
         sqlx::query!(
             r#"
@@ -380,20 +383,16 @@ impl SignalDatabase for PostgresDatabase {
 
     async fn store_key_bundle(
         &self,
-        data: DevicePreKeyBundle,
-        address: ProtocolAddress,
+        data: &DevicePreKeyBundle,
+        address: &ProtocolAddress,
     ) -> Result<()> {
-        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(address)?;
         let mut tx = self.pool.begin().await?;
-        let aspk = data.aci_signed_pre_key;
-        let pspk = data.pni_signed_pre_key;
-        let apqlrpk = data.aci_pq_last_resort_pre_key;
-        let ppqlrpk = data.pni_pq_last_resort_pre_key;
 
-        store_aci_signed_pre_key(&mut tx, &aspk).await?;
-        store_pni_signed_pre_key(&mut tx, &pspk).await?;
-        store_pq_aci_signed_pre_key(&mut tx, &apqlrpk).await?;
-        store_pq_pni_signed_pre_key(&mut tx, &ppqlrpk).await?;
+        store_aci_signed_pre_key(&mut tx, &data.aci_signed_pre_key).await?;
+        store_pni_signed_pre_key(&mut tx, &data.pni_signed_pre_key).await?;
+        store_pq_aci_signed_pre_key(&mut tx, &data.aci_pq_last_resort_pre_key).await?;
+        store_pq_pni_signed_pre_key(&mut tx, &data.pni_pq_last_resort_pre_key).await?;
 
         sqlx::query!(
             r#"
@@ -408,10 +407,10 @@ impl SignalDatabase for PostgresDatabase {
             "#,
             id_str,
             id,
-            aspk.key_id.to_string(),
-            pspk.key_id.to_string(),
-            apqlrpk.key_id.to_string(),
-            ppqlrpk.key_id.to_string()
+            data.aci_signed_pre_key.key_id.to_string(),
+            data.pni_signed_pre_key.key_id.to_string(),
+            data.aci_pq_last_resort_pre_key.key_id.to_string(),
+            data.pni_pq_last_resort_pre_key.key_id.to_string()
         )
         .execute(&mut *tx)
         .await?;
@@ -419,8 +418,8 @@ impl SignalDatabase for PostgresDatabase {
         tx.commit().await.map(|_| ()).map_err(|err| err.into())
     }
 
-    async fn get_key_bundle(&self, address: ProtocolAddress) -> Result<DevicePreKeyBundle> {
-        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&address)?;
+    async fn get_key_bundle(&self, address: &ProtocolAddress) -> Result<DevicePreKeyBundle> {
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(address)?;
 
         sqlx::query!(
         r#"
@@ -486,9 +485,9 @@ impl SignalDatabase for PostgresDatabase {
     async fn store_one_time_pre_keys(
         &self,
         otpks: Vec<UploadSignedPreKey>,
-        owner: ProtocolAddress,
+        owner: &ProtocolAddress,
     ) -> Result<()> {
-        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&owner)?;
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(owner)?;
 
         for otpk in otpks {
             match sqlx::query!(
@@ -528,8 +527,8 @@ impl SignalDatabase for PostgresDatabase {
         Ok(())
     }
 
-    async fn get_one_time_pre_key(&self, owner: ProtocolAddress) -> Result<UploadSignedPreKey> {
-        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(&owner)?;
+    async fn get_one_time_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadSignedPreKey> {
+        let (id_str, id) = parse_to_specific_service_id_from_protocol_address(owner)?;
 
         sqlx::query!(
             r#"

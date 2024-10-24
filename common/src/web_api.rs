@@ -27,7 +27,7 @@ pub struct CreateAccountOptions {
     pub pni_pq_last_resort_pre_key: UploadSignedPreKey,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceCapabilities {
     storage: bool,
@@ -37,7 +37,7 @@ pub struct DeviceCapabilities {
     versioned_expiration_timer: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountAttributes {
     fetches_messages: bool,
@@ -327,19 +327,4 @@ pub struct DevicePreKeyBundle {
     pub pni_signed_pre_key: UploadSignedPreKey,
     pub aci_pq_last_resort_pre_key: UploadSignedPreKey,
     pub pni_pq_last_resort_pre_key: UploadSignedPreKey,
-}
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Device {
-    pub device_id: u32,
-    pub name: String,
-    pub last_seen: u32,
-    pub created: u32,
-}
-
-impl Device {
-    pub fn device_id(&self) -> DeviceId {
-        self.device_id.into()
-    }
 }
