@@ -6,7 +6,7 @@ use futures_util::StreamExt;
 use redis::{Msg, PubSubCommands};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
-
+const PAGE_SIZE: u32 = 100;
 const QUEUE_KEYSPACE_PREFIX: &str = "__keyspace@0__:user_queue::";
 const PERSISTING_KEYSPACE_PREFIX: &str = "__keyspace@0__:user_queue_persisting::";
 
@@ -234,8 +234,59 @@ impl MessageCache {
         Ok(removed_messages)
     }
 
+    pub async fn get_all_messages(&self, user_id: String, device_id: u32) -> Vec<(String, String)> {
+        let all_messages = self.get_items(user_id.clone(), device_id.clone(), -1).await;
+        all_messages
+    }
+
+    async fn get_items(
+        &self,
+        destination_user_id: String,
+        dest_device_id: u32,
+        after_message_id: i32,
+    ) -> Vec<(String, String)> {
+        let message_sort = format!("({}", after_message_id);
+        let mut con = self.pool.get().await.unwrap();
+        let queue_key =
+            MessageCache::get_message_queue_key(destination_user_id.clone(), dest_device_id);
+        let queue_lock_key =
+            MessageCache::get_persist_in_progress_key(destination_user_id.clone(), dest_device_id);
+        let locked: Option<String> = cmd("GET")
+            .arg(queue_lock_key)
+            .query_async(&mut con)
+            .await
+            .unwrap();
+
+        // if there is a queue lock key on due to persist of message.
+        if let Some(lock_key) = locked {
+            return Vec::new();
+        }
+
+        let messages = cmd("ZRANGE")
+            .arg(queue_key.clone())
+            .arg(message_sort.clone())
+            .arg("+inf")
+            .arg("BYSCORE")
+            .arg("LIMIT")
+            .arg(0)
+            .arg(PAGE_SIZE)
+            .arg("WITHSCORES")
+            .query_async::<Vec<String>>(&mut con)
+            .await
+            .unwrap();
+
+        messages
+            .chunks(2)
+            .map(|chunk| (chunk[0].clone(), chunk[1].clone()))
+            .collect()
+    }
+
     fn get_message_queue_key(user_id: String, device_id: u32) -> String {
         format!("user_messages::{{{}::{}}}", user_id, device_id)
+    }
+
+    fn get_persist_in_progress_key(user_id: String, device_id: u32) -> String {
+        format!("user_queue_persisting::{{{}::{}}}", user_id, device_id)
     }
 
     fn get_message_queue_metadata_key(user_id: String, device_id: u32) -> String {
@@ -469,6 +520,37 @@ mod message_cache_tests {
 
         assert_eq!(removed_messages.len(), 1);
         assert_eq!(removed_messages[0], "This is a test of remove()");
+        teardown(conn).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_all_messages() {
+        let message_cache = MessageCache::connect().await.unwrap();
+        let mut conn = message_cache.pool.get().await.unwrap();
+        let user_id = "b0231ab5-4c7e-40ea-a544-f925c".to_string();
+
+        for i in 0..10 {
+            let uuid = generate_uuid();
+            let msg_id = message_cache
+                .insert(
+                    user_id.clone(),
+                    1,
+                    format!("This is message nr. {}", i + 1),
+                    uuid.clone(),
+                )
+                .await
+                .unwrap();
+        }
+
+        //getting those messages
+        let messages = message_cache.get_all_messages(user_id.clone(), 1).await;
+
+        assert_eq!(messages.len(), 10);
+        for i in 0..10 {
+            assert_eq!(messages[i].0, format!("This is message nr. {}", i + 1));
+        }
+
         teardown(conn).await;
     }
 }
