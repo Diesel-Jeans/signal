@@ -7,6 +7,7 @@ mod encryption;
 mod key_management;
 mod server;
 mod storage;
+mod websockets;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
