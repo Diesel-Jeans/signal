@@ -256,8 +256,7 @@ impl<T: WSStream> SocketManager<T> {
     }
 
     async fn remove_ws(&self, who: &SocketAddr) {
-        let mut guard = self.sockets.lock().await;
-        guard.remove(who);
+        self.sockets.lock().await.remove(who);
     }
 
     async fn get_ws(
