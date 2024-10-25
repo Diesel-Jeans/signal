@@ -37,6 +37,8 @@ jobs:
         unzip -o protoc-21.3-linux-x86_64.zip -d ~/.local
     - name: Run fmt
       run: cargo fmt --check
+    - name: Clip deez nuts
+      run: cargo clippy --all-targets --all-features -- -D warnings
     - name: Init docker-compose
       uses: hoverkraft-tech/compose-action@v2.0.1
       with:
