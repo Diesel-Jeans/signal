@@ -8,35 +8,30 @@ use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
 use axum::handler::HandlerWithoutStateExt;
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
-use common::signal_protobuf::Envelope;
-use common::web_api::{
-    AuthorizationHeader, CreateAccountOptions, DevicePreKeyBundle, RegistrationRequest,
-    SetKeyRequest, SignalMessages, UploadKeys,
-};
-use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId};
-use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
+use common::web_api::{AuthorizationHeader, RegistrationRequest, SignalMessages};
+use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use std::env;
-use std::fmt::format;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use crate::message_cache::MessageCache;
+use crate::socket::{SocketManager, ToEnvelope};
+use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use crate::socket::{SocketManager, ToEnvelope};
-
 #[derive(Clone, Debug)]
 struct SignalServerState<T: SignalDatabase> {
     db: T,
     socket_manager: SocketManager<WebSocket>,
+    message_cache: MessageCache,
 }
 
 impl<T: SignalDatabase> SignalServerState<T> {
@@ -51,6 +46,9 @@ impl SignalServerState<InMemorySignalDatabase> {
         Self {
             db: InMemorySignalDatabase::new(),
             socket_manager: SocketManager::new(),
+            message_cache: MessageCache::connect()
+                .await
+                .expect("Could not connect to Redis"),
         }
     }
 }
@@ -60,6 +58,9 @@ impl SignalServerState<PostgresDatabase> {
         Self {
             db: PostgresDatabase::connect().await.unwrap(),
             socket_manager: SocketManager::new(),
+            message_cache: MessageCache::connect()
+                .await
+                .expect("Could not connect to Redis"),
         }
     }
 }
@@ -348,15 +349,6 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod server_tests {
-    use std::sync::{Arc, Mutex};
-
-    use super::*;
-    use super::{handle_put_messages, SignalServerState};
-    use crate::account::Account;
-    use crate::database::SignalDatabase;
-    use libsignal_protocol::*;
-    use uuid::Uuid;
-
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_get_messages_pops_message_queue() {

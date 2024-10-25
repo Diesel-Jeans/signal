@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgres://root:root@0.0.0.0:5432/signal_db
+      REDIS_URL: redis://127.0.0.1:6379
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
