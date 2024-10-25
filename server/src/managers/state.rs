@@ -3,8 +3,8 @@ use crate::{
     socket::SocketManager,
 };
 
-use axum::extract::ws::WebSocket;
 use super::{account_manager::AccountManager, key_manager::KeyManager};
+use axum::extract::ws::WebSocket;
 
 #[derive(Clone, Debug)]
 struct SignalServerState<T: SignalDatabase> {

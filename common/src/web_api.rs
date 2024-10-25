@@ -1,14 +1,14 @@
 use std::{fmt, str::FromStr};
 
+use crate::signal_protobuf::Envelope;
 use anyhow::Error;
 use libsignal_protocol::{DeviceId, IdentityKey, ServiceId};
-use crate::signal_protobuf::Envelope;
-use uuid::Uuid;
 use serde::{
     de::{self, MapAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize,
 };
+use uuid::Uuid;
 
 use crate::pre_key;
 

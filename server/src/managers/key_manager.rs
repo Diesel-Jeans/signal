@@ -4,7 +4,7 @@ use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use libsignal_protocol::PreKeyBundle;
 use sha2::{Digest, Sha256};
 
-use crate::{error::ApiError, database::SignalDatabase};
+use crate::{database::SignalDatabase, error::ApiError};
 
 #[derive(Debug, Clone)]
 pub struct KeyManager {}

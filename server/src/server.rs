@@ -1,6 +1,6 @@
-use crate::error::ApiError;
 use crate::account::{Account, Device};
 use crate::database::SignalDatabase;
+use crate::error::ApiError;
 use crate::in_memory_db::InMemorySignalDatabase;
 use crate::postgres::PostgresDatabase;
 use anyhow::Result;
@@ -14,9 +14,8 @@ use axum::BoxError;
 use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
 use common::web_api::{
-    CreateAccountOptions, SignalMessages,
-    AuthorizationHeader, DevicePreKeyBundle, RegistrationRequest,
-    SetKeyRequest, UploadKeys,
+    AuthorizationHeader, CreateAccountOptions, DevicePreKeyBundle, RegistrationRequest,
+    SetKeyRequest, SignalMessages, UploadKeys,
 };
 use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
@@ -39,8 +38,6 @@ struct SignalServerState<T: SignalDatabase> {
     db: T,
     socket_manager: SocketManager<WebSocket>,
 }
-
-
 
 impl<T: SignalDatabase> SignalServerState<T> {
     #[allow(dead_code)]
@@ -74,8 +71,8 @@ async fn handle_put_messages<T: SignalDatabase>(
 ) -> Result<(), ApiError> {
     println!("Received message");
     /* TODO: handle_put_message
-        this depends on ToEnvelope trait being implemented for SignalMessage which depends on Account
-     */
+       this depends on ToEnvelope trait being implemented for SignalMessage which depends on Account
+    */
     todo!()
 }
 
@@ -359,7 +356,6 @@ mod server_tests {
     use crate::database::SignalDatabase;
     use libsignal_protocol::*;
     use uuid::Uuid;
-
 
     #[ignore = "Not implemented"]
     #[tokio::test]

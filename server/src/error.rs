@@ -36,15 +36,15 @@ impl fmt::Display for ApiError {
 pub enum SocketManagerError {
     SocketClosed,
     NoAddress(SocketAddr),
-    Axum(axum::Error)
+    Axum(axum::Error),
 }
 
 impl fmt::Display for SocketManagerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SocketManagerError::SocketClosed => write!(f, "Socket was closed"),
-            SocketManagerError::NoAddress(who) =>write!(f, "use_ws ERROR: no address '{}'", who),
-            SocketManagerError::Axum(err) => write!(f, "{}", err)
+            SocketManagerError::NoAddress(who) => write!(f, "use_ws ERROR: no address '{}'", who),
+            SocketManagerError::Axum(err) => write!(f, "{}", err),
         }
     }
 }

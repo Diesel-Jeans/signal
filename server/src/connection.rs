@@ -1,7 +1,7 @@
+use axum::extract::ws::{Message, WebSocket};
+use axum::Error;
 use std::collections::HashSet;
 use std::net::SocketAddr;
-use axum::extract::ws::{WebSocket, Message};
-use axum::Error;
 
 #[async_trait::async_trait]
 pub trait WSStream {
@@ -12,13 +12,13 @@ pub trait WSStream {
 
 #[async_trait::async_trait]
 impl WSStream for WebSocket {
-    async fn recv(&mut self) -> Option<Result<Message, Error>>{
+    async fn recv(&mut self) -> Option<Result<Message, Error>> {
         self.recv().await
     }
-    async fn send(&mut self, msg: Message) -> Result<(), Error>{
+    async fn send(&mut self, msg: Message) -> Result<(), Error> {
         self.send(msg).await
     }
-    async fn close(self) -> Result<(), Error>{
+    async fn close(self) -> Result<(), Error> {
         self.close().await
     }
 }
@@ -27,13 +27,15 @@ impl WSStream for WebSocket {
 pub struct WebSocketConnection<T: WSStream> {
     pub addr: SocketAddr,
     pub ws: T,
-    pub pending_requests: HashSet<u64>
+    pub pending_requests: HashSet<u64>,
 }
 
-impl <T: WSStream>WebSocketConnection<T> {
+impl<T: WSStream> WebSocketConnection<T> {
     pub fn new(addr: SocketAddr, ws: T) -> Self {
         Self {
-            addr, ws, pending_requests: HashSet::new()
+            addr,
+            ws,
+            pending_requests: HashSet::new(),
         }
     }
 }
