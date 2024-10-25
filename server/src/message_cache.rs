@@ -5,22 +5,42 @@ use deadpool_redis::{Config, Runtime};
 use futures_util::task::SpawnExt;
 use futures_util::StreamExt;
 use redis::{Msg, PubSubCommands};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::Mutex;
 
 const PAGE_SIZE: u32 = 100;
 const QUEUE_KEYSPACE_PREFIX: &str = "__keyspace@0__:user_queue::";
 const PERSISTING_KEYSPACE_PREFIX: &str = "__keyspace@0__:user_queue_persisting::";
 
-pub struct PubSubConnection {
-    //pub pub_sub: Arc<Mutex<PubSub<'static>>>,
-    //pub rx: Receiver<String>,
+pub struct PubSubConnection {}
+
+trait MessageAvailabilityListener {
+    fn handle_new_messages_available(&self) -> bool;
+
+    fn handle_messages_persisted(&self) -> bool;
+}
+
+// Should be websocketConnection once it is implemented
+#[derive(Debug)]
+struct Foo;
+
+impl MessageAvailabilityListener for Foo {
+    fn handle_new_messages_available(&self) -> bool {
+        todo!()
+    }
+
+    fn handle_messages_persisted(&self) -> bool {
+        todo!()
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct MessageCache {
     pool: deadpool_redis::Pool,
-    //hashmap: HashMap<String, dyn MessageAvailabilityListener>,
+    hashmap: HashMap<String, Arc<Mutex<Foo>>>,
     subscription_sender: Sender<String>,
 }
 
@@ -66,10 +86,8 @@ impl MessageCache {
         let (message_tx, message_rx) = mpsc::channel::<String>(100);
         let message_cache = MessageCache {
             pool: redis_pool,
-            //hashmap: HashMap::new(),
-            //pub_sub: Arc::new(Mutex::new(conn)),
+            hashmap: HashMap::new(),
             subscription_sender: subscription_tx,
-            //event_receiver: Arc::new(Mutex::new(message_rx)),
         };
         tokio::spawn(async move {
             PubSubConnection::listen_to_pubsub(subscription_rx, message_tx).await;
@@ -153,6 +171,12 @@ impl MessageCache {
             .arg(queue_key.clone())
             .query_async::<()>(&mut conn)
             .await?;
+
+        // notifies the message availability manager
+        let queue_name = format!("{}::{}", user_id, device_id);
+        if let Some(listener) = self.hashmap.get(&queue_name) {
+            listener.lock().await.handle_new_messages_available();
+        }
 
         Ok(message_id.clone())
     }
@@ -369,12 +393,6 @@ impl MessageCache {
     }
 }
 
-pub trait MessageAvailabilityListener {
-    fn handle_new_messages_available() -> bool;
-
-    fn handle_messages_persisted() -> bool;
-}
-
 #[cfg(test)]
 mod message_cache_tests {
     use super::*;
@@ -400,7 +418,7 @@ mod message_cache_tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_message_cache_insert() {
+    async fn test_insert() {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
         let uuid = generate_uuid();
@@ -436,7 +454,7 @@ mod message_cache_tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_message_cache_insert_same_id() {
+    async fn test_insert_same_id() {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
         let msg_guid = generate_uuid();
@@ -488,7 +506,7 @@ mod message_cache_tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_message_cache_insert_different_ids() {
+    async fn test_insert_different_ids() {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
         let uuid1 = generate_uuid();
@@ -552,7 +570,7 @@ mod message_cache_tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_message_cache_remove() {
+    async fn test_remove() {
         let message_cache = MessageCache::connect().await.unwrap();
         let mut conn = message_cache.pool.get().await.unwrap();
         let user_id = "b0231ab5-4c7e-40ea-a544-f925c5".to_string();
