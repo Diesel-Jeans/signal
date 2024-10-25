@@ -1,10 +1,12 @@
 #![allow(unused)]
 mod account;
-mod api_error;
+mod connection;
 pub mod database;
+mod error;
 pub mod in_memory_db;
 pub mod managers;
 mod postgres;
+mod query;
 mod server;
 mod socket;
 

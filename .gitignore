@@ -1,5 +1,6 @@
 **/target/
 .idea/
+.vscode/
 client/device_info.json
 server/.env
 server/cert/rootCA.crt
