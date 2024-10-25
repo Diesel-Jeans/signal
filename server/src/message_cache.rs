@@ -4,11 +4,10 @@ use deadpool_redis::redis::cmd;
 use deadpool_redis::{Config, Runtime};
 use futures_util::task::SpawnExt;
 use futures_util::StreamExt;
-use redis::{Msg, PubSubCommands};
+use redis::PubSubCommands;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Mutex;
 
 const PAGE_SIZE: u32 = 100;
@@ -41,39 +40,6 @@ impl MessageAvailabilityListener for Foo {
 pub struct MessageCache {
     pool: deadpool_redis::Pool,
     hashmap: HashMap<String, Arc<Mutex<Foo>>>,
-    subscription_sender: Sender<String>,
-}
-
-impl PubSubConnection {
-    pub async fn listen_to_pubsub(
-        mut subscription_rx: Receiver<String>, // For receiving new subscription requests
-        message_tx: Sender<String>,            // Sender to send received messages back to main
-    ) {
-        let redis_client: redis::Client = redis::Client::open("redis://127.0.0.1:6379").unwrap();
-        let (mut sink, mut stream) = redis_client.get_async_pubsub().await.unwrap().split();
-
-        tokio::spawn(async move {
-            loop {
-                let ifmsg = subscription_rx.recv().await;
-                if ifmsg.is_none() {
-                    continue;
-                }
-                let msg = ifmsg.unwrap();
-                sink.subscribe(&msg).await.unwrap();
-                println!("Subscribed to {}", msg);
-            }
-        });
-
-        tokio::spawn(async move {
-            loop {
-                let message: Msg = stream.next().await.unwrap();
-                let channel = message.get_channel_name();
-                let msg = message.get_payload::<String>().unwrap();
-                println!("Got a message, {} : {}", channel, msg);
-                // message_tx.send(msg.clone()).await.expect("panic message");
-            }
-        });
-    }
 }
 
 impl MessageCache {
@@ -84,17 +50,10 @@ impl MessageCache {
         let redis_pool: deadpool_redis::Pool = redis_config.create_pool(Some(Runtime::Tokio1))?;
         let (subscription_tx, subscription_rx) = mpsc::channel::<String>(100);
         let (message_tx, message_rx) = mpsc::channel::<String>(100);
-        let message_cache = MessageCache {
+        Ok(MessageCache {
             pool: redis_pool,
             hashmap: HashMap::new(),
-            subscription_sender: subscription_tx,
-        };
-        tokio::spawn(async move {
-            PubSubConnection::listen_to_pubsub(subscription_rx, message_tx).await;
-        });
-        message_cache.set_redis_config().await;
-
-        Ok(message_cache)
+        })
     }
 
     pub async fn insert(
@@ -365,54 +324,19 @@ impl MessageCache {
         format!("{}::{}", user_id, device_id)
     }
 
-    async fn add_message_availability_listener(&mut self, uuid: String, device_id: String) {
+    async fn add_message_availability_listener(
+        &mut self,
+        uuid: String,
+        device_id: String,
+        listener: Arc<Mutex<Foo>>,
+    ) {
         let queue_name: String = format!("{}::{}", uuid, device_id);
-        //self.hashmap.insert(queue_name.clone(), listener);
-        for channel in Self::get_keyspace_channels(queue_name) {
-            self.subscribe(channel.as_str()).await;
-        }
+        self.hashmap.insert(queue_name.clone(), listener);
     }
 
     async fn remove_message_availability_listener(&mut self, uuid: String, device_id: String) {
         let queue_name: String = format!("{}::{}", uuid, device_id);
-        //self.hashmap.remove(&queue_name);
-        for channel in Self::get_keyspace_channels(queue_name) {
-            self.unsubscribe(channel.as_str()).await;
-        }
-    }
-
-    pub async fn unsubscribe(&mut self, channel: &str) {
-        self.subscription_sender
-            .send(channel.to_string())
-            .await
-            .unwrap();
-    }
-
-    pub async fn subscribe(&self, channel: &str) {
-        self.subscription_sender
-            .send(channel.to_string())
-            .await
-            .unwrap();
-    }
-
-    fn get_keyspace_channels(queue_name: String) -> Vec<String> {
-        let mut keyspace_channels: Vec<String> = Vec::from([
-            format!("{}{{{}}}", QUEUE_KEYSPACE_PREFIX, queue_name),
-            format!("{}{{{}}}", PERSISTING_KEYSPACE_PREFIX, queue_name),
-        ]);
-        keyspace_channels
-    }
-
-    async fn set_redis_config(&self) {
-        let mut conn = self.pool.get().await.unwrap();
-        cmd("CONFIG")
-            .arg("SET")
-            .arg("notify-keyspace-events")
-            .arg("Ex")
-            .query_async::<()>(&mut conn)
-            .await
-            .unwrap();
-        self.subscribe("__keyevent@0__:expired").await;
+        self.hashmap.remove(&queue_name);
     }
 }
 
@@ -696,12 +620,7 @@ mod message_cache_tests {
         message.content = Some("Hello this is a test".as_bytes().to_vec());
 
         let message_id = message_cache
-            .insert(
-                user_id.to_string(),
-                device_id,
-                message, 
-                generate_uuid(),
-            )
+            .insert(user_id.to_string(), device_id, message, generate_uuid())
             .await
             .unwrap();
 
@@ -709,7 +628,7 @@ mod message_cache_tests {
             .get_messages_to_persist(user_id.to_string(), device_id, -1)
             .await
             .unwrap();
-   
+
         assert_eq!(envelopes.len(), 1);
         teardown(conn).await;
     }
