@@ -265,11 +265,9 @@ impl<T: WSStream> SocketManager<T> {
         who: &SocketAddr,
     ) -> Result<Arc<Mutex<ConnectionState<T>>>, SocketManagerError> {
         let mut map_guard = self.sockets.lock().await;
-        let state = if let Some(x) = map_guard.get_mut(who) {
-            x
-        } else {
-            return Err(SocketManagerError::NoAddress(*who));
-        };
+        let state = map_guard
+            .get_mut(who)
+            .ok_or_else(|| SocketManagerError::NoAddress(*who))?;
 
         Ok(state.clone())
     }
