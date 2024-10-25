@@ -27,6 +27,7 @@ rustls = { version = "0.23.15", features = ["ring"] }
 tonic = "0.12.3"
 prost = "0.13.3"
 url = "2.5.2"
+async-trait = "0.1.83"
 
 [build-dependencies]
 tonic-build = "0.12.3"

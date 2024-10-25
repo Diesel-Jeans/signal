@@ -53,8 +53,10 @@ impl PublicKeyType {
 #[derive(Clone, Debug)]
 struct SignalServerState<T: SignalDatabase> {
     db: T,
-    socket_manager: SocketManager,
+    socket_manager: SocketManager<WebSocket>,
 }
+
+
 
 impl<T: SignalDatabase> SignalServerState<T> {
     #[allow(dead_code)]

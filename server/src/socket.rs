@@ -9,7 +9,7 @@ use sha2::digest::consts::False;
 use sha2::digest::typenum::Integer;
 use tonic::ConnectError;
 use uuid::fmt::Braced;
-use std::fmt;
+use std::fmt::{self, Debug};
 use std::future::Future;
 use std::net::SocketAddr;
 
@@ -21,13 +21,14 @@ use tokio::sync::{Mutex, RwLock, MutexGuard};
 use common::signal_protobuf::{WebSocketMessage, WebSocketRequestMessage, web_socket_message, WebSocketResponseMessage, Envelope, envelope};
 use common::web_api::{SignalMessage, SignalMessages};
 use prost::{bytes::Bytes, Message as PMessage};
+
 use url::Url;
 use std::time::{SystemTime, UNIX_EPOCH};
 use rand::Rng;
 use rand::rngs::OsRng;
 
 use crate::account::Account;
-use crate::connection::WebSocketConnection;
+use crate::connection::{WebSocketConnection, WSStream};
 use crate::error::SocketManagerError;
 use crate::query::PutV1MessageParams;
 
@@ -66,31 +67,45 @@ pub trait ToEnvelope {
 impl ToEnvelope for SignalMessage {
     fn to_envelope(&mut self, destination_id: ServiceId, account: Option<Account>, src_device_id: Option<DeviceId>, timestamp: i64, story: bool, urgent: bool) -> Envelope {
         let typex = envelope::Type::try_from(self.r#type as i32).unwrap();
-        todo!()
+        todo!() // TODO: make this when Account has been implemented correctly
     }
 }
 
 #[derive(Debug)]
-enum ConnectionState {
-    Active(WebSocketConnection),
+enum ConnectionState<T: WSStream> {
+    Active(WebSocketConnection<T>),
     Closed
 }
 
-type ConnectionMap = Arc<Mutex<HashMap<SocketAddr, Arc<Mutex<ConnectionState>>>>>;
-
-#[derive(Clone, Debug)]
-pub struct SocketManager {
-    sockets: ConnectionMap,
+impl<T: WSStream + Debug> ConnectionState<T> {
+    pub fn is_active(&self) -> bool {
+        matches!(self, ConnectionState::Active(_))
+    }
 }
 
-impl SocketManager {
+type ConnectionMap<T> = Arc<Mutex<HashMap<SocketAddr, Arc<Mutex<ConnectionState<T>>>>>>;
+
+#[derive(Debug)]
+pub struct SocketManager<T: WSStream> {
+    sockets: ConnectionMap<T>,
+}
+
+impl<T: WSStream> Clone for SocketManager<T> {
+    fn clone(&self) -> Self {
+        Self {
+            sockets: Arc::clone(&self.sockets),
+        }
+    }
+}
+
+impl <T: WSStream>SocketManager<T> {
     pub fn new() -> Self {
         Self {
             sockets: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    async fn on_ws_binary(&mut self, connection: &mut WebSocketConnection, bytes: Vec<u8>) {
+    async fn on_ws_binary(&mut self, connection: &mut WebSocketConnection<T>, bytes: Vec<u8>) {
         let msg = match WebSocketMessage::decode(Bytes::from(bytes)){
             Ok(x) => x,
             Err(y) => {
@@ -118,7 +133,7 @@ impl SocketManager {
         }
     }
 
-    async fn handle_request(&mut self, connection: &mut WebSocketConnection, req: WebSocketRequestMessage){
+    async fn handle_request(&mut self, connection: &mut WebSocketConnection<T>, req: WebSocketRequestMessage){
         let uri = Uri::from_str(req.path()).unwrap();
         let path = uri.path();
 
@@ -136,15 +151,15 @@ impl SocketManager {
         }
     }
 
-    async fn handle_response(&mut self, connection: &mut WebSocketConnection, res: WebSocketResponseMessage){
+    async fn handle_response(&mut self, connection: &mut WebSocketConnection<T>, res: WebSocketResponseMessage){
         if let Some(id) = res.id {
             connection.pending_requests.remove(&id);
         } else {
-            println!("response to what?")
+            println!("response to what?") // TODO: should probably be handled better
         }
     }
 
-    async fn send_response(&mut self, connection: &mut WebSocketConnection, req: WebSocketRequestMessage, status: u16, reason: String, headers: Vec<String>, body: Option<Vec<u8>>) {
+    async fn send_response(&mut self, connection: &mut WebSocketConnection<T>, req: WebSocketRequestMessage, status: u16, reason: String, headers: Vec<String>, body: Option<Vec<u8>>) {
         todo!()
     }
 
@@ -175,44 +190,31 @@ impl SocketManager {
 
     }
 
-    async fn close_socket(&mut self, connection: &mut WebSocketConnection, code: u16, reason: String){
+    async fn close_socket(&mut self, connection: &mut WebSocketConnection<T>, code: u16, reason: String){
         connection.ws.send(Message::Close(Some(CloseFrame{ 
             code, 
             reason: reason.into()
         })));
-        self.remove_ws(&connection.addr, true);
+        self.remove_ws(&connection.addr);
     }
 
-    async fn on_ws_text(&mut self, connection: &mut WebSocketConnection, text: String) {
-        println!("🎵happy happy happy🎵: {}", text);
+    async fn on_ws_text(&mut self, connection: &mut WebSocketConnection<T>, text: String) {
+        // this is used for testing
+        println!("🎵happy happy happy🎵: {}", text); 
         connection.ws.send(Message::Text("OK".to_string())).await;
     }
 
-    async fn add_ws(&self, who: SocketAddr, socket: WebSocket) {
+    async fn add_ws(&self, who: SocketAddr, socket: T) {
         let state = ConnectionState::Active(WebSocketConnection::new(who, socket));
         self.sockets.lock().await.insert(who, Arc::new(Mutex::new(state)));
     }
 
-    async fn remove_ws(&self, who: &SocketAddr, close_socket: bool) {
+    async fn remove_ws(&self, who: &SocketAddr) {
         let mut guard = self.sockets.lock().await;
-        let opt = guard.remove(who);
-        
-        if !close_socket{
-            return;
-        }
-
-        let state = if let Some(x) = opt {
-            x
-        } else {
-            return;
-        };
-        let mut state_guard = state.lock().await;
-        if let ConnectionState::Active(connection) = std::mem::replace(&mut *state_guard, ConnectionState::Closed){
-            connection.ws.close();
-        }
+         guard.remove(who);
     }
 
-    async fn get_ws(&self, who: &SocketAddr) -> Result<Arc<Mutex<ConnectionState>>, SocketManagerError>
+    async fn get_ws(&self, who: &SocketAddr) -> Result<Arc<Mutex<ConnectionState<T>>>, SocketManagerError>
     {
         let mut map_guard = self.sockets.lock().await;
         let state = if let Some(x) = map_guard.get_mut(who){
@@ -231,7 +233,7 @@ impl SocketManager {
     pub async fn handle_socket(
         &mut self,
         /*authenticated_device: ???, */
-        mut socket: WebSocket,
+        mut socket: T,
         who: SocketAddr,
     ) {
         /* authenticated_device should be put into the socket_manager,
@@ -248,12 +250,24 @@ impl SocketManager {
         };
 
         // this will always check if the state is active, and exit if some other thread has closed the socket
-        while let ConnectionState::Active(ref mut connection) = *state.lock().await {
+        loop {
+            let mut state_g = state.lock().await;
+
+            let connection = if let ConnectionState::Active(ref mut x) = *state_g {
+                x
+            } else {
+                break;
+            };
+            
             let msg = match connection.ws.recv().await {
                 Some(Ok(x)) => x,
-                None => break,
+                None => {
+                    *state_g = ConnectionState::Closed;
+                    break
+                },
                 _ => {
                     self.close_socket(connection, 1007, "Badly formatted".to_string()).await;
+                    *state_g = ConnectionState::Closed;
                     break;
                 }
             };
@@ -263,10 +277,11 @@ impl SocketManager {
                 Message::Text(t) => self.on_ws_text(connection, t).await,
                 Message::Close(_) => {
                     println!("handle_socket: '{}' disconnected", who);
-                    self.remove_ws(&who, false).await;
+                    self.remove_ws(&connection.addr).await;
+                    *state_g = ConnectionState::Closed;
                     break;
                 }
-                _ => {}
+                _ => {/* i dont know if we should support more? */}
             }
         }
     }
@@ -306,4 +321,129 @@ fn generate_req_id() -> u64{
     let mut rng = OsRng;
     let rand_v: u64 = rng.gen();
     rand_v
+}
+
+#[cfg(test)]
+pub(crate) mod test {
+    use std::net::SocketAddr;
+    use std::str::FromStr;
+
+    use crate::socket::{SocketManager, SocketManagerError, ConnectionState};
+    use crate::connection::WSStream;
+    use axum::extract::ws::Message;
+    use axum::Error;
+
+    use tokio::sync::mpsc;
+    use tokio::sync::mpsc::{Receiver, Sender};
+
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    #[derive(Debug)]
+    struct MockSocket {
+        client_sender: Receiver<Result<Message, Error>>,
+        client_receiver: Sender<Message>
+    }
+
+    impl MockSocket {
+        fn new() -> (Self, Sender<Result<Message, Error>>, Receiver<Message>) {
+            let (send_to_socket, client_sender) = mpsc::channel(10); // Queue for test -> socket
+            let (client_receiver, receive_from_socket) = mpsc::channel(10); // Queue for socket -> test
+    
+            (
+                Self {
+                    client_sender,
+                    client_receiver,
+                },
+                send_to_socket,
+                receive_from_socket,
+            )
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl WSStream for MockSocket {
+        async fn recv(&mut self) -> Option<Result<Message, Error>> {
+            self.client_sender.recv().await
+        }
+
+        async fn send(&mut self, msg: Message) -> Result<(), Error> {
+            self.client_receiver.send(msg).await.map_err(|_| Error::new("Send failed".to_string()))
+        }
+
+        async fn close(self) -> Result<(), Error> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mock(){
+        let (mut mock, mut sender, mut receiver) = MockSocket::new();
+        
+        tokio::spawn(async move {
+            if let Some(Ok(Message::Text(x))) = mock.recv().await {
+                mock.send(Message::Text(x)).await
+            } else {
+                panic!("Expected Text Message");
+            }
+        });
+        
+        sender.send(Ok(Message::Text("hello".to_string()))).await;
+
+        match receiver.recv().await.unwrap() {
+            Message::Text(x) => assert!(x == "hello", "ASSERTION ERROR >>>>>>>    Expected 'hello' in test_mock    <<<<<<<<"),
+            _ => panic!(">>>>>>>>>>>>>>>>>>>>> Did not receive text message")
+        }
+    }
+
+    async fn create_connection(manager: &SocketManager<MockSocket>, addr: &str, wait: u64) -> (Arc<Mutex<ConnectionState<MockSocket>>>, Sender<Result<Message, Error>>, Receiver<Message>) {
+        let (mock, sender, mut receiver) = MockSocket::new();
+        let who = SocketAddr::from_str(addr).unwrap();
+        let mut tmgr = manager.clone();
+        tokio::spawn(async move {
+            tmgr.handle_socket(mock, who).await;
+        });
+
+        // could be fixed with some notify code
+        tokio::time::sleep(tokio::time::Duration::from_millis(wait)).await;
+
+        let state = manager.get_ws(&who).await.unwrap();
+
+        (state, sender, receiver)
+    }
+
+    #[tokio::test]
+    async fn test_active_then_close(){
+        let mut sm: SocketManager<MockSocket> = SocketManager::new();
+        
+        let (state, sender, _) = create_connection(&sm, "127.0.0.1:5555", 100).await;
+        
+        sender.send(Ok(Message::Text("Hello".to_string()))).await;
+
+        assert!(state.lock().await.is_active(), ">>>>>>>>>>>>>>>>>>>>>> State was closed prematurely");
+
+        sender.send(Ok(Message::Close(None))).await;
+
+        assert!(!state.lock().await.is_active(), ">>>>>>>>>>>>>>>>>>>>> State was active, expected was closed")
+    }
+
+    #[tokio::test]
+    async fn test_text_relay_ok(){
+        let mut sm: SocketManager<MockSocket> = SocketManager::new();
+        
+        let (state, sender, mut receiver) = create_connection(&sm, "127.0.0.1:5555", 100).await;
+        
+        sender.send(Ok(Message::Text("Hello".to_string()))).await;
+
+        assert!(state.lock().await.is_active(), ">>>>>>>>>>>>>>>>>>>>>> State was closed prematurely");
+
+        match receiver.recv().await {
+            Some(Message::Text(x)) => assert!(x == "OK"),
+            _ => panic!("Unexpected message format")
+        }
+
+        sender.send(Ok(Message::Close(None))).await;
+
+        assert!(!state.lock().await.is_active(), ">>>>>>>>>>>>>>>>>>>>> State was active, expected was closed")
+    }
 }
