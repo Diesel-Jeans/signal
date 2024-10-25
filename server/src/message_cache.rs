@@ -11,10 +11,6 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
 const PAGE_SIZE: u32 = 100;
-const QUEUE_KEYSPACE_PREFIX: &str = "__keyspace@0__:user_queue::";
-const PERSISTING_KEYSPACE_PREFIX: &str = "__keyspace@0__:user_queue_persisting::";
-
-pub struct PubSubConnection {}
 
 trait MessageAvailabilityListener {
     fn handle_new_messages_available(&self) -> bool;
