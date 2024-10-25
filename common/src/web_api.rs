@@ -1,5 +1,6 @@
 use std::{fmt, str::FromStr};
 
+use crate::signal_protobuf::Envelope;
 use anyhow::Error;
 use libsignal_protocol::{DeviceId, IdentityKey, ServiceId};
 use serde::{
@@ -7,6 +8,7 @@ use serde::{
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize,
 };
+use uuid::Uuid;
 
 use crate::pre_key;
 
@@ -384,4 +386,21 @@ impl PreKeyResponseItem {
             signed_pre_key,
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SignalMessages {
+    pub destination: uuid::Uuid,
+    pub timestamp: u64,
+    pub messages: Vec<SignalMessage>,
+    pub online: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SignalMessage {
+    pub r#type: u32,
+    pub destination_device_id: u32,
+    pub destination_registration_id: u32,
+    pub content: String,
 }

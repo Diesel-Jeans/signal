@@ -1,6 +1,6 @@
 use crate::account::{Account, Device};
-use crate::api_error::ApiError;
 use crate::database::SignalDatabase;
+use crate::error::ApiError;
 use crate::in_memory_db::InMemorySignalDatabase;
 use crate::postgres::PostgresDatabase;
 use anyhow::Result;
@@ -12,8 +12,10 @@ use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
-use common::signal_protobuf::Envelope;
-use common::web_api::{AuthorizationHeader, RegistrationRequest};
+use common::web_api::{
+    AuthorizationHeader, RegistrationRequest
+    , SignalMessages,
+};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use std::env;
 use std::time::Duration;
@@ -21,8 +23,8 @@ use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
 use crate::message_cache::MessageCache;
-use crate::socket::SocketManager;
-use axum::extract::ws::WebSocketUpgrade;
+use crate::socket::{SocketManager, ToEnvelope};
+use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
@@ -31,7 +33,7 @@ use std::str::FromStr;
 #[derive(Clone, Debug)]
 struct SignalServerState<T: SignalDatabase> {
     db: T,
-    socket_manager: SocketManager,
+    socket_manager: SocketManager<WebSocket>,
     message_cache: MessageCache,
 }
 
@@ -47,7 +49,9 @@ impl SignalServerState<InMemorySignalDatabase> {
         Self {
             db: InMemorySignalDatabase::new(),
             socket_manager: SocketManager::new(),
-            message_cache: MessageCache::connect().await.unwrap(),
+            message_cache: MessageCache::connect()
+                .await
+                .expect("Could not connect to Redis"),
         }
     }
 }
@@ -57,7 +61,9 @@ impl SignalServerState<PostgresDatabase> {
         Self {
             db: PostgresDatabase::connect().await.unwrap(),
             socket_manager: SocketManager::new(),
-            message_cache: MessageCache::connect().await.unwrap(),
+            message_cache: MessageCache::connect()
+                .await
+                .expect("Could not connect to Redis"),
         }
     }
 }
@@ -65,17 +71,13 @@ impl SignalServerState<PostgresDatabase> {
 async fn handle_put_messages<T: SignalDatabase>(
     state: SignalServerState<T>,
     address: ProtocolAddress,
-    payload: Envelope,
+    payload: SignalMessages,
 ) -> Result<(), ApiError> {
     println!("Received message");
-    state
-        .database()
-        .push_message_queue(address, vec![payload])
-        .await
-        .map_err(|_| ApiError {
-            message: "Could not push the message to message queue.".to_owned(),
-            status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        })
+    /* TODO: handle_put_message
+       this depends on ToEnvelope trait being implemented for SignalMessage which depends on Account
+    */
+    todo!()
 }
 
 async fn handle_get_messages<T: SignalDatabase>(
@@ -184,7 +186,7 @@ fn parse_service_id(string: String) -> Result<ServiceId, ApiError> {
 async fn put_messages_endpoint(
     State(state): State<SignalServerState<PostgresDatabase>>,
     Path(address): Path<String>,
-    Json(payload): Json<Envelope>, // TODO: Multiple messages could be sent at one time
+    Json(payload): Json<SignalMessages>, // TODO: Multiple messages could be sent at one time
 ) -> Result<(), ApiError> {
     let address = parse_protocol_address(address)?;
     handle_put_messages(state, address, payload).await
@@ -350,90 +352,6 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod server_tests {
-    /*
-        fn create_bob() -> Account {
-            let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
-            Account {
-                aci: Some(Uuid::new_v4().to_string()),
-                pni: None,
-                auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
-                    .to_owned(),
-                identity_key: *id_key.identity_key(),
-            }
-        }
-
-        fn create_alice() -> Account {
-            let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
-            Account {
-                aci: Some(Uuid::new_v4().to_string()),
-                pni: None,
-                auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
-                    .to_owned(),
-                identity_key: *id_key.identity_key(),
-            }
-        }
-
-        #[tokio::test]
-        async fn handle_put_messages_adds_message_to_queue() {
-            let state = SignalServerState::<InMemorySignalDatabase>::new().await;
-            let bob = create_bob();
-            let bob_device = Device {
-                device_id: 0,
-                name: "bob_device".to_owned(),
-                last_seen: 0,
-                created: 0,
-            };
-            let bob_address =
-                ProtocolAddress::new(bob.service_id().service_id_string(), bob_device.device_id());
-
-            let alice = create_alice();
-            let alice_device = Device {
-                device_id: 0,
-                name: "alice_device".to_owned(),
-                last_seen: 0,
-                created: 0,
-            };
-            let alice_address = ProtocolAddress::new(
-                alice.service_id().service_id_string(),
-                alice_device.device_id(),
-            );
-            state.database().add_account(bob.clone()).await.unwrap();
-
-            let message = common::signal_protobuf::Envelope {
-                r#type: None,
-                source_service_id: None,
-                source_device: None,
-                client_timestamp: None,
-                content: None,
-                server_guid: None,
-                server_timestamp: None,
-                ephemeral: None,
-                destination_service_id: None,
-                urgent: None,
-                updated_pni: None,
-                story: None,
-                report_spam_token: None,
-                shared_mrm_key: None,
-            };
-            handle_put_messages(state.clone(), bob_address.clone(), message.clone())
-                .await
-                .unwrap();
-
-            assert_eq!(
-                message,
-                state
-                    .database()
-                    .mail_queues
-                    .lock()
-                    .await
-                    .get_mut(&bob_address)
-                    .unwrap()
-                    .pop_front()
-                    .unwrap()
-            );
-        }
-    */
-
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_get_messages_pops_message_queue() {
@@ -450,140 +368,12 @@ mod server_tests {
     #[tokio::test]
     async fn handle_get_keys_gets_keys() {
         todo!();
-        /*
-        let database = Arc::new(Mutex::new(InMemorySignalDatabase::new()));
-        let is_aci = true;
-        let usr_id =
-            ServiceId::parse_from_service_id_string("8c78cd2a-16ff-427d-83dc-1a5e36ce713d")
-                .unwrap();
-        let address = ProtocolAddress::new("04899A85-4C9E-44CC-8428-A02AB69335F1".into(), 0.into());
-
-        let mut database_lock = database.lock().await;
-        database_lock
-            .keys
-            .lock()
-            .await
-            .insert(usr_id, HashMap::new());
-        database_lock
-            .keys
-            .lock()
-            .await
-            .get_mut(&usr_id)
-            .unwrap()
-            .insert(device_id, HashMap::new());
-
-        let mut key_map = database_lock
-            .keys
-            .lock()
-            .await
-            .get_mut(&usr_id)
-            .unwrap()
-            .get_mut(&device_id)
-            .unwrap()
-            .clone();
-
-        let j = 10;
-        let mut i = 0;
-        while j > i {
-            key_map
-                .entry(PreKey::OneTime)
-                .or_insert_with(Vec::new)
-                .push(UploadSignedPreKey {
-                    key_id: 0,
-                    public_key: Box::new([0]),
-                    signature: Box::new([0]),
-                });
-            i = i + 1;
-        }
-
-        drop(database_lock);
-
-        assert_eq!(
-            get_onetime_prekey_count(database, usr_id, device_id)
-                .await
-                .unwrap(),
-            j
-        );
-        */
     }
 
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_post_keycheck_test() {
         todo!()
-        /*
-        let database = InMemorySignalDatabase::new();
-        let usr_id: UserID = 0u32;
-        let device_id: DeviceID = 0u32;
-        let mut rng = OsRng;
-
-        let kyper_pre_key_pair = kem::KeyPair::generate(kem::KeyType::Kyber1024);
-        let kyper_key_id = 0u32;
-        let signed_pre_key_pair = KeyPair::generate(&mut rng);
-        let signed_key_id = 0u32;
-        let identity_key_pair = KeyPair::generate(&mut rng);
-
-        database.keys.lock().await.insert(usr_id, HashMap::new());
-        database
-            .keys
-            .lock()
-            .await
-            .get_mut(&usr_id)
-            .unwrap()
-            .insert(device_id, HashMap::new());
-
-        let key_map = database
-            .keys
-            .lock()
-            .await
-            .get_mut(&usr_id)
-            .unwrap()
-            .get_mut(&device_id)
-            .unwrap();
-
-        key_map
-            .entry(PreKey::Identity)
-            .or_insert_with(Vec::new)
-            .push(UploadSignedPreKey {
-                key_id: 0,
-                public_key: identity_key_pair.public_key.serialize(),
-                signature: Box::new([0]),
-            });
-        key_map
-            .entry(PreKey::Signed)
-            .or_insert_with(Vec::new)
-            .push(UploadSignedPreKey {
-                key_id: signed_key_id,
-                public_key: signed_pre_key_pair.public_key.serialize(),
-                signature: Box::new([0]),
-            });
-        key_map
-            .entry(PreKey::Kyber)
-            .or_insert_with(Vec::new)
-            .push(UploadSignedPreKey {
-                key_id: kyper_key_id,
-                public_key: kyper_pre_key_pair.public_key.serialize(),
-                signature: Box::new([0]),
-            });
-
-        drop(database);
-
-        let mut usr_digest = Sha256::new();
-        usr_digest.update(&identity_key_pair.public_key.serialize());
-        usr_digest.update(&signed_key_id.to_be_bytes());
-        usr_digest.update(signed_pre_key_pair.public_key.serialize().to_owned());
-        usr_digest.update(&kyper_key_id.to_be_bytes());
-        usr_digest.update(kyper_pre_key_pair.public_key.serialize().to_owned());
-
-        let usr_digest: [u8; 32] = usr_digest.finalize().into();
-
-        assert!(
-            handle_post_keycheck(database, usr_id, device_id, usr_digest)
-                .await
-                .unwrap()
-        );
-        assert_ne!(vec![0; 32].as_slice(), usr_digest);
-         */
     }
 
     #[ignore = "Not implemented"]
