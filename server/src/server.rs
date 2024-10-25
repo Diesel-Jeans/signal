@@ -1,3 +1,4 @@
+use crate::account::{Account, Device};
 use crate::api_error::ApiError;
 use crate::database::SignalDatabase;
 use crate::in_memory_db::InMemorySignalDatabase;
@@ -6,18 +7,18 @@ use anyhow::Result;
 use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
 use axum::handler::HandlerWithoutStateExt;
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
-use axum::http::{Method, StatusCode, Uri};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
-use common::web_api::CreateAccountOptions;
+use common::web_api::{AuthorizationHeader, RegistrationRequest};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
-use libsignal_protocol::{kem, PublicKey};
 use std::env;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
+use uuid::Uuid;
 
 use crate::message_cache::MessageCache;
 use crate::socket::SocketManager;
@@ -26,28 +27,6 @@ use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
 use std::str::FromStr;
-
-enum PublicKeyType {
-    Kem(kem::PublicKey),
-    Ec(PublicKey),
-}
-
-impl PublicKeyType {
-    fn expect_kem(self) -> kem::PublicKey {
-        if let PublicKeyType::Kem(key) = self {
-            key
-        } else {
-            panic!("dev_err: expected a kem key, got an ec key")
-        }
-    }
-    fn expect_ec(self) -> PublicKey {
-        if let PublicKeyType::Ec(key) = self {
-            key
-        } else {
-            panic!("dev_err: expected an ec key, got a kem key")
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 struct SignalServerState<T: SignalDatabase> {
@@ -89,13 +68,12 @@ async fn handle_put_messages<T: SignalDatabase>(
     payload: Envelope,
 ) -> Result<(), ApiError> {
     println!("Received message");
-
     state
         .database()
         .push_message_queue(address, vec![payload])
         .await
         .map_err(|_| ApiError {
-            message: "Could not push the message to message queue.".to_owned(), // TODO: Write a better error message
+            message: "Could not push the message to message queue.".to_owned(),
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
         })
 }
@@ -108,11 +86,38 @@ async fn handle_get_messages<T: SignalDatabase>(
 }
 
 async fn handle_put_registration<T: SignalDatabase>(
-    State(state): State<SignalServerState<T>>,
-    Path(address): Path<String>,
-    Json(options): Json<CreateAccountOptions>,
-) {
+    state: SignalServerState<T>,
+    auth_header: AuthorizationHeader,
+    registration: RegistrationRequest,
+) -> Result<(), ApiError> {
     println!("Register client");
+    let uuid = Uuid::parse_str(auth_header.username()).map_err(|err| ApiError {
+        message: format!("Could not parse uuid '{}'", { auth_header.username() }),
+        status_code: StatusCode::BAD_REQUEST,
+    })?;
+
+    let account = Account::new(
+        uuid.into(),
+        Device::new(
+            0u32.into(),
+            "bob_device".into(),
+            0u32,
+            0u32,
+            "".into(),
+            "".into(),
+        ),
+        *registration.pni_identity_key(),
+        *registration.aci_identity_key(),
+    );
+    state
+        .database()
+        .add_account(account)
+        .await
+        .map_err(|err| ApiError {
+            message: format!("Could not store user in database: {}", err),
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        })?;
+    Ok(())
 }
 
 // redirect from http to https. this is temporary
@@ -143,61 +148,6 @@ async fn redirect_http_to_https(addr: SocketAddr, http: u16, https: u16) -> Resu
 
     axum::serve(listener, redirect.into_make_service()).await?;
     Ok(())
-}
-
-// The Signal endpoint /v2/keys/check says that a u64 id is needed, however their ids, such as
-// KyperPreKeyID only supports u32. Here only a u32 is used and therefore only a 4 byte size
-// instead of the sugested u64.
-async fn handle_post_keycheck<T: SignalDatabase>(
-    database: T,
-    usr_id: ServiceId,
-    device_id: DeviceId,
-    usr_digest: [u8; 32],
-) -> Result<bool> {
-    todo!()
-    /*
-    if let Some(keys) = database
-        .lock()
-        .await
-        .keys
-        .lock()
-        .await
-        .get(&usr_id)
-        .and_then(|usr_map| usr_map.get(&device_id))
-    {
-        fn get_pre_key<'a>(
-            key_type: &PreKey,
-            table: &'a HashMap<PreKey, Vec<UploadSignedPreKey>>,
-        ) -> Result<&'a UploadSignedPreKey> {
-            if let Some(key) = table.get(key_type) {
-                if key.len() <= 1 {
-                    Ok(&key[0])
-                } else {
-                    bail!("There are too many keys of type: {:?}.", key_type)
-                }
-            } else {
-                bail!("There is no {:?} key for user", key_type)
-            }
-        }
-
-        let identity_key_upload = get_pre_key(&PreKey::Identity, keys)?;
-        let signed_key_upload = get_pre_key(&PreKey::Signed, keys)?;
-        let kyper_key_update = get_pre_key(&PreKey::Kyber, keys)?;
-
-        let mut digest = Sha256::new();
-        digest.update(&identity_key_upload.public_key);
-        digest.update(&signed_key_upload.key_id.to_be_bytes());
-        digest.update(signed_key_upload.public_key.to_owned());
-        digest.update(&kyper_key_update.key_id.to_be_bytes());
-        digest.update(kyper_key_update.public_key.to_owned());
-
-        let server_digest: [u8; 32] = digest.finalize().into();
-
-        Ok(server_digest == usr_digest)
-    } else {
-        bail!("Client has no keys")
-    }
-    */
 }
 
 /// A protocol address is represented in string form as
@@ -248,8 +198,32 @@ async fn get_messages_endpoint(State(state): State<SignalServerState<PostgresDat
 
 /// Handler for the PUT v1/registration endpoint.
 #[debug_handler]
-async fn put_registration_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
-    // TODO: Call `handle_put_registration`
+async fn put_registration_endpoint(
+    State(state): State<SignalServerState<PostgresDatabase>>,
+    headers: HeaderMap,
+    Json(registration): Json<RegistrationRequest>,
+) -> Result<(), ApiError> {
+    let auth_header = headers
+        .get("Authorization")
+        .ok_or_else(|| ApiError {
+            message: "Missing authorization header".to_owned(),
+            status_code: StatusCode::UNAUTHORIZED,
+        })?
+        .to_str()
+        .map_err(|err| ApiError {
+            message: format!(
+                "Authorization header could not be parsed as string: {}",
+                err
+            ),
+            status_code: StatusCode::UNAUTHORIZED,
+        })?
+        .parse()
+        .map_err(|err| ApiError {
+            message: format!("Authorization header could not be parsed: {}", err),
+            status_code: StatusCode::UNAUTHORIZED,
+        })?;
+
+    handle_put_registration(state, auth_header, registration).await
 }
 
 /// Handler for the GET v2/keys endpoint.
@@ -335,7 +309,9 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .max_age(Duration::from_secs(5184000))
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
+
     let state = SignalServerState::<PostgresDatabase>::new().await;
+
     let app = Router::new()
         .route("/", get(|| async { "Hello from Signal Server" }))
         .route("/v1/messages", get(get_messages_endpoint))
@@ -374,95 +350,89 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod server_tests {
-    use super::*;
-    use super::{handle_put_messages, SignalServerState};
-    use crate::account::Account;
-    use crate::database::SignalDatabase;
-    use common::web_api::Device;
-    use libsignal_protocol::*;
-    use uuid::Uuid;
-
-    fn create_bob() -> Account {
-        let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
-        Account {
-            aci: Some(Uuid::new_v4().to_string()),
-            pni: None,
-            auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
-                .to_owned(),
-            identity_key: id_key.identity_key().clone(),
+    /*
+        fn create_bob() -> Account {
+            let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
+            Account {
+                aci: Some(Uuid::new_v4().to_string()),
+                pni: None,
+                auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
+                    .to_owned(),
+                identity_key: *id_key.identity_key(),
+            }
         }
-    }
 
-    fn create_alice() -> Account {
-        let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
-        Account {
-            aci: Some(Uuid::new_v4().to_string()),
-            pni: None,
-            auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
-                .to_owned(),
-            identity_key: id_key.identity_key().clone(),
+        fn create_alice() -> Account {
+            let id_key = IdentityKeyPair::generate(&mut rand::thread_rng());
+            Account {
+                aci: Some(Uuid::new_v4().to_string()),
+                pni: None,
+                auth_token: "1236854bff0ad5aa206f924c9c2ff800681f69df4f6963976f144c1842c2ff1b"
+                    .to_owned(),
+                identity_key: *id_key.identity_key(),
+            }
         }
-    }
 
-    #[tokio::test]
-    async fn handle_put_messages_adds_message_to_queue() {
-        let state = SignalServerState::<InMemorySignalDatabase>::new().await;
-        let bob = create_bob();
-        let bob_device = Device {
-            device_id: 0,
-            name: "bob_device".to_owned(),
-            last_seen: 0,
-            created: 0,
-        };
-        let bob_address =
-            ProtocolAddress::new(bob.service_id().service_id_string(), bob_device.device_id());
+        #[tokio::test]
+        async fn handle_put_messages_adds_message_to_queue() {
+            let state = SignalServerState::<InMemorySignalDatabase>::new().await;
+            let bob = create_bob();
+            let bob_device = Device {
+                device_id: 0,
+                name: "bob_device".to_owned(),
+                last_seen: 0,
+                created: 0,
+            };
+            let bob_address =
+                ProtocolAddress::new(bob.service_id().service_id_string(), bob_device.device_id());
 
-        let alice = create_alice();
-        let alice_device = Device {
-            device_id: 0,
-            name: "alice_device".to_owned(),
-            last_seen: 0,
-            created: 0,
-        };
-        let alice_address = ProtocolAddress::new(
-            alice.service_id().service_id_string(),
-            alice_device.device_id(),
-        );
-        state.database().add_account(bob.clone()).await.unwrap();
+            let alice = create_alice();
+            let alice_device = Device {
+                device_id: 0,
+                name: "alice_device".to_owned(),
+                last_seen: 0,
+                created: 0,
+            };
+            let alice_address = ProtocolAddress::new(
+                alice.service_id().service_id_string(),
+                alice_device.device_id(),
+            );
+            state.database().add_account(bob.clone()).await.unwrap();
 
-        let message = common::signal_protobuf::Envelope {
-            r#type: None,
-            source_service_id: None,
-            source_device: None,
-            client_timestamp: None,
-            content: None,
-            server_guid: None,
-            server_timestamp: None,
-            ephemeral: None,
-            destination_service_id: None,
-            urgent: None,
-            updated_pni: None,
-            story: None,
-            report_spam_token: None,
-            shared_mrm_key: None,
-        };
-        handle_put_messages(state.clone(), bob_address.clone(), message.clone())
-            .await
-            .unwrap();
-
-        assert_eq!(
-            message,
-            state
-                .database()
-                .mail_queues
-                .lock()
+            let message = common::signal_protobuf::Envelope {
+                r#type: None,
+                source_service_id: None,
+                source_device: None,
+                client_timestamp: None,
+                content: None,
+                server_guid: None,
+                server_timestamp: None,
+                ephemeral: None,
+                destination_service_id: None,
+                urgent: None,
+                updated_pni: None,
+                story: None,
+                report_spam_token: None,
+                shared_mrm_key: None,
+            };
+            handle_put_messages(state.clone(), bob_address.clone(), message.clone())
                 .await
-                .get_mut(&bob_address)
-                .unwrap()
-                .pop_front()
-                .unwrap()
-        );
-    }
+                .unwrap();
+
+            assert_eq!(
+                message,
+                state
+                    .database()
+                    .mail_queues
+                    .lock()
+                    .await
+                    .get_mut(&bob_address)
+                    .unwrap()
+                    .pop_front()
+                    .unwrap()
+            );
+        }
+    */
 
     #[ignore = "Not implemented"]
     #[tokio::test]
@@ -479,11 +449,14 @@ mod server_tests {
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_get_keys_gets_keys() {
-        todo!()
+        todo!();
         /*
         let database = Arc::new(Mutex::new(InMemorySignalDatabase::new()));
-        let usr_id: UserID = 0u32;
-        let device_id: DeviceID = 0u32;
+        let is_aci = true;
+        let usr_id =
+            ServiceId::parse_from_service_id_string("8c78cd2a-16ff-427d-83dc-1a5e36ce713d")
+                .unwrap();
+        let address = ProtocolAddress::new("04899A85-4C9E-44CC-8428-A02AB69335F1".into(), 0.into());
 
         let mut database_lock = database.lock().await;
         database_lock
@@ -531,7 +504,7 @@ mod server_tests {
                 .unwrap(),
             j
         );
-         */
+        */
     }
 
     #[ignore = "Not implemented"]

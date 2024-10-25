@@ -1,10 +1,10 @@
-use crate::account::Account;
+use crate::account::{Account, Device};
 use crate::database::SignalDatabase;
 use anyhow::{anyhow, Result};
 use axum::async_trait;
-use common::pre_key::PreKey;
+use common::pre_key::PreKeyType;
 use common::signal_protobuf::Envelope;
-use common::web_api::{Device, DevicePreKeyBundle, UploadSignedPreKey};
+use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -14,8 +14,9 @@ use tokio::sync::Mutex;
 pub struct InMemorySignalDatabase {
     pub mail_queues: Arc<Mutex<HashMap<ProtocolAddress, VecDeque<Envelope>>>>,
     pub devices: Arc<Mutex<HashMap<ServiceId, Vec<Device>>>>,
-    pub keys:
-        Arc<Mutex<HashMap<ServiceId, HashMap<DeviceId, HashMap<PreKey, Vec<UploadSignedPreKey>>>>>>,
+    pub keys: Arc<
+        Mutex<HashMap<ServiceId, HashMap<DeviceId, HashMap<PreKeyType, Vec<UploadSignedPreKey>>>>>,
+    >,
     pub accounts: Arc<Mutex<HashMap<ServiceId, Account>>>,
 }
 /*
@@ -82,8 +83,37 @@ impl InMemorySignalDatabase {
 
 #[async_trait]
 impl SignalDatabase for InMemorySignalDatabase {
+    async fn add_device(&self, service_id: &ServiceId, device: Device) -> Result<()> {
+        todo!()
+    }
+    async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
+        todo!()
+    }
+    async fn get_device(&self, service_id: &ServiceId, device_id: u32) -> Result<Device> {
+        todo!()
+    }
+    async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()> {
+        todo!()
+    }
+    async fn store_aci_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
+        todo!()
+    }
+
+    async fn store_pni_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
+        todo!()
+    }
+
+    async fn store_pq_aci_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
+        todo!()
+    }
+
+    async fn store_pq_pni_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
+        todo!()
+    }
+
     async fn add_account(&self, account: Account) -> Result<()> {
-        let service_id = account.service_id();
+        todo!("Decide whether this should be aci or pni");
+        let service_id = ServiceId::Aci(account.aci());
         self.accounts
             .lock()
             .await
@@ -100,9 +130,9 @@ impl SignalDatabase for InMemorySignalDatabase {
         self.accounts
             .lock()
             .await
-            .get(&service_id)
+            .get(service_id)
             .ok_or_else(|| anyhow!("No user exists with ID"))
-            .map(Clone::clone)
+            .cloned()
     }
     async fn update_account_aci(&self, service_id: &ServiceId, new_aci: Aci) -> Result<()> {
         todo!()
@@ -134,11 +164,11 @@ impl SignalDatabase for InMemorySignalDatabase {
     async fn store_key_bundle(
         &self,
         data: DevicePreKeyBundle,
-        owner_address: ProtocolAddress,
+        owner_address: &ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
-    async fn get_key_bundle(&self, address: ProtocolAddress) -> Result<DevicePreKeyBundle> {
+    async fn get_key_bundle(&self, address: &ProtocolAddress) -> Result<DevicePreKeyBundle> {
         todo!()
     }
 
@@ -157,16 +187,13 @@ impl SignalDatabase for InMemorySignalDatabase {
 
     async fn store_one_time_pre_keys(
         &self,
-        otpks: Vec<UploadSignedPreKey>,
+        otpks: Vec<UploadPreKey>,
         owner_address: ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
 
-    async fn get_one_time_pre_key(
-        &self,
-        owner_address: ProtocolAddress,
-    ) -> Result<UploadSignedPreKey> {
+    async fn get_one_time_pre_key(&self, owner_address: &ProtocolAddress) -> Result<UploadPreKey> {
         todo!()
     }
 }

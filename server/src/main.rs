@@ -4,6 +4,7 @@ mod api_error;
 pub mod database;
 pub mod in_memory_db;
 mod message_cache;
+pub mod managers;
 mod postgres;
 mod server;
 mod socket;

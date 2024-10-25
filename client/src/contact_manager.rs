@@ -99,10 +99,9 @@ mod test {
     fn test_cm_add() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
-        match cm.add_contact(&charlie) {
-            Ok(_) => assert!(true),
-            Err(x) => assert!(false, "{}", x),
-        };
+        if let Err(x) = cm.add_contact(&charlie) {
+            panic!("{}", x)
+        }
     }
 
     #[test]
@@ -110,11 +109,10 @@ mod test {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
 
-        let _ = cm.add_contact(&charlie);
+        cm.add_contact(&charlie);
 
-        match cm.remove_contact(&charlie) {
-            Ok(_) => assert!(true),
-            Err(x) => assert!(false, "{}", x),
+        if let Err(x) = cm.remove_contact(&charlie) {
+            panic!("{}", x)
         }
     }
 
@@ -123,11 +121,11 @@ mod test {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
 
-        let _ = cm.add_contact(&charlie);
+        cm.add_contact(&charlie);
 
         match cm.get_contact(&charlie) {
-            Ok(c) => assert!(c.uuid == charlie && c.devices.len() == 0),
-            Err(x) => assert!(false, "{}", x),
+            Ok(c) => assert!(c.uuid == charlie && c.devices.is_empty()),
+            Err(x) => panic!("{}", x),
         };
     }
 
@@ -136,15 +134,14 @@ mod test {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
 
-        let _ = cm.add_contact(&charlie);
+        cm.add_contact(&charlie);
 
         let mut store = store(1);
         let bundle = create_pre_key_bundle(&mut store, 1, &mut OsRng)
             .await
             .unwrap();
-        match cm.update_contact(&charlie, vec![(1, bundle.try_into().unwrap())]) {
-            Ok(_) => assert!(true),
-            Err(x) => assert!(false, "{}", x),
+        if let Err(x) = cm.update_contact(&charlie, vec![(1, bundle.try_into().unwrap())]) {
+            panic!("{}", x)
         }
 
         assert!(cm.get_contact(&charlie).is_ok(), "Charlie was not ok")
