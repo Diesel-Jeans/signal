@@ -3,6 +3,7 @@ mod account;
 mod error;
 pub mod database;
 pub mod in_memory_db;
+pub mod managers;
 mod postgres;
 mod server;
 mod socket;

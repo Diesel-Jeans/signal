@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub enum PreKey {
+pub enum PreKeyType {
     Signed,
     Kyber,
     OneTime,

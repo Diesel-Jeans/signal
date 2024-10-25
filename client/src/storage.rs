@@ -37,7 +37,7 @@ mod tests {
     use libsignal_protocol::*;
     use rand::rngs::OsRng;
     use serde::de::IntoDeserializer;
-    use serde_json;
+
     use uuid::Uuid;
 
     #[tokio::test]
