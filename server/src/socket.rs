@@ -127,7 +127,7 @@ impl<T: WSStream> SocketManager<T> {
         let msg = match WebSocketMessage::decode(Bytes::from(bytes)) {
             Ok(x) => x,
             Err(y) => {
-                println!("handle_socket ws proto ERROR: {}", y);
+                println!("on_ws_binary could not decode bytes: {}", y);
                 return;
             }
         };
