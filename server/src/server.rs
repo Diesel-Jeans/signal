@@ -12,10 +12,7 @@ use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
-use common::web_api::{
-    AuthorizationHeader, RegistrationRequest
-    , SignalMessages,
-};
+use common::web_api::{AuthorizationHeader, RegistrationRequest, SignalMessages};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use std::env;
 use std::time::Duration;
