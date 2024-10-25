@@ -43,7 +43,9 @@ impl SignalServerState<InMemorySignalDatabase> {
 
 impl SignalServerState<PostgresDatabase> {
     pub async fn new() -> Self {
-        let db = PostgresDatabase::connect().await.unwrap();
+        let db = PostgresDatabase::connect()
+            .await
+            .expect("Failed to connect to the database.");
         Self {
             db: db.clone(),
             socket_manager: SocketManager::new(),

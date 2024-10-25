@@ -28,13 +28,13 @@ impl BasicAuthorizationHeader {
     /// Signal calls this field "username" but in reality it is a phone number
     /// when sending a [RegistrationRequest] and otherwise it may be an ACI.
     pub fn username(&self) -> &String {
-        return &self.username;
+        &self.username
     }
     pub fn device_id(&self) -> u32 {
-        return self.device_id;
+        self.device_id
     }
     pub fn password(&self) -> &String {
-        return &self.password;
+        &self.password
     }
     pub fn encode(&self) -> String {
         let encoded = BASE64_STANDARD.encode(format!(

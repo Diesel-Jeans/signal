@@ -1,5 +1,5 @@
 pub mod authorization;
-use std::{fmt, num::ParseIntError, str::FromStr, u32};
+use std::{fmt, num::ParseIntError, str::FromStr};
 
 use crate::signal_protobuf::Envelope;
 use anyhow::{anyhow, bail, Error};
