@@ -499,7 +499,7 @@ pub(crate) mod test {
     }
 
     #[tokio::test]
-    async fn test_text_relay_ok() {
+    async fn test_send_text_response_ok() {
         let mut sm: SocketManager<MockSocket> = SocketManager::new();
 
         let (state, sender, mut receiver) = create_connection(&sm, "127.0.0.1:5555", 100).await;
