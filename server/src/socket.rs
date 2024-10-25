@@ -200,7 +200,7 @@ impl<T: WSStream> SocketManager<T> {
         todo!()
     }
 
-    pub async fn send_message(&mut self, who: &SocketAddr, message: Envelope) {
+    pub async fn send_message(&mut self, who: &SocketAddr, mut message: Envelope) {
         let state = if let Ok(x) = self.get_ws(who).await {
             x
         } else {
@@ -209,6 +209,7 @@ impl<T: WSStream> SocketManager<T> {
         let mut state_g = state.lock().await;
         if let ConnectionState::Active(ref mut connection) = *state_g {
             let id = generate_req_id();
+            message.ephemeral = Some(false);
             let body = message.encode_to_vec();
             let req = WebSocketRequestMessage {
                 verb: Some("PUT".to_string()),
@@ -220,10 +221,15 @@ impl<T: WSStream> SocketManager<T> {
                 ],
                 id: Some(id),
             };
+            let ws_msg = WebSocketMessage {
+                r#type: Some(web_socket_message::Type::Request as i32),
+                request: Some(req),
+                response: None
+            };
             connection.pending_requests.insert(id);
             connection
                 .ws
-                .send(Message::Binary(req.encode_to_vec()))
+                .send(Message::Binary(ws_msg.encode_to_vec()))
                 .await;
         }
     }
