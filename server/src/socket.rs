@@ -201,7 +201,7 @@ impl<T: WSStream> SocketManager<T> {
     }
 
     pub async fn send_message(&mut self, who: &SocketAddr, message: Envelope) {
-        let state = if let Ok(x) = self.get_ws(&who).await {
+        let state = if let Ok(x) = self.get_ws(who).await {
             x
         } else {
             return; // socket does not exist
