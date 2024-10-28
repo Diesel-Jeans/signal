@@ -1,7 +1,8 @@
-use std::{fmt, str::FromStr};
+pub mod authorization;
+use std::{fmt, num::ParseIntError, str::FromStr};
 
 use crate::signal_protobuf::Envelope;
-use anyhow::Error;
+use anyhow::{anyhow, bail, Error};
 use libsignal_protocol::{DeviceId, IdentityKey, ServiceId};
 use serde::{
     de::{self, MapAccess, Visitor},
@@ -31,7 +32,7 @@ pub struct CreateAccountOptions {
     pub pni_pq_last_resort_pre_key: UploadSignedPreKey,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceCapabilities {
     storage: bool,
@@ -41,7 +42,7 @@ pub struct DeviceCapabilities {
     versioned_expiration_timer: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountAttributes {
     fetches_messages: bool,

@@ -10,13 +10,16 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+type MessageTable = HashMap<ProtocolAddress, VecDeque<Envelope>>;
+type DeviceTable = HashMap<ServiceId, Vec<Device>>;
+type KeysTable =
+    HashMap<ServiceId, HashMap<DeviceId, HashMap<PreKeyType, Vec<UploadSignedPreKey>>>>;
+
 #[derive(Clone, Default)]
 pub struct InMemorySignalDatabase {
-    pub mail_queues: Arc<Mutex<HashMap<ProtocolAddress, VecDeque<Envelope>>>>,
-    pub devices: Arc<Mutex<HashMap<ServiceId, Vec<Device>>>>,
-    pub keys: Arc<
-        Mutex<HashMap<ServiceId, HashMap<DeviceId, HashMap<PreKeyType, Vec<UploadSignedPreKey>>>>>,
-    >,
+    pub mail_queues: Arc<Mutex<MessageTable>>,
+    pub devices: Arc<Mutex<DeviceTable>>,
+    pub keys: Arc<Mutex<KeysTable>>,
     pub accounts: Arc<Mutex<HashMap<ServiceId, Account>>>,
 }
 /*

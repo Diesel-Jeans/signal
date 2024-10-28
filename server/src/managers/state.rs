@@ -7,10 +7,10 @@ use super::{account_manager::AccountManager, key_manager::KeyManager};
 use axum::extract::ws::WebSocket;
 
 #[derive(Clone, Debug)]
-struct SignalServerState<T: SignalDatabase> {
+pub struct SignalServerState<T: SignalDatabase> {
     db: T,
     socket_manager: SocketManager<WebSocket>,
-    account_manager: AccountManager,
+    account_manager: AccountManager<T>,
     key_manager: KeyManager,
 }
 
@@ -18,25 +18,38 @@ impl<T: SignalDatabase> SignalServerState<T> {
     pub(self) fn database(&self) -> T {
         self.db.clone()
     }
+    pub fn socket_manager(&self) -> &SocketManager<WebSocket> {
+        &self.socket_manager
+    }
+    pub fn account_manager(&self) -> &AccountManager<T> {
+        &self.account_manager
+    }
+    pub fn key_manager(&self) -> &KeyManager {
+        &self.key_manager
+    }
 }
 
 impl SignalServerState<InMemorySignalDatabase> {
-    async fn new() -> Self {
+    pub async fn new() -> Self {
+        let db = InMemorySignalDatabase::new();
         Self {
-            db: InMemorySignalDatabase::new(),
+            db: db.clone(),
             socket_manager: SocketManager::new(),
-            account_manager: AccountManager::new(),
+            account_manager: AccountManager::new(db),
             key_manager: KeyManager::new(),
         }
     }
 }
 
 impl SignalServerState<PostgresDatabase> {
-    async fn new() -> Self {
+    pub async fn new() -> Self {
+        let db = PostgresDatabase::connect()
+            .await
+            .expect("Failed to connect to the database.");
         Self {
-            db: PostgresDatabase::connect().await.unwrap(),
+            db: db.clone(),
             socket_manager: SocketManager::new(),
-            account_manager: AccountManager::new(),
+            account_manager: AccountManager::new(db),
             key_manager: KeyManager::new(),
         }
     }
