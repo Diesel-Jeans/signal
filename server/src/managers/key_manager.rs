@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{database::SignalDatabase, error::ApiError};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct KeyManager {}
 
 impl KeyManager {

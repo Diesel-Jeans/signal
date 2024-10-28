@@ -229,6 +229,7 @@ impl<'de> Deserialize<'de> for RegistrationRequest {
     }
 }
 impl RegistrationRequest {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         session_id: String,
         account_attributes: AccountAttributes,
