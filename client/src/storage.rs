@@ -5,7 +5,7 @@ use serde_json::*;
 use std::fs;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-struct Info {
+pub struct Info {
     uuid: String,
     device_id: u32,
     bundle: PrimitiveKeyBundleContent,

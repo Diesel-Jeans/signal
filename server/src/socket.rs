@@ -115,6 +115,11 @@ impl<T: WSStream> Clone for SocketManager<T> {
         }
     }
 }
+impl<T: WSStream> Default for SocketManager<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl<T: WSStream> SocketManager<T> {
     pub fn new() -> Self {
