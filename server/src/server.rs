@@ -2,17 +2,19 @@ use crate::account::{Account, Device};
 use crate::database::SignalDatabase;
 use crate::error::ApiError;
 use crate::in_memory_db::InMemorySignalDatabase;
+use crate::managers::state::SignalServerState;
 use crate::postgres::PostgresDatabase;
 use anyhow::Result;
 use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
 use axum::handler::HandlerWithoutStateExt;
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
+use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{
     AuthorizationHeader, CreateAccountOptions, DevicePreKeyBundle, RegistrationRequest,
     SetKeyRequest, SignalMessages, UploadKeys,
@@ -20,49 +22,17 @@ use common::web_api::{
 use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
 use std::env;
-use std::fmt::format;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use crate::message_cache::MessageCache;
+use crate::socket::{SocketManager, ToEnvelope};
+use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
 use std::str::FromStr;
-
-use crate::socket::{SocketManager, ToEnvelope};
-
-#[derive(Clone, Debug)]
-struct SignalServerState<T: SignalDatabase> {
-    db: T,
-    socket_manager: SocketManager<WebSocket>,
-}
-
-impl<T: SignalDatabase> SignalServerState<T> {
-    #[allow(dead_code)]
-    fn database(&self) -> T {
-        self.db.clone()
-    }
-}
-
-impl SignalServerState<InMemorySignalDatabase> {
-    async fn new() -> Self {
-        Self {
-            db: InMemorySignalDatabase::new(),
-            socket_manager: SocketManager::new(),
-        }
-    }
-}
-
-impl SignalServerState<PostgresDatabase> {
-    async fn new() -> Self {
-        Self {
-            db: PostgresDatabase::connect().await.unwrap(),
-            socket_manager: SocketManager::new(),
-        }
-    }
-}
 
 async fn handle_put_messages<T: SignalDatabase>(
     state: SignalServerState<T>,
@@ -85,36 +55,37 @@ async fn handle_get_messages<T: SignalDatabase>(
 
 async fn handle_put_registration<T: SignalDatabase>(
     state: SignalServerState<T>,
-    auth_header: AuthorizationHeader,
+    auth_header: BasicAuthorizationHeader,
     registration: RegistrationRequest,
 ) -> Result<(), ApiError> {
     println!("Register client");
-    let uuid = Uuid::parse_str(auth_header.username()).map_err(|err| ApiError {
-        message: format!("Could not parse uuid '{}'", { auth_header.username() }),
-        status_code: StatusCode::BAD_REQUEST,
-    })?;
+    let phone_number = auth_header.username();
 
-    let account = Account::new(
-        uuid.into(),
-        Device::new(
-            0u32.into(),
-            "bob_device".into(),
-            0u32,
-            0u32,
-            "".into(),
-            "".into(),
-        ),
-        *registration.pni_identity_key(),
-        *registration.aci_identity_key(),
-    );
     state
-        .database()
-        .add_account(account)
+        .create_account(
+            phone_number.to_owned(),
+            registration.account_attributes().to_owned(),
+            registration.aci_identity_key().to_owned(),
+            registration.pni_identity_key().to_owned(),
+            Device::new(
+                1.into(),
+                "my_device".to_owned(),
+                0,
+                0,
+                "no token".to_owned(),
+                "salt".to_owned(),
+                registration.aci_signed_pre_key().to_owned(),
+                registration.pni_signed_pre_key().to_owned(),
+                registration.aci_pq_last_resort_pre_key().to_owned(),
+                registration.pni_pq_last_resort_pre_key().to_owned(),
+            ),
+        )
         .await
         .map_err(|err| ApiError {
-            message: format!("Could not store user in database: {}", err),
+            message: format!("Could not create account:{}", err),
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        })?;
+        });
+
     Ok(())
 }
 
@@ -276,7 +247,7 @@ async fn create_websocket_endpoint(
     };
     println!("`{user_agent}` at {addr} connected.");
     ws.on_upgrade(move |socket| {
-        let mut socket_manager = state.socket_manager.clone();
+        let mut socket_manager = state.socket_manager().clone();
         async move {
             socket_manager
                 .handle_socket(/*authenticated_device,*/ socket, addr)
@@ -348,15 +319,6 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod server_tests {
-    use std::sync::{Arc, Mutex};
-
-    use super::*;
-    use super::{handle_put_messages, SignalServerState};
-    use crate::account::Account;
-    use crate::database::SignalDatabase;
-    use libsignal_protocol::*;
-    use uuid::Uuid;
-
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_get_messages_pops_message_queue() {
