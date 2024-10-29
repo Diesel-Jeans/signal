@@ -1,5 +1,5 @@
 use crate::database::SignalDatabase;
-use crate::message_cache::{self, MessageCache};
+use crate::message_cache::{MessageCache, WebsocketConnection};
 use crate::postgres::PostgresDatabase;
 use anyhow::{Ok, Result};
 use common::signal_protobuf::{envelope, Envelope};
@@ -10,8 +10,6 @@ use tokio::sync::Mutex;
 pub struct MessagesManager {
     message_cache: MessageCache,
     // message_db: PostgresDatabase,
-    // report_message_manager
-    // message_deletion_executor
 }
 
 impl MessagesManager {
@@ -58,7 +56,7 @@ impl MessagesManager {
             .get_all_messages(user_id, device_id)
             .await?;
 
-        // TODO: get all DB messages 
+        // TODO: get all DB messages
 
         Ok([cached_messages].concat())
     }
@@ -105,7 +103,7 @@ impl MessagesManager {
         &mut self,
         user_id: &str,
         device_id: DeviceId,
-        listener: Arc<Mutex<message_cache::WebsocketConnection>>,
+        listener: Arc<Mutex<WebsocketConnection>>,
     ) {
         self.message_cache
             .add_message_availability_listener(user_id, device_id, listener);
