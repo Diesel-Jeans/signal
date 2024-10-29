@@ -1,13 +1,15 @@
+
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::extract::Query;
-use axum::http::Uri;
+use axum::http::{StatusCode, Uri};
+use axum::routing::head;
 use libsignal_core::{DeviceId, ServiceId};
 use serde::de::IntoDeserializer;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::digest::consts::False;
 use sha2::digest::typenum::Integer;
-use std::fmt::{self, Debug};
+use std::fmt::{self, format, Debug};
 use std::future::Future;
 use std::net::SocketAddr;
 use tonic::ConnectError;
@@ -32,8 +34,10 @@ use url::Url;
 
 use crate::account::Account;
 use crate::connection::{WSStream, WebSocketConnection};
-use crate::error::SocketManagerError;
+use crate::error::{ApiError, SocketManagerError};
 use crate::query::PutV1MessageParams;
+
+use chrono::Utc;
 
 /*const WS_ENDPOINTS: [&str; 24] = [
     "v4/attachments/form/upload",
@@ -158,17 +162,12 @@ impl<T: WSStream> SocketManager<T> {
         &mut self,
         connection: &mut WebSocketConnection<T>,
         req: WebSocketRequestMessage,
-    ) {
+    ){
         let uri = Uri::from_str(req.path()).unwrap();
         let path = uri.path();
 
         if path.starts_with("v1/messages") {
-            let id = get_path_segment::<String>(path, 2).unwrap();
-            let query: Query<PutV1MessageParams> = Query::try_from_uri(&uri).unwrap();
-            let json = String::from_utf8(req.body().to_vec()).unwrap();
-            let messages = SignalMessages::deserialize(json!(json)).unwrap();
-            todo!(); // TODO: call handle_put_messages
-                     //self.send_response(connection, req, status, reason, headers, body);
+            self.ws_put_message_handler(path, uri.clone(), connection, req).await
 
         // add more endpoints below as needed
         } else {
@@ -192,13 +191,43 @@ impl<T: WSStream> SocketManager<T> {
         &mut self,
         connection: &mut WebSocketConnection<T>,
         req: WebSocketRequestMessage,
-        status: u16,
+        status: u32,
         reason: String,
-        headers: Vec<String>,
+        mut headers: Vec<String>,
         body: Option<Vec<u8>>,
     ) {
-        todo!()
+        if !headers.iter().any(|x| x.starts_with("Content-Length")){
+            headers.push(format!("Content-Length: {}", body.as_ref().map(|v| v.len()).unwrap_or(0)));
+        }
+
+        let res = WebSocketResponseMessage {
+            id: req.id,
+            status: Some(status),
+            message: Some(reason),
+            headers: headers,
+            body: body
+        };
+
+        let ws_msg = WebSocketMessage {
+            r#type: Some(web_socket_message::Type::Response as i32),
+            request: None,
+            response: Some(res)
+        };
+        connection.ws
+        .send(Message::Binary(ws_msg.encode_to_vec())).await;
     }
+
+    async fn send_server_error(&mut self, connection: &mut WebSocketConnection<T>,
+        req: WebSocketRequestMessage){
+
+        self.send_response(
+            connection, 
+            req, 
+            500, 
+            "Error Response".to_string(), 
+            vec![format!("Date: {}", current_rfc1123())], 
+            None).await
+        }
 
     pub async fn send_message(&mut self, who: &SocketAddr, mut message: Envelope) {
         let state = if let Ok(x) = self.get_ws(who).await {
@@ -337,6 +366,65 @@ impl<T: WSStream> SocketManager<T> {
             }
         }
     }
+
+    async fn ws_put_message_handler(&mut self, path: &str, uri: Uri, connection: &mut WebSocketConnection<T>, req: WebSocketRequestMessage, ){
+        let id = match  get_path_segment::<String>(path, 2) {
+            Err(x) => {
+                println!("{}", x);
+                self.send_response(connection, req, 400, x, vec![], None).await;
+                return;
+            },
+            Ok(y) => y
+        };
+
+        let query: PutV1MessageParams = match  Query::try_from_uri(&uri) {
+            Err(x) => {
+                println!("{}", x.body_text());
+                self.send_response(connection, req, 400, x.body_text(), vec![], None).await;
+                return;
+            },
+            Ok(y) => y.0
+        };
+
+        let json = match String::from_utf8(req.body().to_vec()) {
+            Err(x) => {
+                println!("Body bytes to json failed");
+                self.send_response(connection, req, 400, "malformed json".to_string(), vec![], None).await;
+                return;
+            },
+            Ok(y) => y
+        };
+
+        let json = match SignalMessages::deserialize(json!(json)) {
+            Err(x) => {
+                println!("Failed to convert json to SignalMessages");
+                self.send_response(connection, req, 400, "Failed to convert json to SignalMessages".to_string(), vec![], None).await;
+                return;
+            },
+            Ok(y) => y
+        };
+
+        // TODO: call the real endpoint handler when it is done
+        let res: Result<(), ApiError> = Err(ApiError{status_code: StatusCode::UNAUTHORIZED, message: "z".to_string()});
+
+        match res {
+            Err(x) => self.send_response(
+                connection, 
+                req, 
+                x.status_code.as_u16().into(), 
+                x.message, 
+                vec![], 
+                None).await, // TODO: real server can output jason if error
+            Ok(y) => self.send_response(
+                connection, 
+                req, 
+                200, 
+                "OK".to_string(), 
+                vec![], 
+                None) // TODO: convert OK body to some bytes
+                .await,
+        }
+    }
 }
 
 fn get_path_segment<T: FromStr<Err = impl std::fmt::Debug>>(
@@ -371,6 +459,10 @@ fn current_millis() -> u128 {
         .as_millis()
 }
 
+fn current_rfc1123() -> String {
+    Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string()
+}
+
 fn generate_req_id() -> u64 {
     let mut rng = OsRng;
     let rand_v: u64 = rng.gen();
@@ -387,8 +479,7 @@ pub(crate) mod test {
     use axum::extract::ws::Message;
     use axum::Error;
 
-    use tokio::sync::mpsc;
-    use tokio::sync::mpsc::{Receiver, Sender};
+    use tokio::sync::mpsc::{channel, Receiver, Sender};
 
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -401,8 +492,8 @@ pub(crate) mod test {
 
     impl MockSocket {
         fn new() -> (Self, Sender<Result<Message, Error>>, Receiver<Message>) {
-            let (send_to_socket, client_sender) = mpsc::channel(10); // Queue for test -> socket
-            let (client_receiver, receive_from_socket) = mpsc::channel(10); // Queue for socket -> test
+            let (send_to_socket, client_sender) = channel(10); // Queue for test -> socket
+            let (client_receiver, receive_from_socket) = channel(10); // Queue for socket -> test
 
             (
                 Self {
