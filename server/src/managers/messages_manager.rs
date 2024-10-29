@@ -37,6 +37,8 @@ impl MessagesManager {
         device_id: DeviceId,
     ) -> Result<(bool, &str)> {
         let cache_has_messages = self.message_cache.has_messages(user_id, device_id).await?;
+
+        // TODO: check if persisted in DB
         // let db_has_messages = self.messages_db.has_messages(user_id, device_id).await?;
 
         if cache_has_messages {
@@ -50,12 +52,42 @@ impl MessagesManager {
         unimplemented!()
     }
 
-    pub async fn delete() {
-        unimplemented!()
+    pub async fn delete(
+        &self,
+        user_id: &str,
+        device_id: DeviceId,
+        message_guids: Vec<String>,
+    ) -> anyhow::Result<Vec<Envelope>> {
+        let removed_messages = self
+            .message_cache
+            .remove(user_id, device_id, message_guids)
+            .await?;
+
+        // TODO: deleteMessage in DB
+
+        Ok(removed_messages)
     }
 
-    pub async fn persist_messages() {
-        unimplemented!()
+    /// Remove messages from cache and store in DB
+    pub async fn persist_messages(
+        &self,
+        user_id: &str,
+        device_id: DeviceId,
+        messages: Vec<Envelope>,
+    ) -> anyhow::Result<usize> {
+        let message_guids: Vec<String> = messages
+            .iter()
+            .map(|m| m.server_guid().to_string())
+            .collect();
+
+        // TODO: store in DB first
+
+        let removed_from_cache = self
+            .message_cache
+            .remove(user_id, device_id, message_guids)
+            .await?;
+
+        Ok(removed_from_cache.len())
     }
 
     pub fn add_message_availability_listener(
