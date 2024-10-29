@@ -172,23 +172,14 @@ impl SignalDatabase for PostgresDatabase {
         sqlx::query!(
             r#"
             SELECT
-                devices.device_id,
-                devices.name,
-                devices.auth_token,
-                devices.salt,
-                aspks.key_id AS aspk_key_id, aspks.public_key AS aspk_public_key, aspks.signature AS aspk_signature,
-                pspks.key_id AS pspk_key_id, pspks.public_key AS pspk_public_key, pspks.signature AS pspk_signature,
-                apqlrpks.key_id AS apqlrpk_key_id, apqlrpks.public_key AS apqlrpk_public_key, apqlrpks.signature AS apqlrpk_signature,
-                ppqlrpks.key_id AS ppqlrpk_key_id, ppqlrpks.public_key AS ppqlrpk_public_key, ppqlrpks.signature AS ppqlrpk_signature
+                device_id,
+                name,
+                auth_token,
+                salt
             FROM
                 devices
-                INNER JOIN device_keys ON device_keys.owner = devices.id
-                INNER JOIN aci_signed_pre_key_store AS aspks ON aspks.key_id = device_keys.aci_signed_pre_key
-                INNER JOIN pni_signed_pre_key_store AS pspks ON pspks.key_id = device_keys.pni_signed_pre_key
-                INNER JOIN aci_pq_last_resort_pre_key_store AS apqlrpks ON apqlrpks.key_id = device_keys.aci_pq_last_resort_pre_key
-                INNER JOIN pni_pq_last_resort_pre_key_store AS ppqlrpks ON ppqlrpks.key_id = device_keys.pni_pq_last_resort_pre_key
             WHERE
-                devices.owner = (
+                owner = (
                     SELECT
                         id
                     FROM
@@ -212,10 +203,6 @@ impl SignalDatabase for PostgresDatabase {
                         0,
                         row.auth_token,
                         row.salt,
-                        UploadSignedPreKey { key_id: row.aspk_key_id.parse().expect("Database table is corrupt"), public_key: row.aspk_public_key.into(), signature: row.aspk_signature.into() },
-                        UploadSignedPreKey { key_id: row.pspk_key_id.parse().expect("Database table is corrupt"), public_key: row.pspk_public_key.into(), signature: row.pspk_signature.into() },
-                        UploadSignedPreKey { key_id: row.apqlrpk_key_id.parse().expect("Database table is corrupt"), public_key: row.apqlrpk_public_key.into(), signature: row.apqlrpk_signature.into() }, 
-                        UploadSignedPreKey { key_id: row.ppqlrpk_key_id.parse().expect("Database table is corrupt"), public_key: row.ppqlrpk_public_key.into(), signature: row.ppqlrpk_signature.into() },
                     )
                 })
                 .collect()
@@ -227,23 +214,14 @@ impl SignalDatabase for PostgresDatabase {
         sqlx::query!(
             r#"
             SELECT
-                devices.device_id,
-                devices.name,
-                devices.auth_token,
-                devices.salt,
-                aspks.key_id AS aspk_key_id, aspks.public_key AS aspk_public_key, aspks.signature AS aspk_signature,
-                pspks.key_id AS pspk_key_id, pspks.public_key AS pspk_public_key, pspks.signature AS pspk_signature,
-                apqlrpks.key_id AS apqlrpk_key_id, apqlrpks.public_key AS apqlrpk_public_key, apqlrpks.signature AS apqlrpk_signature,
-                ppqlrpks.key_id AS ppqlrpk_key_id, ppqlrpks.public_key AS ppqlrpk_public_key, ppqlrpks.signature AS ppqlrpk_signature
+                device_id,
+                name,
+                auth_token,
+                salt
             FROM
                 devices
-                INNER JOIN device_keys ON device_keys.owner = devices.id
-                INNER JOIN aci_signed_pre_key_store AS aspks ON aspks.key_id = device_keys.aci_signed_pre_key
-                INNER JOIN pni_signed_pre_key_store AS pspks ON pspks.key_id = device_keys.pni_signed_pre_key
-                INNER JOIN aci_pq_last_resort_pre_key_store AS apqlrpks ON apqlrpks.key_id = device_keys.aci_pq_last_resort_pre_key
-                INNER JOIN pni_pq_last_resort_pre_key_store AS ppqlrpks ON ppqlrpks.key_id = device_keys.pni_pq_last_resort_pre_key
             WHERE
-                devices.owner = (
+                owner = (
                     SELECT
                         id
                     FROM
@@ -252,7 +230,7 @@ impl SignalDatabase for PostgresDatabase {
                         aci = $1 OR
                         pni = $1
                 )
-                AND devices.device_id = $2
+                AND device_id = $2
             "#,
             service_id.service_id_string(),
             device_id.to_string()
@@ -267,10 +245,6 @@ impl SignalDatabase for PostgresDatabase {
                 0,
                 row.auth_token,
                 row.salt,
-                UploadSignedPreKey { key_id: row.aspk_key_id.parse().expect("Database table is corrupt"), public_key: row.aspk_public_key.into(), signature: row.aspk_signature.into() },
-                UploadSignedPreKey { key_id: row.pspk_key_id.parse().expect("Database table is corrupt"), public_key: row.pspk_public_key.into(), signature: row.pspk_signature.into() },
-                UploadSignedPreKey { key_id: row.apqlrpk_key_id.parse().expect("Database table is corrupt"), public_key: row.apqlrpk_public_key.into(), signature: row.apqlrpk_signature.into() }, 
-                UploadSignedPreKey { key_id: row.ppqlrpk_key_id.parse().expect("Database table is corrupt"), public_key: row.ppqlrpk_public_key.into(), signature: row.ppqlrpk_signature.into() },
             )
         })
         .map_err(|err| err.into())
