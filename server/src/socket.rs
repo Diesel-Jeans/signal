@@ -387,6 +387,9 @@ pub(crate) mod test {
     use axum::extract::ws::Message;
     use axum::Error;
 
+    use common::web_api::{
+        AccountAttributes, DeviceCapabilities,
+    };
     use libsignal_core::Pni;
     use libsignal_protocol::{IdentityKey, KeyPair, PublicKey};
     use rand::rngs::OsRng;
@@ -460,6 +463,40 @@ pub(crate) mod test {
         }
     }
 
+    async fn create_authenticated_device() -> AuthenticatedDevice {
+        let device = Device::new(
+            1.into(),
+            "test".to_owned(),
+            0,
+            0,
+            Vec::<u8>::new(),
+            "salt".to_owned(),
+        );
+        let device_capabilities = DeviceCapabilities {
+            storage: false,
+            transfer: false,
+            payment_activation: false,
+            delete_sync: false,
+            versioned_expiration_timer: false,
+        };
+        let account_attr = AccountAttributes {
+            fetches_messages: false,
+            registration_id: 1,
+            pni_registration_id: 1,
+            capabilities: device_capabilities,
+            unidentified_access_key: <Box<[u8]>>::default(),
+        };
+        let account = Account::new(
+            Pni::from(Uuid::new_v4()),
+            device.clone(),
+            IdentityKey::from(KeyPair::generate(&mut OsRng).public_key),
+            IdentityKey::from(KeyPair::generate(&mut OsRng).public_key),
+            "12354678".to_owned(),
+            account_attr,
+        );
+        AuthenticatedDevice::new(account, device)
+    }
+
     async fn create_connection(
         manager: &SocketManager<MockSocket>,
         addr: &str,
@@ -469,21 +506,7 @@ pub(crate) mod test {
         Sender<Result<Message, Error>>,
         Receiver<Message>,
     ) {
-        let device = Device::new(
-            1.into(),
-            "test".to_owned(),
-            0,
-            0,
-            Vec::<u8>::new(),
-            "salt".to_owned(),
-        );
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device.clone(),
-            IdentityKey::from(KeyPair::generate(&mut OsRng).public_key),
-            IdentityKey::from(KeyPair::generate(&mut OsRng).public_key),
-        );
-        let authenticated_device = AuthenticatedDevice::new(account, device);
+        let authenticated_device = create_authenticated_device().await;
         let (mock, sender, mut receiver) = MockSocket::new();
         let who = SocketAddr::from_str(addr).unwrap();
         let mut tmgr = manager.clone();

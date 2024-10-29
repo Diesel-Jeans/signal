@@ -75,14 +75,10 @@ async fn authenticate_device<T: SignalDatabase>(
     device_id: u32,
     password: &str,
 ) -> Result<AuthenticatedDevice, ApiError> {
-    let account: Account = state
-        .account_manager()
-        .get_account(service_id)
-        .await
-        .map_err(|_| ApiError {
-            status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "Error getting account".to_owned(),
-        })?;
+    let account: Account = state.get_account(service_id).await.map_err(|_| ApiError {
+        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        message: "Error getting account".to_owned(),
+    })?;
 
     let device: Device = account
         .devices()
