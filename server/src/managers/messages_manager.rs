@@ -1,12 +1,11 @@
+use crate::database::SignalDatabase;
+use crate::message_cache::{self, MessageCache};
+use crate::postgres::PostgresDatabase;
 use anyhow::{Ok, Result};
 use common::signal_protobuf::{envelope, Envelope};
 use libsignal_core::DeviceId;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
-use crate::database::SignalDatabase;
-use crate::message_cache::{self, MessageCache};
-use crate::postgres::PostgresDatabase;
 
 pub struct MessagesManager {
     message_cache: MessageCache,
@@ -48,8 +47,20 @@ impl MessagesManager {
         }
     }
 
-    pub async fn get_messages_for_device() {
-        unimplemented!()
+    pub async fn get_messages_for_device(
+        &self,
+        user_id: &str,
+        device_id: DeviceId,
+        cached_msg_only: bool,
+    ) -> Result<Vec<Envelope>> {
+        let cached_messages = self
+            .message_cache
+            .get_all_messages(user_id, device_id)
+            .await?;
+
+        // TODO: get all DB messages 
+
+        Ok([cached_messages].concat())
     }
 
     pub async fn delete(
@@ -57,7 +68,7 @@ impl MessagesManager {
         user_id: &str,
         device_id: DeviceId,
         message_guids: Vec<String>,
-    ) -> anyhow::Result<Vec<Envelope>> {
+    ) -> Result<Vec<Envelope>> {
         let removed_messages = self
             .message_cache
             .remove(user_id, device_id, message_guids)
@@ -74,7 +85,7 @@ impl MessagesManager {
         user_id: &str,
         device_id: DeviceId,
         messages: Vec<Envelope>,
-    ) -> anyhow::Result<usize> {
+    ) -> Result<usize> {
         let message_guids: Vec<String> = messages
             .iter()
             .map(|m| m.server_guid().to_string())
