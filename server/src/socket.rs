@@ -381,14 +381,18 @@ pub(crate) mod test {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
-    use crate::account::AuthenticatedDevice;
+    use crate::account::{Account, AuthenticatedDevice, Device};
     use crate::connection::WSStream;
     use crate::socket::{ConnectionState, SocketManager, SocketManagerError};
     use axum::extract::ws::Message;
     use axum::Error;
 
+    use libsignal_core::Pni;
+    use libsignal_protocol::{IdentityKey, KeyPair, PublicKey};
+    use rand::rngs::OsRng;
     use tokio::sync::mpsc;
     use tokio::sync::mpsc::{Receiver, Sender};
+    use uuid::Uuid;
 
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -465,11 +469,26 @@ pub(crate) mod test {
         Sender<Result<Message, Error>>,
         Receiver<Message>,
     ) {
+        let device = Device::new(
+            1.into(),
+            "test".to_owned(),
+            0,
+            0,
+            Vec::<u8>::new(),
+            "salt".to_owned(),
+        );
+        let account = Account::new(
+            Pni::from(Uuid::new_v4()),
+            device.clone(),
+            IdentityKey::from(KeyPair::generate(&mut OsRng).public_key),
+            IdentityKey::from(KeyPair::generate(&mut OsRng).public_key),
+        );
+        let authenticated_device = AuthenticatedDevice::new(account, device);
         let (mock, sender, mut receiver) = MockSocket::new();
         let who = SocketAddr::from_str(addr).unwrap();
         let mut tmgr = manager.clone();
         tokio::spawn(async move {
-            tmgr.handle_socket(todo!(), mock, who).await;
+            tmgr.handle_socket(authenticated_device, mock, who).await;
         });
 
         // could be fixed with some notify code
