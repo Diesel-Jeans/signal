@@ -21,7 +21,7 @@ trait MessageAvailabilityListener {
 
 // Should be websocketConnection once it is implemented
 #[derive(Debug)]
-struct WebsocketConnection;
+pub struct WebsocketConnection;
 
 impl MessageAvailabilityListener for WebsocketConnection {
     fn handle_new_messages_available(&self) -> bool {
@@ -346,12 +346,12 @@ impl MessageCache {
 }
 
 #[cfg(test)]
-mod message_cache_tests {
+pub mod message_cache_tests {
     use super::*;
     use serial_test::serial;
     use uuid::Uuid;
 
-    fn generate_uuid() -> String {
+    pub fn generate_uuid() -> String {
         let guid = Uuid::new_v4();
         guid.to_string()
     }
@@ -365,7 +365,7 @@ mod message_cache_tests {
         }
     }
 
-    async fn teardown(mut con: deadpool_redis::Connection) {
+    pub async fn teardown(mut con: deadpool_redis::Connection) {
         cmd("FLUSHALL").query_async::<()>(&mut con).await.unwrap();
     }
 
