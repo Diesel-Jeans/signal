@@ -1,4 +1,5 @@
 use anyhow::Result;
+use common::web_api::{AccountAttributes, UploadSignedPreKey};
 use libsignal_core::{Aci, DeviceId, Pni, ServiceId};
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
@@ -42,6 +43,8 @@ pub struct Account {
     aci_identity_key: IdentityKey,
     pni_identity_key: IdentityKey,
     devices: Vec<Device>,
+    phone_number: String,
+    account_attr: AccountAttributes,
 }
 
 impl Account {
@@ -50,6 +53,8 @@ impl Account {
         device: Device,
         pni_identity_key: IdentityKey,
         aci_identity_key: IdentityKey,
+        phone_number: String,
+        account_attr: AccountAttributes,
     ) -> Self {
         Self {
             pni,
@@ -57,6 +62,8 @@ impl Account {
             devices: vec![device],
             pni_identity_key,
             aci_identity_key,
+            phone_number,
+            account_attr,
         }
     }
 
@@ -66,6 +73,8 @@ impl Account {
         pni_identity_key: IdentityKey,
         aci_identity_key: IdentityKey,
         devices: Vec<Device>,
+        phone_number: String,
+        account_attr: AccountAttributes,
     ) -> Self {
         Self {
             pni,
@@ -73,6 +82,8 @@ impl Account {
             pni_identity_key,
             aci_identity_key,
             devices,
+            phone_number,
+            account_attr,
         }
     }
 
@@ -101,6 +112,14 @@ impl Account {
         self.devices.push(device);
         Ok(())
     }
+
+    pub fn phone_number(&self) -> &str {
+        &self.phone_number
+    }
+
+    pub fn account_attr(&self) -> &AccountAttributes {
+        &self.account_attr
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -111,6 +130,10 @@ pub struct Device {
     created: u32,
     auth_token: Vec<u8>,
     salt: String,
+    aci_signed_pre_key: UploadSignedPreKey,
+    pni_signed_pre_key: UploadSignedPreKey,
+    aci_pq_pre_key: UploadSignedPreKey,
+    pni_pq_pre_key: UploadSignedPreKey,
 }
 
 impl Device {
@@ -121,6 +144,10 @@ impl Device {
         created: u32,
         auth_token: Vec<u8>,
         salt: String,
+        aci_signed_pre_key: UploadSignedPreKey,
+        pni_signed_pre_key: UploadSignedPreKey,
+        aci_pq_pre_key: UploadSignedPreKey,
+        pni_pq_pre_key: UploadSignedPreKey,
     ) -> Self {
         Self {
             device_id,
@@ -129,6 +156,10 @@ impl Device {
             created,
             auth_token,
             salt,
+            aci_signed_pre_key,
+            pni_signed_pre_key,
+            aci_pq_pre_key,
+            pni_pq_pre_key,
         }
     }
     pub fn device_id(&self) -> DeviceId {
@@ -150,6 +181,22 @@ impl Device {
 
     pub fn salt(&self) -> &String {
         &self.salt
+    }
+
+    pub fn aci_signed_pre_key(&self) -> &UploadSignedPreKey {
+        &self.aci_signed_pre_key
+    }
+
+    pub fn pni_signed_pre_key(&self) -> &UploadSignedPreKey {
+        &self.pni_signed_pre_key
+    }
+
+    pub fn aci_pq_pre_key(&self) -> &UploadSignedPreKey {
+        &self.aci_pq_pre_key
+    }
+
+    pub fn pni_pq_pre_key(&self) -> &UploadSignedPreKey {
+        &self.pni_pq_pre_key
     }
 }
 

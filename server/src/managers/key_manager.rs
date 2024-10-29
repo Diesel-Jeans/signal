@@ -1,10 +1,13 @@
+use crate::{database::SignalDatabase, error::ApiError};
+use anyhow::Result;
 use axum::http::StatusCode;
-use common::web_api::{PreKeyResponse, PreKeyResponseItem, SetKeyRequest};
+use common::web_api::{
+    DevicePreKeyBundle, PreKeyResponse, PreKeyResponseItem, SetKeyRequest, UploadPreKey,
+    UploadSignedPreKey,
+};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use libsignal_protocol::PreKeyBundle;
 use sha2::{Digest, Sha256};
-
-use crate::{database::SignalDatabase, error::ApiError};
 
 #[derive(Debug, Default, Clone)]
 pub struct KeyManager {}
@@ -13,16 +16,18 @@ impl KeyManager {
     pub fn new() -> Self {
         Self {}
     }
-    async fn handle_put_keys<S: SignalDatabase>(
-        database: S,
+    pub async fn handle_put_keys<S: SignalDatabase>(
+        &self,
+        database: &S,
         address: &ProtocolAddress,
         bundle: SetKeyRequest,
     ) -> Result<(), ApiError> {
         todo!()
     }
 
-    async fn handle_get_keys<S: SignalDatabase>(
-        database: S,
+    pub async fn handle_get_keys<S: SignalDatabase>(
+        &self,
+        database: &S,
         service_id: &ServiceId,
         address_and_registration_ids: Vec<(ProtocolAddress, u32)>,
     ) -> Result<PreKeyResponse, ApiError> {
@@ -47,7 +52,7 @@ impl KeyManager {
             };
 
             let prekey = database
-                .get_one_time_pre_key(&address)
+                .get_one_time_ec_pre_key(&address)
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
@@ -67,7 +72,7 @@ impl KeyManager {
         for (address, registration_id) in address_and_registration_ids {
             keys.push(
                 get_key(
-                    &database,
+                    database,
                     service_id,
                     address.device_id(),
                     registration_id,
@@ -96,8 +101,9 @@ impl KeyManager {
     // The Signal endpoint /v2/keys/check says that a u64 id is needed, however their ids, such as
     // KyperPreKeyID only supports u32. Here only a u32 is used and therefore only a 4 byte size
     // instead of the sugested u64.
-    async fn handle_post_keycheck<S: SignalDatabase>(
-        database: S,
+    pub async fn handle_post_keycheck<S: SignalDatabase>(
+        &self,
+        database: &S,
         service_id: &ServiceId,
         address: ProtocolAddress,
         usr_digest: [u8; 32],
@@ -156,5 +162,16 @@ impl KeyManager {
         let server_digest: [u8; 32] = digest.finalize().into();
 
         Ok(server_digest == usr_digest)
+    }
+
+    pub async fn get_one_time_pre_key_count<T: SignalDatabase>(
+        &self,
+        db: &T,
+        service_id: &ServiceId,
+    ) -> Result<(u32, u32)> {
+        Ok((
+            db.get_one_time_ec_pre_key_count(service_id).await?,
+            db.get_one_time_pq_pre_key_count(service_id).await?,
+        ))
     }
 }
