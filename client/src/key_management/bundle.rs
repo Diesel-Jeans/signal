@@ -192,6 +192,7 @@ pub struct PrimitiveKeyBundleContent {
     kyper_signature: Option<Vec<u8>>,
 }
 impl PrimitiveKeyBundleContent {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         registration_id: u32,
         device_id: u32,

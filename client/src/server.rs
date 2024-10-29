@@ -66,7 +66,7 @@ pub trait Server {
     ) -> Result<Response, Box<dyn std::error::Error>>;
     async fn delete_client(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
     async fn delete_device(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
-    fn new() -> Result<ServerAPI, Box<dyn std::error::Error>>;
+    fn new() -> Self;
 }
 
 impl Server for ServerAPI {
@@ -158,15 +158,18 @@ impl Server for ServerAPI {
         self.make_request(ReqType::Delete(payload), uri).await
     }
 
-    fn new() -> Result<ServerAPI, Box<dyn std::error::Error>> {
+    fn new() -> Self {
         let test_client = Config::new()
-            .set_base_url(Url::parse("http://127.0.0.1:50051")?)
+            .set_base_url(
+                Url::parse("http://127.0.0.1:50051").expect("Could not parse URL for server"),
+            )
             .set_timeout(Some(Duration::from_secs(5)))
-            .try_into()?;
+            .try_into()
+            .expect("Could not connect to server.");
 
-        Ok(ServerAPI {
+        ServerAPI {
             client: test_client,
-        })
+        }
     }
 }
 impl ServerAPI {

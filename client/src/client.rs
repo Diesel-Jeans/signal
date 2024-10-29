@@ -10,7 +10,7 @@ impl Client {
     pub fn new() -> Self {
         Client {
             contact_manager: ContactManager::new(),
-            server_api: ServerAPI::new().unwrap(),
+            server_api: ServerAPI::new(),
         }
     }
     pub async fn send_message(&self, message: &str) -> Result<(), Box<dyn std::error::Error>> {
