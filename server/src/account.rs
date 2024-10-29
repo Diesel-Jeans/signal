@@ -160,14 +160,8 @@ pub struct AuthenticatedDevice {
 }
 
 impl AuthenticatedDevice {
-    pub fn new(
-        account: Account,
-        device: Device,
-    ) -> Self {
-        Self {
-            account,
-            device,
-        }
+    pub fn new(account: Account, device: Device) -> Self {
+        Self { account, device }
     }
 
     pub fn account(&self) -> &Account {
