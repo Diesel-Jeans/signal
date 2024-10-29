@@ -29,6 +29,42 @@ impl PostgresDatabase {
 
         Ok(Self { pool })
     }
+
+    async fn store_aci_signed_pre_key(
+        &self,
+        spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()> {
+        let pool = &mut self.pool.acquire().await?;
+        store_aci_signed_pre_key(pool, spk, address).await
+    }
+
+    async fn store_pni_signed_pre_key(
+        &self,
+        spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()> {
+        let pool = &mut self.pool.acquire().await?;
+        store_pni_signed_pre_key(pool, spk, address).await
+    }
+
+    async fn store_pq_aci_signed_pre_key(
+        &self,
+        pq_spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()> {
+        let pool = &mut self.pool.acquire().await?;
+        store_pq_aci_signed_pre_key(pool, pq_spk, address).await
+    }
+
+    async fn store_pq_pni_signed_pre_key(
+        &self,
+        pq_spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()> {
+        let pool = &mut self.pool.acquire().await?;
+        store_pq_pni_signed_pre_key(pool, pq_spk, address).await
+    }
 }
 
 #[async_trait]
@@ -147,9 +183,9 @@ impl SignalDatabase for PostgresDatabase {
         sqlx::query!(
             r#"
             INSERT INTO
-                devices (owner, device_id, name, auth_token, salt)
+                devices (owner, device_id, name, auth_token, salt, registration_id)
             SELECT
-                id, $2, $3, $4, $5
+                id, $2, $3, $4, $5, $6
             FROM
                 accounts
             WHERE
@@ -161,6 +197,7 @@ impl SignalDatabase for PostgresDatabase {
             device.name().as_bytes(),
             device.auth_token(),
             device.salt(),
+            device.registration_id().to_string(),
         )
         .execute(&self.pool)
         .await
@@ -175,7 +212,8 @@ impl SignalDatabase for PostgresDatabase {
                 device_id,
                 name,
                 auth_token,
-                salt
+                salt,
+                registration_id
             FROM
                 devices
             WHERE
@@ -203,6 +241,7 @@ impl SignalDatabase for PostgresDatabase {
                         0,
                         row.auth_token,
                         row.salt,
+                        row.registration_id.parse().unwrap(),
                     )
                 })
                 .collect()
@@ -217,7 +256,8 @@ impl SignalDatabase for PostgresDatabase {
                 device_id,
                 name,
                 auth_token,
-                salt
+                salt,
+                registration_id
             FROM
                 devices
             WHERE
@@ -245,6 +285,7 @@ impl SignalDatabase for PostgresDatabase {
                 0,
                 row.auth_token,
                 row.salt,
+                row.registration_id.parse().unwrap(),
             )
         })
         .map_err(|err| err.into())
@@ -347,24 +388,31 @@ impl SignalDatabase for PostgresDatabase {
         })
     }
 
-    async fn store_aci_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
-        let pool = &mut self.pool.acquire().await?;
-        store_aci_signed_pre_key(pool, spk).await
+    async fn store_signed_pre_key(
+        &self,
+        spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()> {
+        let service_id = ServiceId::parse_from_service_id_string(address.name())
+            .ok_or_else(|| anyhow!("Invalid service id"))?;
+        match service_id {
+            ServiceId::Aci(_) => self.store_aci_signed_pre_key(spk, address).await?,
+            ServiceId::Pni(_) => self.store_pni_signed_pre_key(spk, address).await?,
+        }
+        Ok(())
     }
-
-    async fn store_pni_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
-        let pool = &mut self.pool.acquire().await?;
-        store_pni_signed_pre_key(pool, spk).await
-    }
-
-    async fn store_pq_aci_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
-        let pool = &mut self.pool.acquire().await?;
-        store_pq_aci_signed_pre_key(pool, pq_spk).await
-    }
-
-    async fn store_pq_pni_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
-        let pool = &mut self.pool.acquire().await?;
-        store_pq_pni_signed_pre_key(pool, pq_spk).await
+    async fn store_pq_signed_pre_key(
+        &self,
+        spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()> {
+        let service_id = ServiceId::parse_from_service_id_string(address.name())
+            .ok_or_else(|| anyhow!("Invalid service id"))?;
+        match service_id {
+            ServiceId::Aci(_) => self.store_pq_aci_signed_pre_key(spk, address).await?,
+            ServiceId::Pni(_) => self.store_pq_pni_signed_pre_key(spk, address).await?,
+        }
+        Ok(())
     }
 
     async fn store_key_bundle(
@@ -374,21 +422,29 @@ impl SignalDatabase for PostgresDatabase {
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
-        store_aci_signed_pre_key(&mut tx, &data.aci_signed_pre_key).await?;
-        store_pni_signed_pre_key(&mut tx, &data.pni_signed_pre_key).await?;
-        store_pq_aci_signed_pre_key(&mut tx, &data.aci_pq_pre_key).await?;
-        store_pq_pni_signed_pre_key(&mut tx, &data.pni_pq_pre_key).await?;
+        store_aci_signed_pre_key(&mut tx, &data.aci_signed_pre_key, address).await?;
+        store_pni_signed_pre_key(&mut tx, &data.pni_signed_pre_key, address).await?;
+        store_pq_aci_signed_pre_key(&mut tx, &data.aci_pq_pre_key, address).await?;
+        store_pq_pni_signed_pre_key(&mut tx, &data.pni_pq_pre_key, address).await?;
 
         sqlx::query!(
             r#"
             INSERT INTO
                 device_keys (owner, aci_signed_pre_key, pni_signed_pre_key, aci_pq_last_resort_pre_key, pni_pq_last_resort_pre_key)
             SELECT
-                id, $2, $3, $4, $5
+                devices.id, 
+                aci_signed_pre_key_store.id, 
+                pni_signed_pre_key_store.id, 
+                aci_pq_last_resort_pre_key_store.id, 
+                pni_pq_last_resort_pre_key_store.id
             FROM
-                devices
+                devices 
+                INNER JOIN aci_signed_pre_key_store ON aci_signed_pre_key_store.owner = devices.id
+                INNER JOIN pni_signed_pre_key_store ON pni_signed_pre_key_store.owner = devices.id
+                INNER JOIN aci_pq_last_resort_pre_key_store ON aci_pq_last_resort_pre_key_store.owner = devices.id
+                INNER JOIN pni_pq_last_resort_pre_key_store ON pni_pq_last_resort_pre_key_store.owner = devices.id
             WHERE
-                owner = (
+                devices.owner = (
                     SELECT
                         id
                     FROM
@@ -396,18 +452,15 @@ impl SignalDatabase for PostgresDatabase {
                     WHERE
                         aci = $1 OR
                         pni = $1
-                )
+                ) AND devices.device_id = $2
             "#,
             address.name(),
-            data.aci_signed_pre_key.key_id.to_string(),
-            data.pni_signed_pre_key.key_id.to_string(),
-            data.aci_pq_pre_key.key_id.to_string(),
-            data.pni_pq_pre_key.key_id.to_string()
+            address.device_id().to_string(),
         )
         .execute(&mut *tx)
         .await?;
 
-        tx.commit().await.map(|_| ()).map_err(|err| err.into())
+        tx.commit().await.map_err(|err| err.into())
     }
 
     async fn get_key_bundle(&self, address: &ProtocolAddress) -> Result<DevicePreKeyBundle> {
@@ -428,10 +481,10 @@ impl SignalDatabase for PostgresDatabase {
                 pni_pq_last_resort_pre_key_store.signature AS ppqlrpk_sig
             FROM
                 device_keys
-                INNER JOIN aci_signed_pre_key_store ON aci_signed_pre_key_store.key_id = device_keys.aci_signed_pre_key
-                INNER JOIN pni_signed_pre_key_store ON pni_signed_pre_key_store.key_id = device_keys.pni_signed_pre_key
-                INNER JOIN aci_pq_last_resort_pre_key_store ON aci_pq_last_resort_pre_key_store.key_id = device_keys.aci_pq_last_resort_pre_key
-                INNER JOIN pni_pq_last_resort_pre_key_store ON pni_pq_last_resort_pre_key_store.key_id = device_keys.pni_pq_last_resort_pre_key
+                INNER JOIN aci_signed_pre_key_store ON aci_signed_pre_key_store.id = device_keys.aci_signed_pre_key
+                INNER JOIN pni_signed_pre_key_store ON pni_signed_pre_key_store.id = device_keys.pni_signed_pre_key
+                INNER JOIN aci_pq_last_resort_pre_key_store ON aci_pq_last_resort_pre_key_store.id = device_keys.aci_pq_last_resort_pre_key
+                INNER JOIN pni_pq_last_resort_pre_key_store ON pni_pq_last_resort_pre_key_store.id = device_keys.pni_pq_last_resort_pre_key
                 INNER JOIN accounts ON accounts.id = device_keys.owner
             WHERE
                 aci = $1 OR
@@ -653,16 +706,35 @@ impl SignalDatabase for PostgresDatabase {
     }
 }
 
-async fn store_aci_signed_pre_key(tx: &mut PgConnection, spk: &UploadSignedPreKey) -> Result<()> {
+async fn store_aci_signed_pre_key(
+    tx: &mut PgConnection,
+    spk: &UploadSignedPreKey,
+    address: &ProtocolAddress,
+) -> Result<()> {
     sqlx::query!(
         r#"
         INSERT INTO
-            aci_signed_pre_key_store (key_id, public_key, signature)
-        VALUES
-            ($1, $2, $3)
-        ON CONFLICT (key_id)
-            DO UPDATE SET key_id = $1, public_key = $2, signature = $3;
+            aci_signed_pre_key_store (owner, key_id, public_key, signature)
+        SELECT 
+            id, $3, $4, $5
+        FROM 
+            devices
+        WHERE 
+            owner = (
+                SELECT 
+                    id
+                FROM 
+                    accounts
+                WHERE 
+                    aci = $1 OR
+                    pni = $1
+            ) AND 
+            device_id = $2
+        ON CONFLICT (key_id, owner)
+            DO UPDATE SET key_id = $3, public_key = $4, signature = $5;
         "#,
+        address.name(),
+        address.device_id().to_string(),
         spk.key_id.to_string(),
         &*spk.public_key,
         &*spk.signature
@@ -673,16 +745,35 @@ async fn store_aci_signed_pre_key(tx: &mut PgConnection, spk: &UploadSignedPreKe
     .map_err(|err| err.into())
 }
 
-async fn store_pni_signed_pre_key(tx: &mut PgConnection, spk: &UploadSignedPreKey) -> Result<()> {
+async fn store_pni_signed_pre_key(
+    tx: &mut PgConnection,
+    spk: &UploadSignedPreKey,
+    address: &ProtocolAddress,
+) -> Result<()> {
     sqlx::query!(
         r#"
         INSERT INTO
-            pni_signed_pre_key_store (key_id, public_key, signature)
-        VALUES
-            ($1, $2, $3)
-        ON CONFLICT (key_id)
-            DO UPDATE SET key_id = $1, public_key = $2, signature = $3;
+            pni_signed_pre_key_store (owner, key_id, public_key, signature)
+        SELECT 
+            id, $3, $4, $5
+        FROM 
+            devices
+        WHERE 
+            owner = (
+                SELECT 
+                    id
+                FROM 
+                    accounts
+                WHERE 
+                    aci = $1 OR
+                    pni = $1
+            ) AND 
+            device_id = $2
+        ON CONFLICT (key_id, owner)
+            DO UPDATE SET key_id = $3, public_key = $4, signature = $5;
         "#,
+        address.name(),
+        address.device_id().to_string(),
         spk.key_id.to_string(),
         &*spk.public_key,
         &*spk.signature
@@ -696,16 +787,33 @@ async fn store_pni_signed_pre_key(tx: &mut PgConnection, spk: &UploadSignedPreKe
 async fn store_pq_aci_signed_pre_key(
     tx: &mut PgConnection,
     pq_spk: &UploadSignedPreKey,
+    address: &ProtocolAddress,
 ) -> Result<()> {
     sqlx::query!(
         r#"
         INSERT INTO
-            aci_pq_last_resort_pre_key_store (key_id, public_key, signature)
-        VALUES
-            ($1, $2, $3)
-        ON CONFLICT (key_id)
-            DO UPDATE SET key_id = $1, public_key = $2, signature = $3;
+            aci_pq_last_resort_pre_key_store (owner, key_id, public_key, signature)
+        SELECT 
+            id, $3, $4, $5
+        FROM 
+            devices
+        WHERE 
+            owner = (
+                SELECT 
+                    id
+                FROM 
+                    accounts
+                WHERE 
+                    aci = $1 OR
+                    pni = $1
+            ) AND 
+            device_id = $2
+        ON CONFLICT (key_id, owner)
+            DO UPDATE SET key_id = $3, public_key = $4, signature = $5;
+
         "#,
+        address.name(),
+        address.device_id().to_string(),
         pq_spk.key_id.to_string(),
         &*pq_spk.public_key,
         &*pq_spk.signature
@@ -719,16 +827,33 @@ async fn store_pq_aci_signed_pre_key(
 async fn store_pq_pni_signed_pre_key(
     tx: &mut PgConnection,
     pq_spk: &UploadSignedPreKey,
+    address: &ProtocolAddress,
 ) -> Result<()> {
     sqlx::query!(
         r#"
         INSERT INTO
-            pni_pq_last_resort_pre_key_store (key_id, public_key, signature)
-        VALUES
-            ($1, $2, $3)
-        ON CONFLICT (key_id)
-            DO UPDATE SET key_id = $1, public_key = $2, signature = $3;
+            pni_pq_last_resort_pre_key_store (owner, key_id, public_key, signature)
+        SELECT 
+            id, $3, $4, $5
+        FROM 
+            devices
+        WHERE 
+            owner = (
+                SELECT 
+                    id
+                FROM 
+                    accounts
+                WHERE 
+                    aci = $1 OR
+                    pni = $1
+            ) AND 
+            device_id = $2
+        ON CONFLICT (key_id, owner)
+            DO UPDATE SET key_id = $3, public_key = $4, signature = $5;
+
         "#,
+        address.name(),
+        address.device_id().to_string(),
         pq_spk.key_id.to_string(),
         &*pq_spk.public_key,
         &*pq_spk.signature

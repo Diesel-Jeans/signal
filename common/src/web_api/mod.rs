@@ -345,9 +345,10 @@ pub struct DevicePreKeyBundle {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetKeyRequest {
-    pub pre_key: Option<UploadPreKey>,
+    pub pre_key: Option<Vec<UploadPreKey>>,
     pub signed_pre_key: Option<UploadSignedPreKey>,
-    pub pq_pre_key: Option<UploadSignedPreKey>,
+    pub pq_pre_key: Option<Vec<UploadSignedPreKey>>,
+    pub pq_last_resort_pre_key: Option<UploadSignedPreKey>,
 }
 
 #[derive(Debug)]

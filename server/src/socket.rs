@@ -469,6 +469,7 @@ pub(crate) mod test {
             0,
             Vec::<u8>::new(),
             "salt".to_owned(),
+            1u32,
         );
         let device_capabilities = DeviceCapabilities {
             storage: false,
