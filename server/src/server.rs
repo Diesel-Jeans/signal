@@ -27,7 +27,6 @@ use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
 use crate::message_cache::MessageCache;
-use crate::socket::{SocketManager, ToEnvelope};
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
@@ -249,9 +248,9 @@ async fn create_websocket_endpoint(
     ws.on_upgrade(move |socket| {
         let mut socket_manager = state.socket_manager().clone();
         async move {
-            socket_manager
+            /*socket_manager
                 .handle_socket(/*authenticated_device,*/ socket, addr)
-                .await;
+                .await;*/
         }
     })
 }

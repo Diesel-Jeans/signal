@@ -1,6 +1,5 @@
 #![allow(unused)]
 mod account;
-mod connection;
 pub mod database;
 mod error;
 pub mod in_memory_db;
@@ -9,7 +8,7 @@ mod message_cache;
 mod postgres;
 mod query;
 mod server;
-mod socket;
+mod envelope;
 
 #[tokio::main]
 pub async fn main() {

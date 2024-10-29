@@ -3,7 +3,7 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::extract::Query;
 use axum::http::{StatusCode, Uri};
 use axum::routing::head;
-use libsignal_core::{DeviceId, ServiceId};
+use libsignal_core::{ProtocolAddress};
 use serde::de::IntoDeserializer;
 use serde::Deserialize;
 use serde_json::json;
@@ -33,7 +33,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use url::Url;
 
 use crate::account::Account;
-use crate::connection::{WSStream, WebSocketConnection};
+use super::connection::{WSStream, WebSocketConnection, ConnectionState, ConnectionMap, ClientConnection};
 use crate::error::{ApiError, SocketManagerError};
 use crate::query::PutV1MessageParams;
 
@@ -66,53 +66,14 @@ use chrono::Utc;
     "v1/storage/auth",
 ];*/
 
-pub trait ToEnvelope {
-    fn to_envelope(
-        &mut self,
-        destination_id: ServiceId,
-        account: Option<Account>,
-        src_device_id: Option<DeviceId>,
-        timestamp: i64,
-        story: bool,
-        urgent: bool,
-    ) -> Envelope;
-}
 
-impl ToEnvelope for SignalMessage {
-    fn to_envelope(
-        &mut self,
-        destination_id: ServiceId,
-        account: Option<Account>,
-        src_device_id: Option<DeviceId>,
-        timestamp: i64,
-        story: bool,
-        urgent: bool,
-    ) -> Envelope {
-        let typex = envelope::Type::try_from(self.r#type as i32).unwrap();
-        todo!() // TODO: make this when Account has been implemented correctly
-    }
-}
 
 #[derive(Debug)]
-enum ConnectionState<T: WSStream> {
-    Active(WebSocketConnection<T>),
-    Closed,
-}
-
-impl<T: WSStream + Debug> ConnectionState<T> {
-    pub fn is_active(&self) -> bool {
-        matches!(self, ConnectionState::Active(_))
-    }
-}
-
-type ConnectionMap<T> = Arc<Mutex<HashMap<SocketAddr, Arc<Mutex<ConnectionState<T>>>>>>;
-
-#[derive(Debug)]
-pub struct SocketManager<T: WSStream> {
+pub struct WebSocketManager<T: WSStream + Debug> {
     sockets: ConnectionMap<T>,
 }
 
-impl<T: WSStream> Clone for SocketManager<T> {
+impl<T: WSStream + Debug> Clone for WebSocketManager<T> {
     fn clone(&self) -> Self {
         Self {
             sockets: Arc::clone(&self.sockets),
@@ -120,7 +81,80 @@ impl<T: WSStream> Clone for SocketManager<T> {
     }
 }
 
-impl<T: WSStream> SocketManager<T> {
+impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
+
+    pub fn new() -> Self {
+        Self {
+            sockets: Arc::new(Mutex::new(HashMap::new()))
+        }
+    }
+
+    pub async fn insert(&mut self, address: &ProtocolAddress, connection: WebSocketConnection<T>){
+        let connection: ClientConnection<T> = Arc::new(Mutex::new(connection));
+        
+        self.sockets.lock().await.insert(address.clone(), connection.clone());
+        let mut mgr = self.clone();
+        
+        let protocol_address = address.clone();
+        tokio::spawn(async move {
+            let connection = connection.clone();
+            let addr = connection.lock().await.socket_address;
+            while let Some(res) = connection.lock().await.recv().await{
+                let msg = match res {
+                    Err(x) => {
+                        println!("WebSocketManager recv ERROR: {}", x);
+                        break;
+                    },
+                    Ok(y) => y
+                };
+
+                match msg {
+                    Message::Binary(b) => {
+                        let msg = match WebSocketMessage::decode(Bytes::from(b)) {
+                            Ok(x) => x,
+                            Err(y) => {
+                                println!("WebSocketManager ERROR - Message::Binary: {}", y);
+                                connection.lock().await.close_reason(1007, "Badly formatted".to_string()).await;
+                                break;
+                            }
+                        };
+                    },
+                    Message::Text(t) => {
+                        println!("Message '{}' from '{}'", t, addr);
+                        println!("replying...");
+                        connection.lock().await.send(Message::Text(t)).await;
+                        println!("sent!");
+                    },
+                    Message::Close(_) => {
+                        connection.lock().await.close().await;
+                        break;
+                    },
+                    _ => {}
+                }
+            }
+
+            match mgr.remove(&protocol_address).await {
+                None => println!("WebSocketManager: Client was already removed from Manager!"),
+                _ => {}
+            };
+        });
+    }
+
+    async fn get(&self, address: &ProtocolAddress) -> Option<ClientConnection<T>>{
+        self.sockets.lock().await.get(address).cloned()
+    }
+
+    async fn get_mut(&mut self, address: &ProtocolAddress) -> Option<ClientConnection<T>>{
+        self.sockets.lock().await.get_mut(address).cloned()
+    }
+
+    async fn remove(&mut self, address: &ProtocolAddress) -> Option<ClientConnection<T>>{
+        self.sockets.lock().await.remove(address)
+    }
+}
+
+
+/*impl<T: WSStream> SocketManager<T> {
     pub fn new() -> Self {
         Self {
             sockets: Arc::new(Mutex::new(HashMap::new())),
@@ -617,4 +651,4 @@ pub(crate) mod test {
             ">>>>>>>>>>>>>>>>>>>>> State was active, expected was closed"
         )
     }
-}
+}*/

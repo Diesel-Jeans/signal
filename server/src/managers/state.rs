@@ -4,7 +4,6 @@ use crate::{
     error::ApiError,
     in_memory_db::InMemorySignalDatabase,
     postgres::PostgresDatabase,
-    socket::SocketManager,
 };
 use anyhow::Result;
 use common::web_api::{
@@ -14,13 +13,13 @@ use common::web_api::{
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::IdentityKey;
 
-use super::{account_manager::AccountManager, key_manager::KeyManager};
+use super::{account_manager::AccountManager, key_manager::KeyManager, websocket::websocket_manager::WebSocketManager};
 use axum::extract::ws::WebSocket;
 
 #[derive(Clone, Debug)]
 pub struct SignalServerState<T: SignalDatabase> {
     db: T,
-    socket_manager: SocketManager<WebSocket>,
+    socket_manager: WebSocketManager<WebSocket>,
     account_manager: AccountManager,
     key_manager: KeyManager,
 }
@@ -29,7 +28,7 @@ impl<T: SignalDatabase> SignalServerState<T> {
     pub(self) fn database(&self) -> T {
         self.db.clone()
     }
-    pub fn socket_manager(&self) -> &SocketManager<WebSocket> {
+    pub fn socket_manager(&self) -> &WebSocketManager<WebSocket> {
         &self.socket_manager
     }
     pub fn account_manager(&self) -> &AccountManager {
@@ -44,7 +43,7 @@ impl SignalServerState<InMemorySignalDatabase> {
     fn new() -> Self {
         Self {
             db: InMemorySignalDatabase::new(),
-            socket_manager: SocketManager::new(),
+            socket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),
         }
@@ -57,7 +56,7 @@ impl SignalServerState<PostgresDatabase> {
             db: PostgresDatabase::connect()
                 .await
                 .expect("Failed to connect to the database."),
-            socket_manager: SocketManager::new(),
+            socket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),
         }
