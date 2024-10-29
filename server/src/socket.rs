@@ -387,9 +387,7 @@ pub(crate) mod test {
     use axum::extract::ws::Message;
     use axum::Error;
 
-    use common::web_api::{
-        AccountAttributes, DeviceCapabilities,
-    };
+    use common::web_api::{AccountAttributes, DeviceCapabilities};
     use libsignal_core::Pni;
     use libsignal_protocol::{IdentityKey, KeyPair, PublicKey};
     use rand::rngs::OsRng;
