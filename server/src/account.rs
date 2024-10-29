@@ -130,10 +130,6 @@ pub struct Device {
     created: u32,
     auth_token: String,
     salt: String,
-    aci_signed_pre_key: UploadSignedPreKey,
-    pni_signed_pre_key: UploadSignedPreKey,
-    aci_pq_pre_key: UploadSignedPreKey,
-    pni_pq_pre_key: UploadSignedPreKey,
 }
 
 impl Device {
@@ -144,10 +140,6 @@ impl Device {
         created: u32,
         auth_token: String,
         salt: String,
-        aci_signed_pre_key: UploadSignedPreKey,
-        pni_signed_pre_key: UploadSignedPreKey,
-        aci_pq_pre_key: UploadSignedPreKey,
-        pni_pq_pre_key: UploadSignedPreKey,
     ) -> Self {
         Self {
             device_id,
@@ -156,10 +148,6 @@ impl Device {
             created,
             auth_token,
             salt,
-            aci_signed_pre_key,
-            pni_signed_pre_key,
-            aci_pq_pre_key,
-            pni_pq_pre_key,
         }
     }
     pub fn device_id(&self) -> DeviceId {
@@ -181,21 +169,5 @@ impl Device {
 
     pub fn salt(&self) -> &String {
         &self.salt
-    }
-
-    pub fn aci_signed_pre_key(&self) -> &UploadSignedPreKey {
-        &self.aci_signed_pre_key
-    }
-
-    pub fn pni_signed_pre_key(&self) -> &UploadSignedPreKey {
-        &self.pni_signed_pre_key
-    }
-
-    pub fn aci_pq_pre_key(&self) -> &UploadSignedPreKey {
-        &self.aci_pq_pre_key
-    }
-
-    pub fn pni_pq_pre_key(&self) -> &UploadSignedPreKey {
-        &self.pni_pq_pre_key
     }
 }

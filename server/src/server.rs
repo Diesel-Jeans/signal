@@ -74,11 +74,13 @@ async fn handle_put_registration<T: SignalDatabase>(
                 0,
                 "no token".to_owned(),
                 "salt".to_owned(),
-                registration.aci_signed_pre_key().to_owned(),
-                registration.pni_signed_pre_key().to_owned(),
-                registration.aci_pq_last_resort_pre_key().to_owned(),
-                registration.pni_pq_last_resort_pre_key().to_owned(),
             ),
+            DevicePreKeyBundle {
+                aci_signed_pre_key: registration.aci_signed_pre_key().to_owned(),
+                pni_signed_pre_key: registration.pni_signed_pre_key().to_owned(),
+                aci_pq_pre_key: registration.aci_pq_last_resort_pre_key().to_owned(),
+                pni_pq_pre_key: registration.pni_pq_last_resort_pre_key().to_owned(),
+            },
         )
         .await
         .map_err(|err| ApiError {
