@@ -66,9 +66,8 @@ impl SignalDatabase for PostgresDatabase {
             FROM
                 accounts
             WHERE
-                $1 = $2
+                aci = $1 OR pni = $1
             "#,
-            id_str,
             id,
         )
         .fetch_one(&self.pool)
@@ -185,16 +184,15 @@ impl SignalDatabase for PostgresDatabase {
             FROM
                 devices
             WHERE
-                owner = (
+                owner in (
                     SELECT
                         id
                     FROM
                         accounts
                     WHERE
-                        $1 = $2
+                        aci = $1 OR pni = $1
                 )
             "#,
-            id_str,
             id
         )
         .fetch_all(&self.pool)

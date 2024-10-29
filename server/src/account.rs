@@ -109,7 +109,7 @@ pub struct Device {
     name: String,
     last_seen: u32,
     created: u32,
-    auth_token: String,
+    auth_token: Vec<u8>,
     salt: String,
 }
 
@@ -119,7 +119,7 @@ impl Device {
         name: String,
         last_seen: u32,
         created: u32,
-        auth_token: String,
+        auth_token: Vec<u8>,
         salt: String,
     ) -> Self {
         Self {
@@ -144,11 +144,37 @@ impl Device {
         self.created
     }
 
-    pub fn auth_token(&self) -> &String {
+    pub fn auth_token(&self) -> &Vec<u8> {
         &self.auth_token
     }
 
     pub fn salt(&self) -> &String {
         &self.salt
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AuthenticatedDevice {
+    account: Account,
+    device: Device,
+}
+
+impl AuthenticatedDevice {
+    pub fn new(
+        account: Account,
+        device: Device,
+    ) -> Self {
+        Self {
+            account,
+            device,
+        }
+    }
+
+    pub fn account(&self) -> &Account {
+        &self.account
+    }
+
+    pub fn device(&self) -> &Device {
+        &self.device
     }
 }

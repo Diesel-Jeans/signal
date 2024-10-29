@@ -30,7 +30,7 @@ use rand::Rng;
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::Url;
 
-use crate::account::Account;
+use crate::account::{Account, AuthenticatedDevice};
 use crate::connection::{WSStream, WebSocketConnection};
 use crate::error::SocketManagerError;
 use crate::query::PutV1MessageParams;
@@ -282,7 +282,7 @@ impl<T: WSStream> SocketManager<T> {
 
     pub async fn handle_socket(
         &mut self,
-        /*authenticated_device: ???, */
+        authenticated_device: AuthenticatedDevice,
         mut socket: T,
         who: SocketAddr,
     ) {
@@ -381,6 +381,7 @@ pub(crate) mod test {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
+    use crate::account::AuthenticatedDevice;
     use crate::connection::WSStream;
     use crate::socket::{ConnectionState, SocketManager, SocketManagerError};
     use axum::extract::ws::Message;
@@ -468,7 +469,7 @@ pub(crate) mod test {
         let who = SocketAddr::from_str(addr).unwrap();
         let mut tmgr = manager.clone();
         tokio::spawn(async move {
-            tmgr.handle_socket(mock, who).await;
+            tmgr.handle_socket(todo!(), mock, who).await;
         });
 
         // could be fixed with some notify code

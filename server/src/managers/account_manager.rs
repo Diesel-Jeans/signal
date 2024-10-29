@@ -1,9 +1,13 @@
 use anyhow::Result;
 use common::web_api::AccountAttributes;
+use libsignal_core::ServiceId;
 use libsignal_protocol::IdentityKey;
 use sqlx::database;
 
-use crate::{account::Device, database::SignalDatabase};
+use crate::{
+    account::{Account, Device},
+    database::SignalDatabase,
+};
 
 #[derive(Debug, Clone)]
 pub struct AccountManager<T: SignalDatabase> {
@@ -27,7 +31,9 @@ impl<T: SignalDatabase> AccountManager<T> {
         Ok(())
     }
 
-    pub fn get_account(&self) {}
+    pub async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
+        self.database.get_account(service_id).await
+    }
 
     pub fn update_account_aci(&self) {}
 
