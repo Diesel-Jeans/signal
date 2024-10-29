@@ -1,9 +1,11 @@
 use anyhow::{Ok, Result};
 use common::signal_protobuf::{envelope, Envelope};
 use libsignal_core::DeviceId;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::database::SignalDatabase;
-use crate::message_cache::MessageCache;
+use crate::message_cache::{self, MessageCache};
 use crate::postgres::PostgresDatabase;
 
 pub struct MessagesManager {
@@ -28,6 +30,7 @@ impl MessagesManager {
             .unwrap())
     }
 
+    // both, cached, persisted, none
     pub async fn may_have_persisted_messages(
         &self,
         user_id: &str,
@@ -41,6 +44,33 @@ impl MessagesManager {
         } else {
             Ok((cache_has_messages, "none"))
         }
+    }
+
+    pub async fn get_messages_for_device() {
+        unimplemented!()
+    }
+
+    pub async fn delete() {
+        unimplemented!()
+    }
+
+    pub async fn persist_messages() {
+        unimplemented!()
+    }
+
+    pub fn add_message_availability_listener(
+        &mut self,
+        user_id: &str,
+        device_id: DeviceId,
+        listener: Arc<Mutex<message_cache::WebsocketConnection>>,
+    ) {
+        self.message_cache
+            .add_message_availability_listener(user_id, device_id, listener);
+    }
+
+    pub fn remove_message_availability_listener(&mut self, user_id: &str, device_id: DeviceId) {
+        self.message_cache
+            .remove_message_availability_listener(user_id, device_id);
     }
 }
 
