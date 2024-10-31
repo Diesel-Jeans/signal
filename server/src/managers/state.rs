@@ -71,13 +71,8 @@ impl<T: SignalDatabase> SignalServerState<T> {
         aci_identity_key: IdentityKey,
         pni_identity_key: IdentityKey,
         primary_device: Device,
+        key_bundle: DevicePreKeyBundle,
     ) -> Result<()> {
-        let key_bundle = DevicePreKeyBundle {
-            aci_signed_pre_key: primary_device.aci_signed_pre_key().clone(),
-            pni_signed_pre_key: primary_device.pni_signed_pre_key().clone(),
-            aci_pq_pre_key: primary_device.aci_pq_pre_key().clone(),
-            pni_pq_pre_key: primary_device.pni_pq_pre_key().clone(),
-        };
         let device_id = primary_device.device_id();
         let account = self
             .account_manager

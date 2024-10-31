@@ -128,12 +128,8 @@ pub struct Device {
     name: String,
     last_seen: u32,
     created: u32,
-    auth_token: String,
+    auth_token: Vec<u8>,
     salt: String,
-    aci_signed_pre_key: UploadSignedPreKey,
-    pni_signed_pre_key: UploadSignedPreKey,
-    aci_pq_pre_key: UploadSignedPreKey,
-    pni_pq_pre_key: UploadSignedPreKey,
 }
 
 impl Device {
@@ -142,12 +138,8 @@ impl Device {
         name: String,
         last_seen: u32,
         created: u32,
-        auth_token: String,
+        auth_token: Vec<u8>,
         salt: String,
-        aci_signed_pre_key: UploadSignedPreKey,
-        pni_signed_pre_key: UploadSignedPreKey,
-        aci_pq_pre_key: UploadSignedPreKey,
-        pni_pq_pre_key: UploadSignedPreKey,
     ) -> Self {
         Self {
             device_id,
@@ -156,10 +148,6 @@ impl Device {
             created,
             auth_token,
             salt,
-            aci_signed_pre_key,
-            pni_signed_pre_key,
-            aci_pq_pre_key,
-            pni_pq_pre_key,
         }
     }
     pub fn device_id(&self) -> DeviceId {
@@ -175,27 +163,31 @@ impl Device {
         self.created
     }
 
-    pub fn auth_token(&self) -> &String {
+    pub fn auth_token(&self) -> &Vec<u8> {
         &self.auth_token
     }
 
     pub fn salt(&self) -> &String {
         &self.salt
     }
+}
 
-    pub fn aci_signed_pre_key(&self) -> &UploadSignedPreKey {
-        &self.aci_signed_pre_key
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AuthenticatedDevice {
+    account: Account,
+    device: Device,
+}
+
+impl AuthenticatedDevice {
+    pub fn new(account: Account, device: Device) -> Self {
+        Self { account, device }
     }
 
-    pub fn pni_signed_pre_key(&self) -> &UploadSignedPreKey {
-        &self.pni_signed_pre_key
+    pub fn account(&self) -> &Account {
+        &self.account
     }
 
-    pub fn aci_pq_pre_key(&self) -> &UploadSignedPreKey {
-        &self.aci_pq_pre_key
-    }
-
-    pub fn pni_pq_pre_key(&self) -> &UploadSignedPreKey {
-        &self.pni_pq_pre_key
+    pub fn device(&self) -> &Device {
+        &self.device
     }
 }

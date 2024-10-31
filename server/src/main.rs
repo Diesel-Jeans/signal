@@ -1,5 +1,6 @@
 #![allow(unused)]
 mod account;
+mod account_authenticator;
 pub mod database;
 mod error;
 pub mod in_memory_db;

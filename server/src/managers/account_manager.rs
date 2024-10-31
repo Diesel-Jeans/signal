@@ -10,7 +10,6 @@ use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::IdentityKey;
 use sqlx::database;
 use uuid::Uuid;
-
 #[derive(Debug, Clone)]
 pub struct AccountManager {}
 

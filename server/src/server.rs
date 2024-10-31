@@ -1,4 +1,4 @@
-use crate::account::{Account, Device};
+use crate::account::{Account, AuthenticatedDevice, Device};
 use crate::database::SignalDatabase;
 use crate::error::ApiError;
 use crate::in_memory_db::InMemorySignalDatabase;
@@ -71,13 +71,15 @@ async fn handle_put_registration<T: SignalDatabase>(
                 "my_device".to_owned(),
                 0,
                 0,
-                "no token".to_owned(),
+                "no token".as_bytes().to_vec(),
                 "salt".to_owned(),
-                registration.aci_signed_pre_key().to_owned(),
-                registration.pni_signed_pre_key().to_owned(),
-                registration.aci_pq_last_resort_pre_key().to_owned(),
-                registration.pni_pq_last_resort_pre_key().to_owned(),
             ),
+            DevicePreKeyBundle {
+                aci_signed_pre_key: registration.aci_signed_pre_key().to_owned(),
+                pni_signed_pre_key: registration.pni_signed_pre_key().to_owned(),
+                aci_pq_pre_key: registration.aci_pq_last_resort_pre_key().to_owned(),
+                pni_pq_pre_key: registration.pni_pq_last_resort_pre_key().to_owned(),
+            },
         )
         .await
         .map_err(|err| ApiError {
@@ -234,7 +236,7 @@ async fn post_link_device_endpoint(State(state): State<SignalServerState<Postgre
 #[debug_handler]
 async fn create_websocket_endpoint(
     State(mut state): State<SignalServerState<PostgresDatabase>>,
-    /*authenticated_device: ???, */
+    authenticated_device: AuthenticatedDevice,
     ws: WebSocketUpgrade,
     user_agent: Option<TypedHeader<headers::UserAgent>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
