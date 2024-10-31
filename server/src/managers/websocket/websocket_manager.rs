@@ -33,6 +33,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
 use crate::account::Account;
+use crate::database::SignalDatabase;
+use crate::managers::state::SignalServerState;
 use super::connection::{WSStream, WebSocketConnection, ConnectionState, ConnectionMap, ClientConnection};
 use crate::error::{ApiError, SocketManagerError};
 use crate::query::PutV1MessageParams;
@@ -89,8 +91,8 @@ impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
         }
     }
 
-    pub async fn insert(&mut self, connection: WebSocketConnection<T>){
-        let address = connection.protocol_address.clone();
+    pub async fn insert<U: SignalDatabase + Send + 'static>(&mut self, connection: WebSocketConnection<T>, state: SignalServerState<U>){
+        let address = connection.protocol_address();
         let connection: ClientConnection<T> = Arc::new(Mutex::new(connection));
         
         self.sockets.lock().await.insert(address.clone(), connection.clone());
@@ -99,8 +101,7 @@ impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
         let protocol_address = address.clone();
         tokio::spawn(async move {
             let connection = connection.clone();
-            let addr = connection.lock().await.socket_address;
-
+            let addr = connection.lock().await.socket_address();
             loop {
                 let mut ws_guard = connection.lock().await;
 
@@ -135,7 +136,7 @@ impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
                                 break;
                             }
                         };
-                        ws_guard.on_receive(msg).await;
+                        ws_guard.on_receive(state.clone(), msg).await;
                     },
                     Message::Text(t) => {
                         println!("Message '{}' from '{}'", t, addr);
@@ -181,17 +182,20 @@ pub(crate) mod test {
     use common::web_api::SignalMessages;
     use prost::Message as PMessage;
 
+    use crate::managers::mock_db::MockDB;
+    use crate::managers::state::SignalServerState;
     use crate::managers::websocket::connection::test::{MockSocket, create_connection, mock_envelope};
     use crate::managers::websocket::connection::{WebSocketConnection, ClientConnection};
     use crate::managers::websocket::net_helper;
     use crate::managers::websocket::websocket_manager::WebSocketManager;
+    use crate::managers::state;
 
     #[tokio::test]
     async fn test_insert() {
         let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
-        let address = ws.protocol_address.clone();
-        mgr.insert(ws).await;
+        let address = ws.protocol_address();
+        mgr.insert(ws, SignalServerState::<MockDB>::new()).await;
 
         assert!(mgr.is_connected(&address).await)
     }
@@ -200,8 +204,8 @@ pub(crate) mod test {
     async fn test_none_msg() {
         let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
-        let address = ws.protocol_address.clone();
-        mgr.insert(ws).await;
+        let address = ws.protocol_address();
+        mgr.insert(ws, SignalServerState::<MockDB>::new()).await;
 
         let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
         
@@ -218,8 +222,8 @@ pub(crate) mod test {
     async fn test_error_msg() {
         let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
-        let address = ws.protocol_address.clone();
-        mgr.insert(ws).await;
+        let address = ws.protocol_address();
+        mgr.insert(ws, SignalServerState::<MockDB>::new()).await;
 
         let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
         
@@ -236,8 +240,8 @@ pub(crate) mod test {
     async fn test_close_msg() {
         let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
-        let address = ws.protocol_address.clone();
-        mgr.insert(ws).await;
+        let address = ws.protocol_address();
+        mgr.insert(ws, SignalServerState::<MockDB>::new()).await;
 
         let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
         
@@ -254,8 +258,8 @@ pub(crate) mod test {
     async fn test_text_msg() {
         let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
-        let address = ws.protocol_address.clone();
-        mgr.insert(ws).await;
+        let address = ws.protocol_address();
+        mgr.insert(ws, SignalServerState::<MockDB>::new()).await;
 
         let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
         
@@ -283,8 +287,8 @@ pub(crate) mod test {
     async fn test_binary_decode_error() {
         let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
-        let address = ws.protocol_address.clone();
-        mgr.insert(ws).await;
+        let address = ws.protocol_address();
+        mgr.insert(ws, SignalServerState::<MockDB>::new()).await;
 
         let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
         
@@ -330,8 +334,8 @@ pub(crate) mod test {
 
         let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
-        let address = ws.protocol_address.clone();
-        mgr.insert(ws).await;
+        let address = ws.protocol_address();
+        mgr.insert(ws, SignalServerState::<MockDB>::new()).await;
 
         let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
         

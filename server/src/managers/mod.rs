@@ -3,3 +3,4 @@ mod client_presence_manager;
 pub mod key_manager;
 pub mod state;
 pub mod websocket;
+mod mock_db;

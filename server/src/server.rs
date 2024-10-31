@@ -3,6 +3,7 @@ use crate::database::SignalDatabase;
 use crate::error::ApiError;
 use crate::in_memory_db::InMemorySignalDatabase;
 use crate::managers::state::SignalServerState;
+use crate::managers::websocket::connection::{UserIdentity, WebSocketConnection};
 use crate::postgres::PostgresDatabase;
 use anyhow::Result;
 use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
@@ -250,9 +251,7 @@ async fn create_websocket_endpoint(
     ws.on_upgrade(move |socket| {
         let mut wmgr = state.websocket_manager().clone();
         async move {
-            /*socket_manager
-                .handle_socket(/*authenticated_device,*/ socket, addr)
-                .await;*/
+            wmgr.insert(WebSocketConnection::new(UserIdentity::AuthenticatedDevice(authenticated_device), addr, socket), state).await
         }
     })
 }

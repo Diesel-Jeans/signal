@@ -8,7 +8,7 @@ use common::signal_protobuf::{
 };
 use rand::rngs::OsRng;
 use rand::Rng;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 struct PathExtractor{
     parts: Vec<String>
@@ -109,11 +109,10 @@ pub fn generate_req_id() -> u64 {
     rand_v
 }
 
-pub fn current_millis() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards")
-        .as_millis()
+pub fn current_millis() -> Result<u128, SystemTimeError> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)?
+        .as_millis())
 }
 
 #[cfg(test)]

@@ -16,6 +16,9 @@ use libsignal_protocol::IdentityKey;
 use super::{account_manager::AccountManager, key_manager::KeyManager, websocket::websocket_manager::WebSocketManager};
 use axum::extract::ws::WebSocket;
 
+#[cfg(test)]
+use super::mock_db::MockDB;
+
 #[derive(Clone, Debug)]
 pub struct SignalServerState<T: SignalDatabase> {
     db: T,
@@ -36,6 +39,18 @@ impl<T: SignalDatabase> SignalServerState<T> {
     }
     pub fn key_manager(&self) -> &KeyManager {
         &self.key_manager
+    }
+}
+
+#[cfg(test)]
+impl SignalServerState<MockDB>{
+    pub fn new() -> Self {
+        Self {
+            db: MockDB{},
+            socket_manager: WebSocketManager::new(),
+            account_manager: AccountManager::new(),
+            key_manager: KeyManager::new(),
+        }
     }
 }
 

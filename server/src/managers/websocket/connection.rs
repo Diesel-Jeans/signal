@@ -3,6 +3,7 @@ use axum::Error;
 use libsignal_core::ProtocolAddress;
 use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::time::SystemTimeError;
 use tokio::sync::{Mutex};
 use std::{collections::HashMap, sync::Arc};
 use std::fmt::Debug;
@@ -10,7 +11,13 @@ use common::signal_protobuf::{
     envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
+
+use crate::account::AuthenticatedDevice;
+use crate::database::SignalDatabase;
+use crate::managers::state::SignalServerState;
+
 use prost::{bytes::Bytes, Message as PMessage};
+
 
 use super::net_helper::{create_request, generate_req_id, current_millis};
 
@@ -35,32 +42,52 @@ impl WSStream for WebSocket {
 }
 
 #[derive(Debug)]
+pub enum UserIdentity{
+    ProtocolAddress(ProtocolAddress),
+    AuthenticatedDevice(AuthenticatedDevice)
+}
+
+#[derive(Debug)]
 pub struct WebSocketConnection<T: WSStream + Debug> {
-    pub protocol_address: ProtocolAddress,
-    pub socket_address: SocketAddr,
+    identity: UserIdentity,
+    socket_address: SocketAddr,
     ws: ConnectionState<T>,
-    pub pending_requests: HashSet<u64>,
+    pending_requests: HashSet<u64>,
 }
 
 impl <T: WSStream + Debug> WebSocketConnection<T> {
-    pub fn new(protocol_addr: ProtocolAddress, socket_addr: SocketAddr, ws: T) -> Self {
+    pub fn new(identity: UserIdentity, socket_addr: SocketAddr, ws: T) -> Self {
         Self {
-            protocol_address: protocol_addr,
+            identity: identity,
             socket_address: socket_addr,
             ws: ConnectionState::Active(ws),
             pending_requests: HashSet::new(),
         }
     }
 
+    pub fn socket_address(&self) -> SocketAddr{
+        self.socket_address.clone()
+    }
+
+    pub fn protocol_address(&self) -> ProtocolAddress {
+        match &self.identity {
+            UserIdentity::AuthenticatedDevice(x) => x.get_protocol_address(true),
+            UserIdentity::ProtocolAddress(y) => y.clone()
+        }
+    }
+
     pub async fn send_message(&mut self, mut message: Envelope) -> Result<(), String>{
-        let msg = self.create_message(message);
+        let msg = match self.create_message(message) {
+            Ok(x) => x,
+            Err(_) => return Err("Time went backwards".to_string())
+        };
         match self.send(Message::Binary(msg.encode_to_vec())).await{
             Ok(_) => Ok(()),
             Err(x) => Err(format!("{}", x))
         }
     }
 
-    fn create_message(&mut self, mut message: Envelope) -> WebSocketMessage {
+    fn create_message(&mut self, mut message: Envelope) -> Result<WebSocketMessage, SystemTimeError> {
         let id = generate_req_id();
         message.ephemeral = Some(false);
         let msg = create_request(
@@ -69,12 +96,12 @@ impl <T: WSStream + Debug> WebSocketConnection<T> {
             "/api/v1/message", 
             vec![
                 "X-Signal-Key: false".to_string(),
-                format!("X-Signal-Timestamp: {}", current_millis()),
+                format!("X-Signal-Timestamp: {}", current_millis()?),
             ], 
             Some(message.encode_to_vec())
         );
         self.pending_requests.insert(id);
-        msg
+        Ok(msg)
     }
 
     pub async fn close(&mut self) {
@@ -117,7 +144,7 @@ impl <T: WSStream + Debug> WebSocketConnection<T> {
         }
     }
 
-    pub async fn on_receive(&mut self, proto_message: WebSocketMessage){
+    pub async fn on_receive<U: SignalDatabase>(&mut self,state: SignalServerState<U>, proto_message: WebSocketMessage){
         todo!()
     }
 }
@@ -149,7 +176,7 @@ pub(crate) mod test {
     use sha2::digest::consts::False;
     use crate::managers::websocket::net_helper::{self, unpack_messages};
 
-    use super::{WSStream, WebSocketConnection, ClientConnection};
+    use super::{ClientConnection, UserIdentity, WSStream, WebSocketConnection};
     use axum::extract::ws::{CloseFrame, Message};
     use axum::Error;
 
@@ -231,7 +258,7 @@ pub(crate) mod test {
         let who = SocketAddr::from_str(socket_addr).unwrap();
         let paddr = ProtocolAddress::new(name.to_string(), device_id.into());
 
-        let ws = WebSocketConnection::new(paddr, who, mock);
+        let ws = WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, mock);
 
 
         (ws, sender, receiver)

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use common::web_api::{AccountAttributes, UploadSignedPreKey};
-use libsignal_core::{Aci, DeviceId, Pni, ServiceId};
+use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
 
@@ -189,5 +189,16 @@ impl AuthenticatedDevice {
 
     pub fn device(&self) -> &Device {
         &self.device
+    }
+    
+    pub fn get_protocol_address(&self, is_aci: bool) -> ProtocolAddress {
+        ProtocolAddress::new(
+            if is_aci {
+                self.account().aci.service_id_string()
+            } else {
+                self.account().pni.service_id_string()
+            },
+            self.device().device_id(),
+        )
     }
 }
