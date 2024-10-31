@@ -69,7 +69,7 @@ impl SignalDatabase for MockDB {
 
     async fn push_message_queue(
         &self,
-        address: ProtocolAddress,
+        address: &ProtocolAddress,
         messages: Vec<Envelope>,
     ) -> Result<()> {
         todo!()

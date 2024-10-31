@@ -1,7 +1,6 @@
 use crate::account::{Account, AuthenticatedDevice, Device};
 use crate::database::SignalDatabase;
 use crate::error::ApiError;
-use crate::in_memory_db::InMemorySignalDatabase;
 use crate::managers::state::SignalServerState;
 use crate::managers::websocket::connection::{UserIdentity, WebSocketConnection};
 use crate::postgres::PostgresDatabase;

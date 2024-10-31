@@ -42,7 +42,7 @@ pub trait SignalDatabase: Clone {
     /// Send a message to a given [ProtocolAddress].
     async fn push_message_queue(
         &self,
-        address: ProtocolAddress,
+        address: &ProtocolAddress,
         messages: Vec<Envelope>,
     ) -> Result<()>;
 

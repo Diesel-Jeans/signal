@@ -62,8 +62,8 @@ pub fn create_response(
         id: Some(id),
         status: Some(status),
         message: Some(message.to_string()),
-        headers: headers,
-        body: body,
+        headers,
+        body,
     };
 
     WebSocketMessage {
@@ -83,8 +83,8 @@ pub fn create_request(
     let req = WebSocketRequestMessage {
         verb: Some(verb.to_string()),
         path: Some(path.to_string()),
-        body: body,
-        headers: headers,
+        body,
+        headers,
         id: Some(id),
     };
     WebSocketMessage {
@@ -108,12 +108,12 @@ pub fn unpack_messages(ws_message: WebSocketMessage) -> Result<SignalMessages, S
     };
 
     let json = match String::from_utf8(body) {
-        Err(_) => return Err(format!("Failed to convert req body to string")),
+        Err(_) => return Err("Failed to convert req body to string".to_string()),
         Ok(y) => y,
     };
 
     match serde_json::from_str(&json) {
-        Err(_) => return Err(format!("Failed to convert json to SignalMessages")),
+        Err(_) => Err("Failed to convert json to SignalMessages".to_string()),
         Ok(y) => Ok(y),
     }
 }

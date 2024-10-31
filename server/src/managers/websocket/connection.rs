@@ -57,7 +57,7 @@ pub struct WebSocketConnection<T: WSStream + Debug> {
 impl<T: WSStream + Debug> WebSocketConnection<T> {
     pub fn new(identity: UserIdentity, socket_addr: SocketAddr, ws: T) -> Self {
         Self {
-            identity: identity,
+            identity,
             socket_address: socket_addr,
             ws: ConnectionState::Active(ws),
             pending_requests: HashSet::new(),
@@ -65,7 +65,7 @@ impl<T: WSStream + Debug> WebSocketConnection<T> {
     }
 
     pub fn socket_address(&self) -> SocketAddr {
-        self.socket_address.clone()
+        self.socket_address
     }
 
     pub fn protocol_address(&self) -> ProtocolAddress {

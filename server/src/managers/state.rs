@@ -2,7 +2,6 @@ use crate::{
     account::{self, Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
     error::ApiError,
-    in_memory_db::InMemorySignalDatabase,
     postgres::PostgresDatabase,
 };
 use anyhow::Result;
@@ -57,21 +56,10 @@ impl SignalServerState<MockDB> {
     }
 }
 
-impl SignalServerState<InMemorySignalDatabase> {
-    fn new() -> Self {
-        Self {
-            db: InMemorySignalDatabase::new(),
-            websocket_manager: WebSocketManager::new(),
-            account_manager: AccountManager::new(),
-            key_manager: KeyManager::new(),
-        }
-    }
-}
-
 impl SignalServerState<PostgresDatabase> {
     pub async fn new() -> Self {
         Self {
-            db: PostgresDatabase::connect()
+            db: PostgresDatabase::connect("DATABASE_URL".to_string())
                 .await
                 .expect("Failed to connect to the database."),
             websocket_manager: WebSocketManager::new(),

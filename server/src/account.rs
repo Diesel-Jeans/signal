@@ -103,7 +103,7 @@ impl Account {
         self.pni_identity_key
     }
 
-    pub fn devices(&self) -> &Vec<Device> {
+    pub fn devices(&self) -> &[Device] {
         &self.devices
     }
 
@@ -166,11 +166,11 @@ impl Device {
         self.created
     }
 
-    pub fn auth_token(&self) -> &Vec<u8> {
+    pub fn auth_token(&self) -> &[u8] {
         &self.auth_token
     }
 
-    pub fn salt(&self) -> &String {
+    pub fn salt(&self) -> &str {
         &self.salt
     }
 
