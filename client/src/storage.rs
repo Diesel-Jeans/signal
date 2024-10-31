@@ -1,8 +1,74 @@
 use crate::contact_manager::Device;
 use crate::key_management::bundle::PrimitiveKeyBundleContent;
+use libsignal_core::{Aci, Pni};
+use libsignal_protocol::{
+    IdentityKeyPair, IdentityKeyStore, InMemIdentityKeyStore, InMemKyberPreKeyStore,
+    InMemPreKeyStore, InMemSignalProtocolStore, KyberPreKeyStore, PreKeyId, PreKeyStore,
+    ProtocolStore,
+};
 use serde::*;
 use serde_json::*;
+use std::collections::HashMap;
 use std::fs;
+use uuid::Uuid;
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct DeviceStorage {
+    aci: Option<Uuid>,
+    pni: Option<Uuid>,
+    password: Option<String>,
+}
+
+impl DeviceStorage {
+    pub fn new() -> Self {
+        fs::read("device_info.json")
+            .map_err(|_| ())
+            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|_| ()))
+            .unwrap_or_default()
+    }
+    fn write(&self) {
+        let data = serde_json::to_string_pretty(self).expect("Can serialize DeviceStorage");
+        fs::write("device_info.json", data);
+    }
+}
+
+pub trait Storage {
+    fn set_password(&mut self, new_password: &str);
+    fn get_password(&self) -> Option<String>;
+    fn set_aci(&mut self, new_aci: &Aci);
+    fn get_aci(&self) -> Option<Aci>;
+    fn set_pni(&mut self, new_pni: &Pni);
+    fn get_pni(&self) -> Option<Pni>;
+}
+
+impl Storage for DeviceStorage {
+    fn set_password(&mut self, new_password: &str) {
+        self.password = Some(new_password.to_owned());
+        self.write();
+    }
+
+    fn get_password(&self) -> Option<String> {
+        self.password.clone()
+    }
+
+    fn set_aci(&mut self, new_aci: &Aci) {
+        self.aci = Some(new_aci.to_owned().into());
+        self.write();
+    }
+
+    fn get_aci(&self) -> Option<Aci> {
+        self.aci.map(|aci| aci.into())
+    }
+
+    fn set_pni(&mut self, new_pni: &Pni) {
+        self.pni = Some(new_pni.to_owned().into());
+        self.write();
+    }
+
+    fn get_pni(&self) -> Option<Pni> {
+        self.pni.map(|pni| pni.into())
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Info {

@@ -4,7 +4,7 @@ use crate::{
     error::ApiError,
     postgres::PostgresDatabase,
 };
-use anyhow::Result;
+use anyhow::{Ok, Result};
 use common::web_api::{
     AccountAttributes, DevicePreKeyBundle, PreKeyResponse, SetKeyRequest, UploadPreKey,
     UploadSignedPreKey,
@@ -78,7 +78,7 @@ impl<T: SignalDatabase> SignalServerState<T> {
         pni_identity_key: IdentityKey,
         primary_device: Device,
         key_bundle: DevicePreKeyBundle,
-    ) -> Result<()> {
+    ) -> Result<Account> {
         let device_id = primary_device.device_id();
         let account = self
             .account_manager
@@ -96,7 +96,9 @@ impl<T: SignalDatabase> SignalServerState<T> {
             &key_bundle,
             &ProtocolAddress::new(account.pni().service_id_string(), device_id),
         )
-        .await
+        .await?;
+
+        Ok(account)
     }
 
     pub async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
