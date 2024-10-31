@@ -1,7 +1,8 @@
-use std::{fmt, str::FromStr};
+pub mod authorization;
+use std::{fmt, num::ParseIntError, str::FromStr};
 
 use crate::signal_protobuf::Envelope;
-use anyhow::Error;
+use anyhow::{anyhow, bail, Error};
 use libsignal_protocol::{DeviceId, IdentityKey, ServiceId};
 use serde::{
     de::{self, MapAccess, Visitor},
@@ -31,24 +32,24 @@ pub struct CreateAccountOptions {
     pub pni_pq_last_resort_pre_key: UploadSignedPreKey,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceCapabilities {
-    storage: bool,
-    transfer: bool,
-    payment_activation: bool,
-    delete_sync: bool,
-    versioned_expiration_timer: bool,
+    pub storage: bool,
+    pub transfer: bool,
+    pub payment_activation: bool,
+    pub delete_sync: bool,
+    pub versioned_expiration_timer: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountAttributes {
-    fetches_messages: bool,
-    registration_id: i32,
-    pni_registration_id: i32,
-    capabilities: DeviceCapabilities,
-    unidentified_access_key: Box<[u8]>,
+    pub fetches_messages: bool,
+    pub registration_id: i32,
+    pub pni_registration_id: i32,
+    pub capabilities: DeviceCapabilities,
+    pub unidentified_access_key: Box<[u8]>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -228,6 +229,7 @@ impl<'de> Deserialize<'de> for RegistrationRequest {
     }
 }
 impl RegistrationRequest {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         session_id: String,
         account_attributes: AccountAttributes,
@@ -287,7 +289,7 @@ impl RegistrationRequest {
 
 /// Used to upload any type of prekey along with a signature that is used
 /// to verify the authenticity of the prekey.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadSignedPreKey {
     pub key_id: u32,

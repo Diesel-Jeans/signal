@@ -756,6 +756,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "libsignal-protocol",
  "prost",
  "serde",
@@ -2970,6 +2971,7 @@ dependencies = [
  "dotenv",
  "futures-util",
  "headers",
+ "hkdf 0.12.4",
  "libsignal-core",
  "libsignal-protocol",
  "prost",

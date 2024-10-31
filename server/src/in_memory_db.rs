@@ -10,13 +10,16 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+type MessageTable = HashMap<ProtocolAddress, VecDeque<Envelope>>;
+type DeviceTable = HashMap<ServiceId, Vec<Device>>;
+type KeysTable =
+    HashMap<ServiceId, HashMap<DeviceId, HashMap<PreKeyType, Vec<UploadSignedPreKey>>>>;
+
 #[derive(Clone, Default)]
 pub struct InMemorySignalDatabase {
-    pub mail_queues: Arc<Mutex<HashMap<ProtocolAddress, VecDeque<Envelope>>>>,
-    pub devices: Arc<Mutex<HashMap<ServiceId, Vec<Device>>>>,
-    pub keys: Arc<
-        Mutex<HashMap<ServiceId, HashMap<DeviceId, HashMap<PreKeyType, Vec<UploadSignedPreKey>>>>>,
-    >,
+    pub mail_queues: Arc<Mutex<MessageTable>>,
+    pub devices: Arc<Mutex<DeviceTable>>,
+    pub keys: Arc<Mutex<KeysTable>>,
     pub accounts: Arc<Mutex<HashMap<ServiceId, Account>>>,
 }
 /*
@@ -83,7 +86,7 @@ impl InMemorySignalDatabase {
 
 #[async_trait]
 impl SignalDatabase for InMemorySignalDatabase {
-    async fn add_device(&self, service_id: &ServiceId, device: Device) -> Result<()> {
+    async fn add_device(&self, service_id: &ServiceId, device: &Device) -> Result<()> {
         todo!()
     }
     async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
@@ -111,14 +114,14 @@ impl SignalDatabase for InMemorySignalDatabase {
         todo!()
     }
 
-    async fn add_account(&self, account: Account) -> Result<()> {
+    async fn add_account(&self, account: &Account) -> Result<()> {
         todo!("Decide whether this should be aci or pni");
         let service_id = ServiceId::Aci(account.aci());
         self.accounts
             .lock()
             .await
             .entry(service_id)
-            .or_insert(account);
+            .or_insert(account.clone());
         self.devices
             .lock()
             .await
@@ -158,12 +161,12 @@ impl SignalDatabase for InMemorySignalDatabase {
             .extend(messages);
         Ok(())
     }
-    async fn pop_msg_queue(&self, address: ProtocolAddress) -> Result<Vec<Envelope>> {
+    async fn pop_msg_queue(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
         todo!()
     }
     async fn store_key_bundle(
         &self,
-        data: DevicePreKeyBundle,
+        data: &DevicePreKeyBundle,
         owner_address: &ProtocolAddress,
     ) -> Result<()> {
         todo!()
@@ -172,28 +175,41 @@ impl SignalDatabase for InMemorySignalDatabase {
         todo!()
     }
 
-    async fn get_one_time_pre_key_count(&self, service_id: &ServiceId) -> Result<u32> {
+    async fn get_one_time_ec_pre_key_count(&self, service_id: &ServiceId) -> Result<u32> {
         todo!()
-        /*
-        database
-        .keys
-        .get(&usr_id)
-        .and_then(|device_map| device_map.get(&device_id))
-        .and_then(|key_map| key_map.get(&PreKey::OneTime))
-        .and_then(|key_list| Some(key_list.len()))
-        .ok_or_else(|| anyhow::anyhow!("Could not get one time pre key count"))
-        */
     }
 
-    async fn store_one_time_pre_keys(
+    async fn get_one_time_pq_pre_key_count(&self, service_id: &ServiceId) -> Result<u32> {
+        todo!()
+    }
+
+    async fn store_one_time_ec_pre_keys(
         &self,
         otpks: Vec<UploadPreKey>,
-        owner_address: ProtocolAddress,
+        owner_address: &ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
 
-    async fn get_one_time_pre_key(&self, owner_address: &ProtocolAddress) -> Result<UploadPreKey> {
+    async fn store_one_time_pq_pre_keys(
+        &self,
+        otpks: Vec<UploadSignedPreKey>,
+        owner_address: &ProtocolAddress,
+    ) -> Result<()> {
+        todo!()
+    }
+
+    async fn get_one_time_ec_pre_key(
+        &self,
+        owner_address: &ProtocolAddress,
+    ) -> Result<UploadPreKey> {
+        todo!()
+    }
+
+    async fn get_one_time_pq_pre_key(
+        &self,
+        owner_address: &ProtocolAddress,
+    ) -> Result<UploadSignedPreKey> {
         todo!()
     }
 }

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use common::web_api::{AccountAttributes, UploadSignedPreKey};
 use libsignal_core::{Aci, DeviceId, Pni, ServiceId};
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
@@ -42,6 +43,8 @@ pub struct Account {
     aci_identity_key: IdentityKey,
     pni_identity_key: IdentityKey,
     devices: Vec<Device>,
+    phone_number: String,
+    account_attr: AccountAttributes,
 }
 
 impl Account {
@@ -50,6 +53,8 @@ impl Account {
         device: Device,
         pni_identity_key: IdentityKey,
         aci_identity_key: IdentityKey,
+        phone_number: String,
+        account_attr: AccountAttributes,
     ) -> Self {
         Self {
             pni,
@@ -57,6 +62,8 @@ impl Account {
             devices: vec![device],
             pni_identity_key,
             aci_identity_key,
+            phone_number,
+            account_attr,
         }
     }
 
@@ -66,6 +73,8 @@ impl Account {
         pni_identity_key: IdentityKey,
         aci_identity_key: IdentityKey,
         devices: Vec<Device>,
+        phone_number: String,
+        account_attr: AccountAttributes,
     ) -> Self {
         Self {
             pni,
@@ -73,6 +82,8 @@ impl Account {
             pni_identity_key,
             aci_identity_key,
             devices,
+            phone_number,
+            account_attr,
         }
     }
 
@@ -101,6 +112,14 @@ impl Account {
         self.devices.push(device);
         Ok(())
     }
+
+    pub fn phone_number(&self) -> &str {
+        &self.phone_number
+    }
+
+    pub fn account_attr(&self) -> &AccountAttributes {
+        &self.account_attr
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -109,7 +128,7 @@ pub struct Device {
     name: String,
     last_seen: u32,
     created: u32,
-    auth_token: String,
+    auth_token: Vec<u8>,
     salt: String,
 }
 
@@ -119,7 +138,7 @@ impl Device {
         name: String,
         last_seen: u32,
         created: u32,
-        auth_token: String,
+        auth_token: Vec<u8>,
         salt: String,
     ) -> Self {
         Self {
@@ -144,11 +163,31 @@ impl Device {
         self.created
     }
 
-    pub fn auth_token(&self) -> &String {
+    pub fn auth_token(&self) -> &Vec<u8> {
         &self.auth_token
     }
 
     pub fn salt(&self) -> &String {
         &self.salt
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AuthenticatedDevice {
+    account: Account,
+    device: Device,
+}
+
+impl AuthenticatedDevice {
+    pub fn new(account: Account, device: Device) -> Self {
+        Self { account, device }
+    }
+
+    pub fn account(&self) -> &Account {
+        &self.account
+    }
+
+    pub fn device(&self) -> &Device {
+        &self.device
     }
 }
