@@ -297,7 +297,7 @@ pub struct UploadSignedPreKey {
     pub signature: Box<[u8]>,  // TODO: Make this a PublicKey and implement Serialize
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadPreKey {
     pub key_id: u32,
@@ -333,7 +333,7 @@ impl UploadKeys {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DevicePreKeyBundle {
     pub aci_signed_pre_key: UploadSignedPreKey,

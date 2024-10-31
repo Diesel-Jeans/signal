@@ -4,7 +4,6 @@ mod account_authenticator;
 pub mod database;
 mod envelope;
 mod error;
-pub mod in_memory_db;
 pub mod managers;
 mod message_cache;
 mod postgres;

@@ -1,7 +1,6 @@
 use crate::{
     account::{Account, Device},
     database::SignalDatabase,
-    in_memory_db::InMemorySignalDatabase,
     postgres::PostgresDatabase,
 };
 use anyhow::{bail, Result};
