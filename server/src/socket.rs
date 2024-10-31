@@ -30,7 +30,7 @@ use rand::Rng;
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::Url;
 
-use crate::account::Account;
+use crate::account::{Account, AuthenticatedDevice};
 use crate::connection::{WSStream, WebSocketConnection};
 use crate::error::SocketManagerError;
 use crate::query::PutV1MessageParams;
@@ -282,7 +282,7 @@ impl<T: WSStream> SocketManager<T> {
 
     pub async fn handle_socket(
         &mut self,
-        /*authenticated_device: ???, */
+        authenticated_device: AuthenticatedDevice,
         mut socket: T,
         who: SocketAddr,
     ) {
@@ -381,13 +381,19 @@ pub(crate) mod test {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
+    use crate::account::{Account, AuthenticatedDevice, Device};
     use crate::connection::WSStream;
     use crate::socket::{ConnectionState, SocketManager, SocketManagerError};
     use axum::extract::ws::Message;
     use axum::Error;
 
+    use common::web_api::{AccountAttributes, DeviceCapabilities};
+    use libsignal_core::Pni;
+    use libsignal_protocol::{IdentityKey, KeyPair, PublicKey};
+    use rand::rngs::OsRng;
     use tokio::sync::mpsc;
     use tokio::sync::mpsc::{Receiver, Sender};
+    use uuid::Uuid;
 
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -455,6 +461,40 @@ pub(crate) mod test {
         }
     }
 
+    async fn create_authenticated_device() -> AuthenticatedDevice {
+        let device = Device::new(
+            1.into(),
+            "test".to_owned(),
+            0,
+            0,
+            Vec::<u8>::new(),
+            "salt".to_owned(),
+        );
+        let device_capabilities = DeviceCapabilities {
+            storage: false,
+            transfer: false,
+            payment_activation: false,
+            delete_sync: false,
+            versioned_expiration_timer: false,
+        };
+        let account_attr = AccountAttributes {
+            fetches_messages: false,
+            registration_id: 1,
+            pni_registration_id: 1,
+            capabilities: device_capabilities,
+            unidentified_access_key: <Box<[u8]>>::default(),
+        };
+        let account = Account::new(
+            Pni::from(Uuid::new_v4()),
+            device.clone(),
+            IdentityKey::from(KeyPair::generate(&mut OsRng).public_key),
+            IdentityKey::from(KeyPair::generate(&mut OsRng).public_key),
+            "12354678".to_owned(),
+            account_attr,
+        );
+        AuthenticatedDevice::new(account, device)
+    }
+
     async fn create_connection(
         manager: &SocketManager<MockSocket>,
         addr: &str,
@@ -464,11 +504,12 @@ pub(crate) mod test {
         Sender<Result<Message, Error>>,
         Receiver<Message>,
     ) {
+        let authenticated_device = create_authenticated_device().await;
         let (mock, sender, mut receiver) = MockSocket::new();
         let who = SocketAddr::from_str(addr).unwrap();
         let mut tmgr = manager.clone();
         tokio::spawn(async move {
-            tmgr.handle_socket(mock, who).await;
+            tmgr.handle_socket(authenticated_device, mock, who).await;
         });
 
         // could be fixed with some notify code
