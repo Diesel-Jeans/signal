@@ -6,6 +6,9 @@ use common::web_api::SignalMessages;
 use common::signal_protobuf::{
     web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage
 };
+use rand::rngs::OsRng;
+use rand::Rng;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 struct PathExtractor{
     parts: Vec<String>
@@ -39,7 +42,7 @@ impl PathExtractor {
 }
 
 
-fn create_response(id: u64, status: u32, message: &str, mut headers: Vec<String>, body: Option<Vec<u8>>) -> WebSocketMessage{
+pub fn create_response(id: u64, status: u32, message: &str, mut headers: Vec<String>, body: Option<Vec<u8>>) -> WebSocketMessage{
     if !headers.iter().any(|x| x.starts_with("Content-Length")){
         headers.push(format!("Content-Length: {}", body.as_ref().map(|v| v.len()).unwrap_or(0)));
     }
@@ -59,7 +62,7 @@ fn create_response(id: u64, status: u32, message: &str, mut headers: Vec<String>
     }
 }
 
-fn create_request(id: u64, verb: &str, path: &str, headers: Vec<String>, body: Option<Vec<u8>>) -> WebSocketMessage{
+pub fn create_request(id: u64, verb: &str, path: &str, headers: Vec<String>, body: Option<Vec<u8>>) -> WebSocketMessage{
     let req = WebSocketRequestMessage {
         verb: Some(verb.to_string()),
         path: Some(path.to_string()),
@@ -74,7 +77,7 @@ fn create_request(id: u64, verb: &str, path: &str, headers: Vec<String>, body: O
     }
 }
 
-fn unpack_messages(ws_message: WebSocketMessage) -> Result<SignalMessages, String> {
+pub fn unpack_messages(ws_message: WebSocketMessage) -> Result<SignalMessages, String> {
     let req =  match ws_message.r#type() {
         web_socket_message::Type::Request => {
             match ws_message.request {
@@ -100,7 +103,18 @@ fn unpack_messages(ws_message: WebSocketMessage) -> Result<SignalMessages, Strin
     }
 }
 
+pub fn generate_req_id() -> u64 {
+    let mut rng = OsRng;
+    let rand_v: u64 = rng.gen();
+    rand_v
+}
 
+pub fn current_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_millis()
+}
 
 #[cfg(test)]
 pub(crate) mod test {

@@ -246,7 +246,7 @@ async fn create_websocket_endpoint(
     };
     println!("`{user_agent}` at {addr} connected.");
     ws.on_upgrade(move |socket| {
-        let mut socket_manager = state.socket_manager().clone();
+        let mut wmgr = state.websocket_manager().clone();
         async move {
             /*socket_manager
                 .handle_socket(/*authenticated_device,*/ socket, addr)

@@ -29,7 +29,7 @@ use prost::{bytes::Bytes, Message as PMessage};
 
 use rand::rngs::OsRng;
 use rand::Rng;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
 use crate::account::Account;
@@ -89,7 +89,8 @@ impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
         }
     }
 
-    pub async fn insert(&mut self, address: &ProtocolAddress, connection: WebSocketConnection<T>){
+    pub async fn insert(&mut self, connection: WebSocketConnection<T>){
+        let address = connection.protocol_address.clone();
         let connection: ClientConnection<T> = Arc::new(Mutex::new(connection));
         
         self.sockets.lock().await.insert(address.clone(), connection.clone());
@@ -99,10 +100,26 @@ impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
         tokio::spawn(async move {
             let connection = connection.clone();
             let addr = connection.lock().await.socket_address;
-            while let Some(res) = connection.lock().await.recv().await{
+
+            loop {
+                let mut ws_guard = connection.lock().await;
+
+                let timeout_res = tokio::time::timeout(Duration::from_millis(100), ws_guard.recv()).await;
+                let msg_opt = match timeout_res {
+                    Ok(x) => x,
+                    _ => continue // did not receive message in time, release and let others access the connection
+                };
+
+                let res = if let Some(x) = msg_opt{
+                    x
+                } else{
+                    ws_guard.close().await;
+                    break;
+                };
                 let msg = match res {
                     Err(x) => {
                         println!("WebSocketManager recv ERROR: {}", x);
+                        ws_guard.close().await;
                         break;
                     },
                     Ok(y) => y
@@ -114,25 +131,25 @@ impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
                             Ok(x) => x,
                             Err(y) => {
                                 println!("WebSocketManager ERROR - Message::Binary: {}", y);
-                                connection.lock().await.close_reason(1007, "Badly formatted".to_string()).await;
+                                ws_guard.close_reason(1007, "Badly formatted").await;
                                 break;
                             }
                         };
+                        ws_guard.on_receive(msg).await;
                     },
                     Message::Text(t) => {
                         println!("Message '{}' from '{}'", t, addr);
                         println!("replying...");
-                        connection.lock().await.send(Message::Text(t)).await;
+                        ws_guard.send(Message::Text(t)).await;
                         println!("sent!");
                     },
                     Message::Close(_) => {
-                        connection.lock().await.close().await;
+                        ws_guard.close().await;
                         break;
                     },
                     _ => {}
                 }
-            }
-
+            } 
             match mgr.remove(&protocol_address).await {
                 None => println!("WebSocketManager: Client was already removed from Manager!"),
                 _ => {}
@@ -140,17 +157,208 @@ impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
         });
     }
 
-    async fn get(&self, address: &ProtocolAddress) -> Option<ClientConnection<T>>{
+    pub async fn is_connected(&mut self, address: &ProtocolAddress) -> bool{
+        self.sockets.lock().await.contains_key(address)
+    }
+
+    pub async fn get(&self, address: &ProtocolAddress) -> Option<ClientConnection<T>>{
         self.sockets.lock().await.get(address).cloned()
     }
 
-    async fn get_mut(&mut self, address: &ProtocolAddress) -> Option<ClientConnection<T>>{
+    pub async fn get_mut(&mut self, address: &ProtocolAddress) -> Option<ClientConnection<T>>{
         self.sockets.lock().await.get_mut(address).cloned()
     }
 
     async fn remove(&mut self, address: &ProtocolAddress) -> Option<ClientConnection<T>>{
         self.sockets.lock().await.remove(address)
     }
+}
+
+#[cfg(test)]
+pub(crate) mod test {
+    use async_std::channel::Send;
+    use axum::extract::ws::Message;
+    use common::web_api::SignalMessages;
+    use prost::Message as PMessage;
+
+    use crate::managers::websocket::connection::test::{MockSocket, create_connection, mock_envelope};
+    use crate::managers::websocket::connection::{WebSocketConnection, ClientConnection};
+    use crate::managers::websocket::net_helper;
+    use crate::managers::websocket::websocket_manager::WebSocketManager;
+
+    #[tokio::test]
+    async fn test_insert() {
+        let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
+        let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
+        let address = ws.protocol_address.clone();
+        mgr.insert(ws).await;
+
+        assert!(mgr.is_connected(&address).await)
+    }
+
+    #[tokio::test]
+    async fn test_none_msg() {
+        let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
+        let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
+        let address = ws.protocol_address.clone();
+        mgr.insert(ws).await;
+
+        let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
+        
+        assert!(ws.lock().await.is_active());
+
+        drop(sender);
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        assert!(!mgr.is_connected(&address).await);
+        assert!(!ws.lock().await.is_active());
+    }
+
+    #[tokio::test]
+    async fn test_error_msg() {
+        let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
+        let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
+        let address = ws.protocol_address.clone();
+        mgr.insert(ws).await;
+
+        let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
+        
+        assert!(ws.lock().await.is_active());
+
+        sender.send(Err(axum::Error::new("Error message"))).await;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        assert!(!mgr.is_connected(&address).await);
+        assert!(!ws.lock().await.is_active());
+    }
+
+    #[tokio::test]
+    async fn test_close_msg() {
+        let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
+        let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
+        let address = ws.protocol_address.clone();
+        mgr.insert(ws).await;
+
+        let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
+        
+        assert!(ws.lock().await.is_active());
+
+        sender.send(Ok(Message::Close(None))).await;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        assert!(!mgr.is_connected(&address).await);
+        assert!(!ws.lock().await.is_active());
+    }
+
+    #[tokio::test]
+    async fn test_text_msg() {
+        let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
+        let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
+        let address = ws.protocol_address.clone();
+        mgr.insert(ws).await;
+
+        let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
+        
+        assert!(ws.lock().await.is_active());
+
+        sender.send(Ok(Message::Text("hello".to_string()))).await;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        
+        
+        assert!(!receiver.is_empty());
+        assert!(mgr.is_connected(&address).await);
+        assert!(ws.lock().await.is_active());
+
+        match receiver.recv().await.unwrap() {
+            Message::Text(x) => assert!(
+                x == "hello",
+                "Expected 'hello'"
+            ),
+            _ => panic!("Did not receive text message"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_binary_decode_error() {
+        let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
+        let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
+        let address = ws.protocol_address.clone();
+        mgr.insert(ws).await;
+
+        let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
+        
+        assert!(ws.lock().await.is_active());
+
+        sender.send(Ok(Message::Binary("hello".as_bytes().to_vec()))).await;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        
+        
+        assert!(!receiver.is_empty());
+        assert!(!mgr.is_connected(&address).await);
+        assert!(!ws.lock().await.is_active());
+
+        match receiver.recv().await.unwrap() {
+            Message::Close(Some(x)) => {
+                assert!(x.code == 1007);
+                assert!(x.reason == "Badly formatted");
+            },
+            _ => panic!("Did not receive close message"),
+        }
+    }
+
+    #[ignore = "not implemented"]
+    #[tokio::test]
+    async fn test_binary_decode_ok() {
+        let msg = r#"
+{
+    "messages":[
+        {
+            "type": 1,
+            "destinationDeviceId": 3,
+            "destinationRegistrationId": 22,
+            "content": "aGVsbG8="
+        }
+    ],
+    "online": false,
+    "urgent": true,
+    "timestamp": 1730217386
+}
+"#;
+
+
+        let mut mgr: WebSocketManager<MockSocket> = WebSocketManager::new();
+        let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043");
+        let address = ws.protocol_address.clone();
+        mgr.insert(ws).await;
+
+        let ws: ClientConnection<MockSocket> = mgr.get(&address).await.unwrap();
+        
+        assert!(ws.lock().await.is_active());
+
+        
+        let id = net_helper::generate_req_id();
+        let req = net_helper::create_request(
+            id, 
+            "PUT", 
+            "v1/messages/aaa?story=false", 
+            vec![], 
+            Some(msg.as_bytes().to_vec()));
+            
+        sender.send(Ok(Message::Binary(req.encode_to_vec()))).await;
+        
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        
+        assert!(!receiver.is_empty());
+        assert!(mgr.is_connected(&address).await);
+        assert!(ws.lock().await.is_active());
+
+        // TODO: check that response is ok
+    }
+
+
 }
 
 
@@ -276,8 +484,8 @@ impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
             let body = message.encode_to_vec();
             let req = WebSocketRequestMessage {
                 verb: Some("PUT".to_string()),
-                path: Some("/api/v1/message".to_string()),
                 body: Some(body),
+                path: Some("/api/v1/message".to_string()),
                 headers: vec![
                     "X-Signal-Key: false".to_string(),
                     format!("X-Signal-Timestamp: {}", current_millis()),

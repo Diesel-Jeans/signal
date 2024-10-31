@@ -28,7 +28,7 @@ impl<T: SignalDatabase> SignalServerState<T> {
     pub(self) fn database(&self) -> T {
         self.db.clone()
     }
-    pub fn socket_manager(&self) -> &WebSocketManager<WebSocket> {
+    pub fn websocket_manager(&self) -> &WebSocketManager<WebSocket> {
         &self.socket_manager
     }
     pub fn account_manager(&self) -> &AccountManager {
