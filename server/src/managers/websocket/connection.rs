@@ -4,7 +4,7 @@ use common::signal_protobuf::{
     envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
-use libsignal_core::{ProtocolAddress, ServiceIdKind};
+use libsignal_core::{ProtocolAddress, ServiceIdKind, DeviceId};
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -18,6 +18,7 @@ use crate::managers::state::SignalServerState;
 
 use prost::{bytes::Bytes, Message as PMessage};
 
+use crate::message_cache::MessageAvailabilityListener;
 use super::net_helper::{create_request, current_millis, generate_req_id};
 
 #[async_trait::async_trait]
@@ -54,7 +55,7 @@ pub struct WebSocketConnection<T: WSStream + Debug> {
     pending_requests: HashSet<u64>,
 }
 
-impl<T: WSStream + Debug> WebSocketConnection<T> {
+impl<T: WSStream + Debug + Send> WebSocketConnection<T> {
     pub fn new(identity: UserIdentity, socket_addr: SocketAddr, ws: T) -> Self {
         Self {
             identity: identity,
@@ -84,6 +85,26 @@ impl<T: WSStream + Debug> WebSocketConnection<T> {
             Ok(_) => Ok(()),
             Err(x) => Err(format!("{}", x)),
         }
+    }
+
+    pub async fn send_messages(&mut self, cached_only: bool) -> bool{
+        // TODO: use state.msg_manager when messagemanager is implemented
+        let msg_manager = MessagesManager{};
+        
+        let addr = self.protocol_address();
+        let res = msg_manager.get_messages_for_device(addr.name(), addr.device_id(), cached_only).await;
+        let envelopes = match res {
+            Ok(x) => x,
+            Err(_) => {
+                println!("Failed to fetch messages");
+                return false
+            }
+        };
+
+        for envelope in envelopes{
+            self.send_message(envelope).await.map_err(|e| println!("{}", e));
+        }
+        return true
     }
 
     fn create_message(
@@ -151,6 +172,40 @@ impl<T: WSStream + Debug> WebSocketConnection<T> {
         proto_message: WebSocketMessage,
     ) {
         todo!()
+    }
+}
+
+
+// Dummy message manager
+use anyhow::Result;
+struct MessagesManager{}
+impl MessagesManager{
+    pub async fn get_messages_for_device(
+        &self,
+        user_id: &str,
+        device_id: DeviceId,
+        cached_msg_only: bool,
+    ) -> Result<Vec<Envelope>> {
+        todo!()
+    }
+}
+
+
+#[async_trait::async_trait]
+impl <T: WSStream + Debug + Send + 'static> MessageAvailabilityListener for WebSocketConnection<T> {
+    async fn handle_new_messages_available(&mut self) -> bool {
+        if !self.is_active(){
+            return false
+        }
+        
+        self.send_messages(true).await
+    }
+
+    async fn handle_messages_persisted(&mut self) -> bool {
+        if !self.is_active(){
+            return false
+        }
+        self.send_messages(false).await
     }
 }
 
