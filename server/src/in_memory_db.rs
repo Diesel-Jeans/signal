@@ -22,67 +22,6 @@ pub struct InMemorySignalDatabase {
     pub keys: Arc<Mutex<KeysTable>>,
     pub accounts: Arc<Mutex<HashMap<ServiceId, Account>>>,
 }
-/*
-impl InMemorySignalDatabase {
-
-    async fn create_user_id_for(
-    database: Arc<Mutex<InMemorySignalDatabase>>,
-    username: &Username,
-) -> Result<UserID, ErrorMessage> {
-    let mut database = database.lock().await;
-    if !database
-        .usernames
-        .iter()
-        .any(|(_, existing)| *username == **existing)
-    {
-        use rand::distributions::{Alphanumeric, DistString};
-
-        let id: UserID = Alphanumeric
-            .sample_string(&mut rand::thread_rng(), 16)
-            .parse()
-            .unwrap();
-        database.usernames.insert(id.clone(), username.clone());
-        Ok(id)
-    } else {
-        Err("Username already exists".into())
-    }
-}
-
-
-    async fn get_user_id_for(&self, username: &Username) -> Result<UserID, Error> {
-        if let Some(id) = self
-            .usernames
-            .iter()
-            .find(|(_, existing)| **existing == *username)
-        {
-            Ok(id.0.clone())
-        } else {
-            Err("Username not found".into())
-        }
-    }
-
-    async fn create_new_device_id(
-        database: Arc<Mutex<InMemorySignalDatabase>>,
-        id: &UserID,
-    ) -> Result<DeviceID, Error> {
-        let mut database = database.lock().await;
-        if let Some(devices) = database.devices.get_mut(id) {
-            let max = *devices.iter().max().unwrap_or(&0u32);
-            for i in 0u32.into()..max {
-                if !devices.contains(&i) {
-                    devices.insert(i.to_owned());
-                    return Ok(i.to_owned());
-                }
-            }
-            let new_device = max + 1;
-            devices.insert(new_device);
-            Ok(new_device)
-        } else {
-            Err("Device could not be created because user did not exist".into())
-        }
-    }
-}
-*/
 
 #[async_trait]
 impl SignalDatabase for InMemorySignalDatabase {
@@ -98,19 +37,20 @@ impl SignalDatabase for InMemorySignalDatabase {
     async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()> {
         todo!()
     }
-    async fn store_aci_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
+
+    async fn store_signed_pre_key(
+        &self,
+        spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()> {
         todo!()
     }
 
-    async fn store_pni_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
-        todo!()
-    }
-
-    async fn store_pq_aci_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
-        todo!()
-    }
-
-    async fn store_pq_pni_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
+    async fn store_pq_signed_pre_key(
+        &self,
+        pq_spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()> {
         todo!()
     }
 

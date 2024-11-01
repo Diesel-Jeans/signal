@@ -90,7 +90,7 @@ async fn authenticate_device<T: SignalDatabase>(
         })?
         .to_owned();
 
-    if verify_password(&device.auth_token(), &device.salt(), password).await? {
+    if verify_password(device.auth_token(), device.salt(), password).await? {
         Ok(AuthenticatedDevice::new(account, device))
     } else {
         Err(ApiError {
