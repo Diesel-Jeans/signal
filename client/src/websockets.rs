@@ -4,38 +4,39 @@ use common::signal_protobuf::{
     WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
 };
 use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt, TryStream, TryStreamExt};
 use libsignal_protocol::InMemSignalProtocolStore;
-use native_tls::{Certificate, TlsConnector as NativeTlsConnector};
+use native_tls::{Certificate, TlsConnector as NativeTlsConnector, TlsStream};
 use prost::encoding::hash_map::encode;
 use prost::Message as ProstMessage;
+use socket2::{Domain, Socket, TcpKeepalive, Type};
 use std::env;
 use std::fmt::{Display, Formatter};
 use std::future::Future;
+use std::net::ToSocketAddrs;
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use surf::http::headers::ToHeaderValues;
 use tokio::net::TcpStream;
+use tokio::runtime::Handle;
 use tokio::sync::Mutex;
-use tokio::task::Unconstrained;
+use tokio::task::{JoinHandle, Unconstrained};
 use tokio::*;
 use tokio_native_tls::TlsConnector;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::WebSocket;
 use tokio_tungstenite::*;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use url::Url;
-// use ::extract::ws::WebSocket as AxWebSocket;
 
 struct StreamHandler {
-    pub stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    pub stream: WebSocketStream<tokio_native_tls::TlsStream<TcpStream>>,
 }
 
 impl StreamHandler {
     async fn try_new() -> Result<StreamHandler> {
-        // let (mut write, mut read) = open_ws_connection_to_server_as_client().await?.split();
-        // Ok(StreamHandler { write, read })
         let stream = open_ws_connection_to_server_as_client().await?;
         Ok(StreamHandler { stream })
     }
@@ -49,6 +50,12 @@ impl WebsocketHandler {
         Ok(WebsocketHandler {
             socket: Arc::new(Mutex::new(StreamHandler::try_new().await?)),
         })
+    }
+
+    async fn send_message(self, msg: Message) -> Result<()> {
+        let mut guard = self.socket.try_lock()?;
+        guard.stream.send(msg).await?;
+        Ok(())
     }
 }
 
@@ -70,8 +77,7 @@ pub(crate) async fn send_ws_message(
     Ok(())
 }
 
-pub(crate) async fn open_ws_connection_to_server_as_client(
-) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocketStream<tokio_native_tls::TlsStream<TcpStream>>> {
     let address = env::var("SERVER_ADDRESS")?;
     let https_port = env::var("HTTPS_PORT")?;
     let ws_url =
@@ -79,16 +85,51 @@ pub(crate) async fn open_ws_connection_to_server_as_client(
             .into_client_request()?;
 
     let mut tls_connector = NativeTlsConnector::builder();
-    // .danger_accept_invalid_certs(true) // Ignore invalid certificates
     for cert in get_certs()? {
         tls_connector.add_root_certificate(cert);
     }
 
     let connector = tls_connector.build()?;
-    let tls_connector = Connector::NativeTls(connector);
 
-    let (ws_stream, _) =
-        connect_async_tls_with_config(ws_url, None, false, Some(tls_connector)).await?;
+    // Create a TcpSocket, enable keepalive, and set intervals - all related to issue #56
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
+    socket.set_keepalive(true)?;
+    socket.set_tcp_keepalive(
+        &TcpKeepalive::new()
+            .with_time(Duration::from_secs(10))
+            .with_interval(Duration::from_secs(10)),
+    )?;
+
+    // Resolve address and convert to SockAddr
+    let socket_address = format!("{}:{}", address.as_str(), https_port)
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Failed to resolve address"))?;
+    let sock_addr = socket2::SockAddr::from(socket_address);
+
+    // Connect and convert to Tokio TcpStream.parse()?
+    socket.connect(&sock_addr)?;
+    let tcp_stream = TcpStream::from_std(socket.into())?;
+    let stream_connector = TlsConnector::from(connector);
+
+    // Apply TLS wrapping
+    let tls_stream = stream_connector
+        .connect(address.as_str(), tcp_stream)
+        .await?;
+
+    //Config to ensure the correct max frame size is enforced, related to issue #56
+    let conf = WebSocketConfig {
+        max_frame_size: Some(0x210000),
+        ..WebSocketConfig::default()
+    };
+
+    let (ws_stream, _) = client_async_with_config(
+        ws_url,
+        tls_stream,
+        Some(conf),
+        //Some(tokio_tungstenite::Connector::NativeTls(connector)),
+    )
+        .await?;
 
     Ok(ws_stream)
 }
@@ -105,27 +146,35 @@ fn get_certs() -> Result<Vec<Certificate>> {
 fn get_handle_for_ws_listener(
     mut sock: Arc<Mutex<StreamHandler>>,
 ) -> (
-    Unconstrained<impl Future<Output = ()> + Sized>,
+    // Unconstrained<impl Future<Output=()> + Sized>,
+    std::thread::JoinHandle<()>,
     mpsc::Receiver<Message>,
 ) {
-    let (tx, rx) = mpsc::channel::<Message>();
-    let hand = tokio::task::unconstrained(async move {
-        // Lock the socket handler asynchronously
-        while let Ok(msg) = sock.lock().await.stream.next().await.unwrap() {
-            match msg {
-                Message::Close(m) => {
-                    break;
-                }
-                _ => {
-                    if let Err(e) = tx.send(msg) {
+    println!("Entered handle function");
+    let (mut tx, mut rx) = mpsc::channel::<Message>();
+    let handle = Handle::current();
+    let mtx = tx.clone();
+
+    let hand = std::thread::spawn(move || {
+        handle.block_on(async move {
+            // println!("Entered async handler");
+            // Lock the socket handler asynchronously
+            while let Ok(msg) = sock.lock().await.stream.next().await.unwrap() {
+                match msg {
+                    Message::Close(m) => {
                         break;
+                    }
+                    _ => {
+                        if let Err(e) = tx.send(msg) {
+                            break;
+                        }
+                        std::thread::yield_now();
                     }
                 }
             }
-        }
-        std::thread::yield_now();
+            std::thread::yield_now();
+        })
     });
-
     (hand, rx)
 }
 
@@ -143,13 +192,23 @@ mod tests {
     use std::task::{Context, Poll};
     use std::thread;
     use std::thread::{sleep, yield_now};
-    use std::time::Duration;
+    use std::time::{Duration, UNIX_EPOCH};
     use tokio::io::AsyncReadExt;
 
     #[tokio::test]
     async fn test_websocket() {
         dotenv::dotenv().ok();
         let handler = WebsocketHandler::try_new().await.unwrap();
+        let hand = handler.socket.clone();
+
+        // handler.send_message(Message::Text(format!(
+        //     "Hello World! {}",
+        //     SystemTime::now()
+        //         .duration_since(std::time::UNIX_EPOCH)
+        //         .unwrap()
+        //         .as_secs()
+        // )));
+
         handler
             .socket
             .try_lock()
@@ -182,14 +241,10 @@ mod tests {
             .await
             .unwrap();
 
-        let sock = handler.socket.clone();
+        let (x, y) = get_handle_for_ws_listener(hand);
 
-        let (x, y) = get_handle_for_ws_listener(sock);
+        sleep(Duration::from_millis(100));
 
-        //Sleeps to allow the server to respond
-        sleep(Duration::from_millis(50));
-
-        x.now_or_never();
         while let Ok(msg) = y.try_recv() {
             match msg {
                 Message::Text(msg) => println!("{}", msg),
