@@ -74,6 +74,7 @@ async fn handle_put_registration<T: SignalDatabase>(
                 0,
                 "no token".as_bytes().to_vec(),
                 "salt".to_owned(),
+                1u32,
             ),
             DevicePreKeyBundle {
                 aci_signed_pre_key: registration.aci_signed_pre_key().to_owned(),

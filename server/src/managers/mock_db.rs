@@ -22,6 +22,21 @@ pub struct MockDB {}
 #[cfg(test)]
 #[async_trait]
 impl SignalDatabase for MockDB {
+    async fn store_signed_pre_key(
+        &self,
+        spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()> {
+        todo!()
+    }
+
+    async fn store_pq_signed_pre_key(
+        &self,
+        pq_spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()> {
+        todo!()
+    }
     async fn add_device(&self, service_id: &ServiceId, device: &Device) -> Result<()> {
         todo!()
     }
@@ -32,21 +47,6 @@ impl SignalDatabase for MockDB {
         todo!()
     }
     async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()> {
-        todo!()
-    }
-    async fn store_aci_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
-        todo!()
-    }
-
-    async fn store_pni_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()> {
-        todo!()
-    }
-
-    async fn store_pq_aci_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
-        todo!()
-    }
-
-    async fn store_pq_pni_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()> {
         todo!()
     }
 

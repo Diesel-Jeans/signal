@@ -4,7 +4,7 @@ use common::signal_protobuf::{
     envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
-use libsignal_core::ProtocolAddress;
+use libsignal_core::{ProtocolAddress, ServiceIdKind};
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -70,7 +70,7 @@ impl<T: WSStream + Debug> WebSocketConnection<T> {
 
     pub fn protocol_address(&self) -> ProtocolAddress {
         match &self.identity {
-            UserIdentity::AuthenticatedDevice(x) => x.get_protocol_address(true),
+            UserIdentity::AuthenticatedDevice(x) => x.get_protocol_address(ServiceIdKind::Aci),
             UserIdentity::ProtocolAddress(y) => y.clone(),
         }
     }

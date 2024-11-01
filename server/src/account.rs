@@ -1,6 +1,6 @@
 use anyhow::Result;
 use common::web_api::{AccountAttributes, UploadSignedPreKey};
-use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
+use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKind};
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
 
@@ -130,6 +130,7 @@ pub struct Device {
     created: u32,
     auth_token: Vec<u8>,
     salt: String,
+    registration_id: u32,
 }
 
 impl Device {
@@ -140,6 +141,7 @@ impl Device {
         created: u32,
         auth_token: Vec<u8>,
         salt: String,
+        registration_id: u32,
     ) -> Self {
         Self {
             device_id,
@@ -148,6 +150,7 @@ impl Device {
             created,
             auth_token,
             salt,
+            registration_id,
         }
     }
     pub fn device_id(&self) -> DeviceId {
@@ -170,6 +173,10 @@ impl Device {
     pub fn salt(&self) -> &String {
         &self.salt
     }
+
+    pub fn registration_id(&self) -> u32 {
+        self.registration_id
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -191,12 +198,11 @@ impl AuthenticatedDevice {
         &self.device
     }
 
-    pub fn get_protocol_address(&self, is_aci: bool) -> ProtocolAddress {
+    pub fn get_protocol_address(&self, kind: ServiceIdKind) -> ProtocolAddress {
         ProtocolAddress::new(
-            if is_aci {
-                self.account().aci.service_id_string()
-            } else {
-                self.account().pni.service_id_string()
+            match kind {
+                ServiceIdKind::Aci => self.account().aci.service_id_string(),
+                ServiceIdKind::Pni => self.account().pni.service_id_string(),
             },
             self.device().device_id(),
         )
