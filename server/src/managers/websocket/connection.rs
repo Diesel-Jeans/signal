@@ -105,12 +105,9 @@ impl <T: WSStream + Debug> WebSocketConnection<T> {
     }
 
     pub async fn close(&mut self) {
-        let socket = if let ConnectionState::Active(x) = std::mem::replace(&mut self.ws, ConnectionState::Closed) {
-            x
-        } else {
-            return; 
-        };
-        socket.close().await;
+        if let ConnectionState::Active(socket) = std::mem::replace(&mut self.ws, ConnectionState::Closed) {
+            socket.close().await;
+        }
     }
 
     pub async fn close_reason(&mut self, code: u16, reason: &str) -> Result<(), String>{

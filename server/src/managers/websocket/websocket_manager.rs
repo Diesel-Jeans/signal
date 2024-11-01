@@ -98,7 +98,6 @@ impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
         self.sockets.lock().await.insert(address.clone(), connection.clone());
         let mut mgr = self.clone();
         
-        let protocol_address = address.clone();
         tokio::spawn(async move {
             let connection = connection.clone();
             let addr = connection.lock().await.socket_address();
@@ -111,19 +110,17 @@ impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
                     _ => continue // did not receive message in time, release and let others access the connection
                 };
 
-                let res = if let Some(x) = msg_opt{
-                    x
-                } else{
-                    ws_guard.close().await;
-                    break;
-                };
-                let msg = match res {
-                    Err(x) => {
+                let msg = match msg_opt {
+                    Some(Ok(y)) => y,
+                    Some(Err(x)) => {
                         println!("WebSocketManager recv ERROR: {}", x);
                         ws_guard.close().await;
                         break;
                     },
-                    Ok(y) => y
+                    None => {
+                        ws_guard.close().await;
+                        break;
+                    }
                 };
 
                 match msg {
@@ -151,7 +148,7 @@ impl <T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
                     _ => {}
                 }
             } 
-            match mgr.remove(&protocol_address).await {
+            match mgr.remove(&address).await {
                 None => println!("WebSocketManager: Client was already removed from Manager!"),
                 _ => {}
             };
@@ -360,6 +357,7 @@ pub(crate) mod test {
         assert!(ws.lock().await.is_active());
 
         // TODO: check that response is ok
+        todo!()
     }
 
 

@@ -22,7 +22,7 @@ use super::mock_db::MockDB;
 #[derive(Clone, Debug)]
 pub struct SignalServerState<T: SignalDatabase> {
     db: T,
-    socket_manager: WebSocketManager<WebSocket>,
+    websocket_manager: WebSocketManager<WebSocket>,
     account_manager: AccountManager,
     key_manager: KeyManager,
 }
@@ -32,7 +32,7 @@ impl<T: SignalDatabase> SignalServerState<T> {
         self.db.clone()
     }
     pub fn websocket_manager(&self) -> &WebSocketManager<WebSocket> {
-        &self.socket_manager
+        &self.websocket_manager
     }
     pub fn account_manager(&self) -> &AccountManager {
         &self.account_manager
@@ -47,7 +47,7 @@ impl SignalServerState<MockDB>{
     pub fn new() -> Self {
         Self {
             db: MockDB{},
-            socket_manager: WebSocketManager::new(),
+            websocket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),
         }
@@ -58,7 +58,7 @@ impl SignalServerState<InMemorySignalDatabase> {
     fn new() -> Self {
         Self {
             db: InMemorySignalDatabase::new(),
-            socket_manager: WebSocketManager::new(),
+            websocket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),
         }
@@ -71,7 +71,7 @@ impl SignalServerState<PostgresDatabase> {
             db: PostgresDatabase::connect()
                 .await
                 .expect("Failed to connect to the database."),
-            socket_manager: WebSocketManager::new(),
+            websocket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),
         }
