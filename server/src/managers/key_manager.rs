@@ -15,7 +15,7 @@ use common::{
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct KeyManager {}
 
 impl KeyManager {

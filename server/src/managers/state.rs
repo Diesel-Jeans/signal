@@ -4,7 +4,6 @@ use crate::{
     error::ApiError,
     in_memory_db::InMemorySignalDatabase,
     postgres::PostgresDatabase,
-    socket::SocketManager,
 };
 use anyhow::Result;
 use common::web_api::{
@@ -14,13 +13,19 @@ use common::web_api::{
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKind};
 use libsignal_protocol::IdentityKey;
 
-use super::{account_manager::AccountManager, key_manager::KeyManager};
+use super::{
+    account_manager::AccountManager, key_manager::KeyManager,
+    websocket::websocket_manager::WebSocketManager,
+};
 use axum::extract::ws::WebSocket;
+
+#[cfg(test)]
+use super::mock_db::MockDB;
 
 #[derive(Clone, Debug)]
 pub struct SignalServerState<T: SignalDatabase> {
     db: T,
-    socket_manager: SocketManager<WebSocket>,
+    websocket_manager: WebSocketManager<WebSocket>,
     account_manager: AccountManager,
     key_manager: KeyManager,
 }
@@ -29,8 +34,8 @@ impl<T: SignalDatabase> SignalServerState<T> {
     pub(self) fn database(&self) -> T {
         self.db.clone()
     }
-    pub fn socket_manager(&self) -> &SocketManager<WebSocket> {
-        &self.socket_manager
+    pub fn websocket_manager(&self) -> &WebSocketManager<WebSocket> {
+        &self.websocket_manager
     }
     pub fn account_manager(&self) -> &AccountManager {
         &self.account_manager
@@ -40,11 +45,23 @@ impl<T: SignalDatabase> SignalServerState<T> {
     }
 }
 
+#[cfg(test)]
+impl SignalServerState<MockDB> {
+    pub fn new() -> Self {
+        Self {
+            db: MockDB {},
+            websocket_manager: WebSocketManager::new(),
+            account_manager: AccountManager::new(),
+            key_manager: KeyManager::new(),
+        }
+    }
+}
+
 impl SignalServerState<InMemorySignalDatabase> {
     fn new() -> Self {
         Self {
             db: InMemorySignalDatabase::new(),
-            socket_manager: SocketManager::new(),
+            websocket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),
         }
@@ -57,7 +74,7 @@ impl SignalServerState<PostgresDatabase> {
             db: PostgresDatabase::connect()
                 .await
                 .expect("Failed to connect to the database."),
-            socket_manager: SocketManager::new(),
+            websocket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),
         }

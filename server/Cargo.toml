@@ -9,7 +9,7 @@ libsignal-protocol = { git = "https://github.com/Diesel-Jeans/libsignal.git", ve
 
 common = { path = "../common" }
 tokio = { version = "1.40.0", features = ["full"] }
-axum = { version = "0.7.6", features = ["macros", "ws"] }
+axum = { version = "0.7.6", features = ["macros", "ws", "query"] }
 axum-extra = {version = "0.9.4", features = ["typed-header"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 tokio-tungstenite = "0.24.0"

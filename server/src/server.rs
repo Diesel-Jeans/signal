@@ -3,6 +3,7 @@ use crate::database::SignalDatabase;
 use crate::error::ApiError;
 use crate::in_memory_db::InMemorySignalDatabase;
 use crate::managers::state::SignalServerState;
+use crate::managers::websocket::connection::{UserIdentity, WebSocketConnection};
 use crate::postgres::PostgresDatabase;
 use anyhow::Result;
 use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
@@ -27,7 +28,6 @@ use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
 use crate::message_cache::MessageCache;
-use crate::socket::{SocketManager, ToEnvelope};
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
@@ -250,11 +250,17 @@ async fn create_websocket_endpoint(
     };
     println!("`{user_agent}` at {addr} connected.");
     ws.on_upgrade(move |socket| {
-        let mut socket_manager = state.socket_manager().clone();
+        let mut wmgr = state.websocket_manager().clone();
         async move {
-            socket_manager
-                .handle_socket(authenticated_device, socket, addr)
-                .await;
+            wmgr.insert(
+                WebSocketConnection::new(
+                    UserIdentity::AuthenticatedDevice(authenticated_device),
+                    addr,
+                    socket,
+                ),
+                state,
+            )
+            .await
         }
     })
 }

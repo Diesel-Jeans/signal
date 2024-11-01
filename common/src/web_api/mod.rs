@@ -393,10 +393,10 @@ impl PreKeyResponseItem {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SignalMessages {
-    pub destination: uuid::Uuid,
-    pub timestamp: u64,
     pub messages: Vec<SignalMessage>,
     pub online: bool,
+    pub urgent: bool,
+    pub timestamp: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
