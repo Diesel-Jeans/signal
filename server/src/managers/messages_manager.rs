@@ -1,18 +1,26 @@
 use crate::database::SignalDatabase;
-use crate::message_cache::{MessageCache, WebsocketConnection};
+use crate::message_cache::{MessageAvailabilityListener, MessageCache};
 use crate::postgres::PostgresDatabase;
 use anyhow::{Ok, Result};
 use common::signal_protobuf::{envelope, Envelope};
-use libsignal_core::DeviceId;
+use libsignal_core::{DeviceId, ProtocolAddress};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub struct MessagesManager {
-    message_cache: MessageCache,
-    // message_db: PostgresDatabase,
+pub struct MessagesManager<T, U>
+where
+    T: SignalDatabase,
+    U: MessageAvailabilityListener,
+{
+    message_db: T,
+    message_cache: MessageCache<U>,
 }
 
-impl MessagesManager {
+impl<T, U> MessagesManager<T, U>
+where
+    T: SignalDatabase,
+    U: MessageAvailabilityListener,
+{
     pub async fn insert(
         &self,
         user_id: &str,
@@ -27,22 +35,28 @@ impl MessagesManager {
             .unwrap())
     }
 
-    // both, cached, persisted, none
     pub async fn may_have_persisted_messages(
         &self,
         user_id: &str,
         device_id: DeviceId,
     ) -> Result<(bool, &str)> {
         let cache_has_messages = self.message_cache.has_messages(user_id, device_id).await?;
+        let db_has_messages = self.has_messages(user_id, device_id).await?;
 
-        // TODO: check if persisted in DB
-        // let db_has_messages = self.messages_db.has_messages(user_id, device_id).await?;
+        // assert_eq!(cache_has_messages, true);
+        // assert_eq!(db_has_messages, true);
 
-        if cache_has_messages {
-            Ok((cache_has_messages, "cached"))
+        let outcome = if (cache_has_messages && db_has_messages) {
+            "both"
+        } else if (cache_has_messages) {
+            "cached"
+        } else if (db_has_messages) {
+            "persisted"
         } else {
-            Ok((cache_has_messages, "none"))
-        }
+            "none"
+        };
+
+        Ok((cache_has_messages || db_has_messages, outcome))
     }
 
     pub async fn get_messages_for_device(
@@ -103,7 +117,7 @@ impl MessagesManager {
         &mut self,
         user_id: &str,
         device_id: DeviceId,
-        listener: Arc<Mutex<WebsocketConnection>>,
+        listener: Arc<Mutex<U>>,
     ) {
         self.message_cache
             .add_message_availability_listener(user_id, device_id, listener);
@@ -115,48 +129,133 @@ impl MessagesManager {
     }
 }
 
+impl<T, U> MessagesManager<T, U>
+where
+    T: SignalDatabase,
+    U: MessageAvailabilityListener,
+{
+    async fn has_messages(&self, user_id: &str, device_id: DeviceId) -> Result<bool> {
+        let address = ProtocolAddress::new(user_id.to_string(), device_id);
+        let count = self.message_db.has_messages(&address).await?;
+        Ok(count > 0)
+    }
+}
+
 #[cfg(test)]
 mod message_manager_tests {
+    use std::{default, string};
+
+    use crate::account::{self, Account, AuthenticatedDevice, Device};
+    use crate::message_cache::message_cache_tests::MockWebSocketConnection;
     use crate::message_cache::MessageCache;
+    use crate::postgres::PostgresDatabase;
     use anyhow::Result;
+    use common::web_api::{AccountAttributes, DeviceCapabilities};
     use deadpool_redis::redis::cmd;
+    use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
+    use libsignal_protocol::{IdentityKey, PublicKey};
     use serial_test::serial;
     use uuid::Uuid;
 
     use super::*;
 
-    async fn init_manager() -> Result<MessagesManager> {
-        Ok(MessagesManager {
-            message_cache: MessageCache::connect().await.unwrap(),
-        })
+    async fn init_manager() -> Result<MessagesManager<PostgresDatabase, MockWebSocketConnection>> {
+        Ok(
+            MessagesManager::<PostgresDatabase, MockWebSocketConnection> {
+                message_cache: MessageCache::connect().await.unwrap(),
+                message_db: PostgresDatabase::connect("DATABASE_URL_TEST".to_string())
+                    .await
+                    .unwrap(),
+            },
+        )
     }
 
-    async fn teardown(msg_manager: MessagesManager) {
+    async fn teardown(msg_manager: &MessagesManager<PostgresDatabase, MockWebSocketConnection>) {
         let mut conn = msg_manager.message_cache.get_connection().await.unwrap();
         cmd("FLUSHALL").query_async::<()>(&mut conn).await.unwrap();
     }
 
-    fn generate_random_envelope(message: &str, uuid: String) -> Envelope {
+    fn generate_random_envelope(account: &Account, message: &str) -> Envelope {
         Envelope {
             content: Some(bincode::serialize(message).unwrap()),
-            server_guid: Some(uuid),
+            server_guid: Some(Uuid::new_v4().to_string()),
+            destination_service_id: Some(account.aci().service_id_string()),
             ..Default::default()
         }
+    }
+
+    fn create_device(device_id: u32, name: &str) -> Device {
+        let last_seen = 0;
+        let created = 0;
+        let auth_token = vec![0];
+        let salt = String::from("salt");
+        return Device::new(
+            device_id.into(),
+            name.to_string(),
+            last_seen,
+            created,
+            auth_token,
+            salt,
+        );
+    }
+
+    fn create_identity_key() -> IdentityKey {
+        let mut identity_key = [0u8; 33];
+        identity_key[0] = 5;
+        return IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap());
+    }
+
+    fn create_account_attributes() -> AccountAttributes {
+        return AccountAttributes {
+            fetches_messages: true,
+            registration_id: 0,
+            pni_registration_id: 0,
+            capabilities: DeviceCapabilities {
+                storage: true,
+                transfer: true,
+                payment_activation: true,
+                delete_sync: true,
+                versioned_expiration_timer: true,
+            },
+            unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
+        };
+    }
+
+    fn create_account() -> Account {
+        let pni = Pni::from(Uuid::new_v4());
+        let device = create_device(0, "Alice");
+        let pni_identity_key = create_identity_key();
+        let aci_identity_key = create_identity_key();
+        let phone_number = "420-1337-69";
+        let account_attr = create_account_attributes();
+        return Account::new(
+            pni,
+            device,
+            pni_identity_key,
+            aci_identity_key,
+            phone_number.to_string(),
+            account_attr,
+        );
     }
 
     #[tokio::test]
     #[serial]
     async fn test_may_have_cached_persisted_messages() {
         let msg_manager = init_manager().await.unwrap();
-
+        let account = create_account();
+        let account_aci = account.aci().service_id_string();
         let user_id = Uuid::new_v4().to_string();
-        let device_id = 1.into();
-        let message_guid = Uuid::new_v4().to_string();
-        let envelope = generate_random_envelope("Hello Bob", message_guid.clone());
+        let device_id = create_device(0, &user_id).device_id();
+        let envelope = generate_random_envelope(&account, "Hello Bob");
 
         msg_manager
             .message_cache
-            .insert(&user_id, device_id, envelope, &message_guid)
+            .insert(
+                &user_id,
+                device_id,
+                envelope.clone(),
+                envelope.server_guid(),
+            )
             .await;
 
         let result = msg_manager
@@ -164,7 +263,87 @@ mod message_manager_tests {
             .await
             .unwrap();
 
+        teardown(&msg_manager);
+
         assert_eq!(result, (true, "cached"));
-        teardown(msg_manager);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_may_have_both_cached_and_db_persisted_messages() {
+        let msg_manager = init_manager().await.unwrap();
+        let account = create_account();
+        let account_aci = account.aci().service_id_string();
+        let user_id = Uuid::new_v4().to_string();
+        let device_id = create_device(0, &user_id).device_id();
+        let envelope = generate_random_envelope(&account, "Hello Bob");
+
+        // Cache
+        msg_manager
+            .message_cache
+            .insert(
+                &account_aci.clone().as_str(),
+                device_id,
+                envelope.clone(),
+                envelope.server_guid(),
+            )
+            .await;
+
+        // DB
+        msg_manager.message_db.add_account(&account).await.unwrap();
+
+        let address = ProtocolAddress::new(account_aci.clone(), device_id);
+        msg_manager
+            .message_db
+            .push_message_queue(&address, vec![&envelope])
+            .await
+            .unwrap();
+
+        let may_have_messages = msg_manager
+            .may_have_persisted_messages(&account_aci.to_string().as_str(), device_id)
+            .await
+            .unwrap();
+
+        // Teardown DB and cache
+        msg_manager
+            .message_db
+            .delete_account(&ServiceId::Aci(account.aci()))
+            .await
+            .unwrap();
+
+        teardown(&msg_manager);
+
+        assert_eq!(may_have_messages, (true, "both"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_db_msg() {
+        let msg_manager = init_manager().await.unwrap();
+        let account = create_account();
+        let account_aci = account.aci().service_id_string();
+        let user_id = Uuid::new_v4().to_string();
+        let device_id = create_device(0, &user_id).device_id();
+        let envelope = generate_random_envelope(&account, "Hello Bob");
+
+        msg_manager.message_db.add_account(&account).await.unwrap();
+
+        let address = ProtocolAddress::new(account_aci, device_id);
+        msg_manager
+            .message_db
+            .push_message_queue(&address, vec![&envelope])
+            .await
+            .unwrap();
+
+        let count = msg_manager.message_db.has_messages(&address).await.unwrap();
+
+        // Teardown DB
+        msg_manager
+            .message_db
+            .delete_account(&ServiceId::Aci(account.aci()))
+            .await
+            .unwrap();
+
+        assert_eq!(count, 1);
     }
 }
