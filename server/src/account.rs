@@ -190,7 +190,7 @@ impl AuthenticatedDevice {
     pub fn device(&self) -> &Device {
         &self.device
     }
-    
+
     pub fn get_protocol_address(&self, is_aci: bool) -> ProtocolAddress {
         ProtocolAddress::new(
             if is_aci {

@@ -13,7 +13,10 @@ use common::web_api::{
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::IdentityKey;
 
-use super::{account_manager::AccountManager, key_manager::KeyManager, websocket::websocket_manager::WebSocketManager};
+use super::{
+    account_manager::AccountManager, key_manager::KeyManager,
+    websocket::websocket_manager::WebSocketManager,
+};
 use axum::extract::ws::WebSocket;
 
 #[cfg(test)]
@@ -43,10 +46,10 @@ impl<T: SignalDatabase> SignalServerState<T> {
 }
 
 #[cfg(test)]
-impl SignalServerState<MockDB>{
+impl SignalServerState<MockDB> {
     pub fn new() -> Self {
         Self {
-            db: MockDB{},
+            db: MockDB {},
             websocket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),

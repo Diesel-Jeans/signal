@@ -1,17 +1,17 @@
-use std::str::FromStr;
-use serde::Deserialize;
-use url::Url;
 use axum::http::Uri;
-use common::web_api::SignalMessages;
 use common::signal_protobuf::{
-    web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage
+    web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
 };
+use common::web_api::SignalMessages;
 use rand::rngs::OsRng;
 use rand::Rng;
+use serde::Deserialize;
+use std::str::FromStr;
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
+use url::Url;
 
-struct PathExtractor{
-    parts: Vec<String>
+struct PathExtractor {
+    parts: Vec<String>,
 }
 
 // rust does not have variadic templates so therefore we must cope, and extract them one by one
@@ -20,31 +20,42 @@ impl PathExtractor {
         let uri = uri.path();
 
         let mut extractor = Self {
-            parts: uri.split("/").map(String::from).collect()
+            parts: uri.split("/").map(String::from).collect(),
         };
         if extractor.parts.is_empty() {
             return Err("PathExtractor: Is empty!".to_string());
         }
-        if uri.starts_with("/"){
+        if uri.starts_with("/") {
             extractor.parts.remove(0);
         }
         Ok(extractor)
     }
-    pub fn extract<T: FromStr<Err = impl std::fmt::Debug>>(&self, index: usize) -> Result<T, String>{
+    pub fn extract<T: FromStr<Err = impl std::fmt::Debug>>(
+        &self,
+        index: usize,
+    ) -> Result<T, String> {
         if index >= self.parts.len() {
             return Err("PathExtractor: Larger than count".to_string());
         }
         match T::from_str(&self.parts[index]) {
             Ok(x) => Ok(x),
-            Err(_) => Err("failed to convert".to_string())
+            Err(_) => Err("failed to convert".to_string()),
         }
     }
 }
 
-
-pub fn create_response(id: u64, status: u32, message: &str, mut headers: Vec<String>, body: Option<Vec<u8>>) -> WebSocketMessage{
-    if !headers.iter().any(|x| x.starts_with("Content-Length")){
-        headers.push(format!("Content-Length: {}", body.as_ref().map(|v| v.len()).unwrap_or(0)));
+pub fn create_response(
+    id: u64,
+    status: u32,
+    message: &str,
+    mut headers: Vec<String>,
+    body: Option<Vec<u8>>,
+) -> WebSocketMessage {
+    if !headers.iter().any(|x| x.starts_with("Content-Length")) {
+        headers.push(format!(
+            "Content-Length: {}",
+            body.as_ref().map(|v| v.len()).unwrap_or(0)
+        ));
     }
 
     let res = WebSocketResponseMessage {
@@ -52,17 +63,23 @@ pub fn create_response(id: u64, status: u32, message: &str, mut headers: Vec<Str
         status: Some(status),
         message: Some(message.to_string()),
         headers: headers,
-        body: body
+        body: body,
     };
 
     WebSocketMessage {
         r#type: Some(web_socket_message::Type::Response as i32),
         request: None,
-        response: Some(res)
+        response: Some(res),
     }
 }
 
-pub fn create_request(id: u64, verb: &str, path: &str, headers: Vec<String>, body: Option<Vec<u8>>) -> WebSocketMessage{
+pub fn create_request(
+    id: u64,
+    verb: &str,
+    path: &str,
+    headers: Vec<String>,
+    body: Option<Vec<u8>>,
+) -> WebSocketMessage {
     let req = WebSocketRequestMessage {
         verb: Some(verb.to_string()),
         path: Some(path.to_string()),
@@ -73,23 +90,21 @@ pub fn create_request(id: u64, verb: &str, path: &str, headers: Vec<String>, bod
     WebSocketMessage {
         r#type: Some(web_socket_message::Type::Request as i32),
         request: Some(req),
-        response: None
+        response: None,
     }
 }
 
 pub fn unpack_messages(ws_message: WebSocketMessage) -> Result<SignalMessages, String> {
-    let req =  match ws_message.r#type() {
-        web_socket_message::Type::Request => {
-            match ws_message.request {
-                Some(x) => x,
-                None => return Err("Message was not a SignalMessages".to_string())
-            }
+    let req = match ws_message.r#type() {
+        web_socket_message::Type::Request => match ws_message.request {
+            Some(x) => x,
+            None => return Err("Message was not a SignalMessages".to_string()),
         },
-        _ => return Err("Message was not a SignalMessages".to_string())
+        _ => return Err("Message was not a SignalMessages".to_string()),
     };
     let body = match req.body {
         None => return Err("Body was none".to_string()),
-        Some(x) => x
+        Some(x) => x,
     };
 
     let json = match String::from_utf8(body) {
@@ -97,9 +112,9 @@ pub fn unpack_messages(ws_message: WebSocketMessage) -> Result<SignalMessages, S
         Ok(y) => y,
     };
 
-    match serde_json::from_str(&json){
+    match serde_json::from_str(&json) {
         Err(_) => return Err(format!("Failed to convert json to SignalMessages")),
-        Ok(y) => Ok(y)
+        Ok(y) => Ok(y),
     }
 }
 
@@ -110,9 +125,7 @@ pub fn generate_req_id() -> u64 {
 }
 
 pub fn current_millis() -> Result<u128, SystemTimeError> {
-    Ok(SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_millis())
+    Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis())
 }
 
 #[cfg(test)]
@@ -123,17 +136,16 @@ pub(crate) mod test {
     use axum::http::Uri;
     use common::signal_protobuf::web_socket_message;
 
-
     #[test]
-    fn test_path_extractor(){
+    fn test_path_extractor() {
         let uri = Uri::from_str("/a/b/1/true/hello").unwrap();
         let extractor = PathExtractor::new(&uri).unwrap();
 
-        let (x, y, z) = extractor.extract::<u8>(2).and_then(|x, | {
-           extractor.extract::<bool>(3).map(|y|(x, y))
-        }).and_then(|(x,y)|{
-            extractor.extract::<String>(4).map(|z|(x,y,z))
-        }).expect("Expected that 2, 3, 4 were int, bool and string");
+        let (x, y, z) = extractor
+            .extract::<u8>(2)
+            .and_then(|x| extractor.extract::<bool>(3).map(|y| (x, y)))
+            .and_then(|(x, y)| extractor.extract::<String>(4).map(|z| (x, y, z)))
+            .expect("Expected that 2, 3, 4 were int, bool and string");
 
         assert!(x == 1);
         assert!(y);
@@ -141,14 +153,8 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn test_create_response(){
-        let msg = create_response(
-            1, 
-            200, 
-            "OK", 
-            vec!["my-header: ok".to_string()], 
-            None
-        );
+    fn test_create_response() {
+        let msg = create_response(1, 200, "OK", vec!["my-header: ok".to_string()], None);
         assert!(msg.r#type() == web_socket_message::Type::Response);
         let res = msg.response.unwrap();
         assert!(res.id() == 1);
@@ -159,13 +165,14 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn test_create_request(){
+    fn test_create_request() {
         let msg = create_request(
-            1, 
-            "PUT", 
-            "/v1/messages", 
-            vec!["my-header: ok".to_string()], 
-            None);
+            1,
+            "PUT",
+            "/v1/messages",
+            vec!["my-header: ok".to_string()],
+            None,
+        );
         assert!(msg.r#type() == web_socket_message::Type::Request);
         let req = msg.request.unwrap();
         assert!(req.id() == 1);
@@ -176,7 +183,7 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn test_unpack_messages(){
+    fn test_unpack_messages() {
         let msg = r#"
 {
     "messages":[
@@ -194,12 +201,7 @@ pub(crate) mod test {
 "#;
         let b = msg.as_bytes().to_vec();
 
-        let req = create_request(
-            1, 
-            "PUT", 
-            "/v1/messages",
-            vec![], 
-            Some(b));
+        let req = create_request(1, "PUT", "/v1/messages", vec![], Some(b));
 
         let msg = unpack_messages(req).unwrap();
         assert!(msg.online == false);

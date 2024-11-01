@@ -251,7 +251,15 @@ async fn create_websocket_endpoint(
     ws.on_upgrade(move |socket| {
         let mut wmgr = state.websocket_manager().clone();
         async move {
-            wmgr.insert(WebSocketConnection::new(UserIdentity::AuthenticatedDevice(authenticated_device), addr, socket), state).await
+            wmgr.insert(
+                WebSocketConnection::new(
+                    UserIdentity::AuthenticatedDevice(authenticated_device),
+                    addr,
+                    socket,
+                ),
+                state,
+            )
+            .await
         }
     })
 }

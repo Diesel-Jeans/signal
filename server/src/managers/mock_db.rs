@@ -17,7 +17,7 @@ type KeysTable =
 
 #[cfg(test)]
 #[derive(Clone)]
-pub struct MockDB{}
+pub struct MockDB {}
 
 #[cfg(test)]
 #[async_trait]

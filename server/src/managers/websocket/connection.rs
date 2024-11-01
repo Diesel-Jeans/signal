@@ -1,16 +1,16 @@
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::Error;
-use libsignal_core::ProtocolAddress;
-use std::collections::HashSet;
-use std::net::SocketAddr;
-use std::time::SystemTimeError;
-use tokio::sync::{Mutex};
-use std::{collections::HashMap, sync::Arc};
-use std::fmt::Debug;
 use common::signal_protobuf::{
     envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
+use libsignal_core::ProtocolAddress;
+use std::collections::HashSet;
+use std::fmt::Debug;
+use std::net::SocketAddr;
+use std::time::SystemTimeError;
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::Mutex;
 
 use crate::account::AuthenticatedDevice;
 use crate::database::SignalDatabase;
@@ -18,8 +18,7 @@ use crate::managers::state::SignalServerState;
 
 use prost::{bytes::Bytes, Message as PMessage};
 
-
-use super::net_helper::{create_request, generate_req_id, current_millis};
+use super::net_helper::{create_request, current_millis, generate_req_id};
 
 #[async_trait::async_trait]
 pub trait WSStream {
@@ -42,9 +41,9 @@ impl WSStream for WebSocket {
 }
 
 #[derive(Debug)]
-pub enum UserIdentity{
+pub enum UserIdentity {
     ProtocolAddress(ProtocolAddress),
-    AuthenticatedDevice(AuthenticatedDevice)
+    AuthenticatedDevice(AuthenticatedDevice),
 }
 
 #[derive(Debug)]
@@ -55,7 +54,7 @@ pub struct WebSocketConnection<T: WSStream + Debug> {
     pending_requests: HashSet<u64>,
 }
 
-impl <T: WSStream + Debug> WebSocketConnection<T> {
+impl<T: WSStream + Debug> WebSocketConnection<T> {
     pub fn new(identity: UserIdentity, socket_addr: SocketAddr, ws: T) -> Self {
         Self {
             identity: identity,
@@ -65,87 +64,95 @@ impl <T: WSStream + Debug> WebSocketConnection<T> {
         }
     }
 
-    pub fn socket_address(&self) -> SocketAddr{
+    pub fn socket_address(&self) -> SocketAddr {
         self.socket_address.clone()
     }
 
     pub fn protocol_address(&self) -> ProtocolAddress {
         match &self.identity {
             UserIdentity::AuthenticatedDevice(x) => x.get_protocol_address(true),
-            UserIdentity::ProtocolAddress(y) => y.clone()
+            UserIdentity::ProtocolAddress(y) => y.clone(),
         }
     }
 
-    pub async fn send_message(&mut self, mut message: Envelope) -> Result<(), String>{
+    pub async fn send_message(&mut self, mut message: Envelope) -> Result<(), String> {
         let msg = match self.create_message(message) {
             Ok(x) => x,
-            Err(_) => return Err("Time went backwards".to_string())
+            Err(_) => return Err("Time went backwards".to_string()),
         };
-        match self.send(Message::Binary(msg.encode_to_vec())).await{
+        match self.send(Message::Binary(msg.encode_to_vec())).await {
             Ok(_) => Ok(()),
-            Err(x) => Err(format!("{}", x))
+            Err(x) => Err(format!("{}", x)),
         }
     }
 
-    fn create_message(&mut self, mut message: Envelope) -> Result<WebSocketMessage, SystemTimeError> {
+    fn create_message(
+        &mut self,
+        mut message: Envelope,
+    ) -> Result<WebSocketMessage, SystemTimeError> {
         let id = generate_req_id();
         message.ephemeral = Some(false);
         let msg = create_request(
-            id, 
-            "PUT", 
-            "/api/v1/message", 
+            id,
+            "PUT",
+            "/api/v1/message",
             vec![
                 "X-Signal-Key: false".to_string(),
                 format!("X-Signal-Timestamp: {}", current_millis()?),
-            ], 
-            Some(message.encode_to_vec())
+            ],
+            Some(message.encode_to_vec()),
         );
         self.pending_requests.insert(id);
         Ok(msg)
     }
 
     pub async fn close(&mut self) {
-        if let ConnectionState::Active(socket) = std::mem::replace(&mut self.ws, ConnectionState::Closed) {
+        if let ConnectionState::Active(socket) =
+            std::mem::replace(&mut self.ws, ConnectionState::Closed)
+        {
             socket.close().await;
         }
     }
 
-    pub async fn close_reason(&mut self, code: u16, reason: &str) -> Result<(), String>{
+    pub async fn close_reason(&mut self, code: u16, reason: &str) -> Result<(), String> {
         let fut = self.send(Message::Close(Some(CloseFrame {
             code,
             reason: reason.to_string().into(),
         })));
 
-        if let Err(x) = fut.await{
+        if let Err(x) = fut.await {
             return Err(format!("{}", x));
         }
         self.close().await;
         Ok(())
     }
 
-    pub fn is_active(& self) -> bool{
+    pub fn is_active(&self) -> bool {
         self.ws.is_active()
     }
 
     pub async fn recv(&mut self) -> Option<Result<Message, axum::Error>> {
         match self.ws {
             ConnectionState::Active(ref mut socket) => socket.recv().await,
-            ConnectionState::Closed => None
+            ConnectionState::Closed => None,
         }
     }
 
     pub async fn send(&mut self, msg: Message) -> Result<(), axum::Error> {
         match self.ws {
             ConnectionState::Active(ref mut socket) => socket.send(msg).await,
-            ConnectionState::Closed => Err(axum::Error::new("Connection is closed"))
+            ConnectionState::Closed => Err(axum::Error::new("Connection is closed")),
         }
     }
 
-    pub async fn on_receive<U: SignalDatabase>(&mut self,state: SignalServerState<U>, proto_message: WebSocketMessage){
+    pub async fn on_receive<U: SignalDatabase>(
+        &mut self,
+        state: SignalServerState<U>,
+        proto_message: WebSocketMessage,
+    ) {
         todo!()
     }
 }
-
 
 #[derive(Debug)]
 pub enum ConnectionState<T: WSStream> {
@@ -163,15 +170,15 @@ pub type ClientConnection<T> = Arc<Mutex<WebSocketConnection<T>>>;
 pub type ConnectionMap<T> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnection<T>>>>;
 
 #[cfg(test)]
-pub(crate) mod test { 
+pub(crate) mod test {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
-    use common::signal_protobuf::{Envelope, envelope, WebSocketMessage, WebSocketRequestMessage};
+    use crate::managers::websocket::net_helper::{self, unpack_messages};
+    use common::signal_protobuf::{envelope, Envelope, WebSocketMessage, WebSocketRequestMessage};
     use common::web_api::SignalMessages;
     use libsignal_core::ProtocolAddress;
     use sha2::digest::consts::False;
-    use crate::managers::websocket::net_helper::{self, unpack_messages};
 
     use super::{ClientConnection, UserIdentity, WSStream, WebSocketConnection};
     use axum::extract::ws::{CloseFrame, Message};
@@ -179,9 +186,9 @@ pub(crate) mod test {
 
     use tokio::sync::mpsc::{channel, Receiver, Sender};
 
+    use prost::{bytes::Bytes, Message as PMessage};
     use std::sync::Arc;
     use tokio::sync::Mutex;
-    use prost::{bytes::Bytes, Message as PMessage};
 
     #[derive(Debug)]
     pub struct MockSocket {
@@ -223,7 +230,7 @@ pub(crate) mod test {
         }
     }
 
-    pub fn mock_envelope() -> Envelope{
+    pub fn mock_envelope() -> Envelope {
         Envelope {
             r#type: Some(envelope::Type::PlaintextContent as i32),
             source_service_id: Some("aaa".to_string()),
@@ -238,7 +245,7 @@ pub(crate) mod test {
             updated_pni: Some("b?".to_string()),
             story: Some(false),
             report_spam_token: None,
-            shared_mrm_key: None
+            shared_mrm_key: None,
         }
     }
 
@@ -256,7 +263,6 @@ pub(crate) mod test {
         let paddr = ProtocolAddress::new(name.to_string(), device_id.into());
 
         let ws = WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, mock);
-
 
         (ws, sender, receiver)
     }
@@ -276,40 +282,36 @@ pub(crate) mod test {
         sender.send(Ok(Message::Text("hello".to_string()))).await;
 
         match receiver.recv().await.unwrap() {
-            Message::Text(x) => assert!(
-                x == "hello",
-                "Expected 'hello' in test_mock"
-            ),
+            Message::Text(x) => assert!(x == "hello", "Expected 'hello' in test_mock"),
             _ => panic!("Did not receive text message"),
         }
     }
 
     #[tokio::test]
-    async fn test_send_and_recv(){
+    async fn test_send_and_recv() {
         let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
-    
+
         sender.send(Ok(Message::Text("hello".to_string()))).await;
 
         match client.recv().await {
             Some(Ok(Message::Text(x))) => assert!(x == "hello", "message was not hello"),
-            _ => panic!("Unexpected error when receiving msg")
+            _ => panic!("Unexpected error when receiving msg"),
         }
 
         client.send(Message::Text("hello back".to_string())).await;
-        
-        if receiver.is_empty(){
+
+        if receiver.is_empty() {
             panic!("receiver was empty when it was expected not to be")
         }
 
         match receiver.recv().await {
             Some(Message::Text(x)) => assert!(x == "hello back", "message was not 'hello back'"),
-            _ => panic!("Unexpected error when receiving msg")
+            _ => panic!("Unexpected error when receiving msg"),
         }
-
     }
 
     #[tokio::test]
-    async fn test_close(){
+    async fn test_close() {
         let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
 
         assert!(client.is_active());
@@ -318,7 +320,7 @@ pub(crate) mod test {
     }
 
     #[tokio::test]
-    async fn test_close_reason(){
+    async fn test_close_reason() {
         let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
         assert!(client.is_active());
         client.close_reason(666, "test").await;
@@ -329,14 +331,13 @@ pub(crate) mod test {
             Some(Message::Close(Some(x))) => {
                 assert!(x.code == 666);
                 assert!(x.reason == "test");
-            },
-            _ => panic!("Did not receive close frame")
+            }
+            _ => panic!("Did not receive close frame"),
         }
-
     }
 
     #[tokio::test]
-    async fn test_send_message(){
+    async fn test_send_message() {
         let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
         let env = mock_envelope();
         client.send_message(env.clone()).await;
@@ -344,14 +345,15 @@ pub(crate) mod test {
         assert!(!receiver.is_empty());
 
         let msg = match receiver.recv().await {
-            Some(Message::Binary(x)) => WebSocketMessage::decode(Bytes::from(x)).expect("unexpected error in decode websocket message"),
-            _ => panic!("Did not receive close frame")
+            Some(Message::Binary(x)) => WebSocketMessage::decode(Bytes::from(x))
+                .expect("unexpected error in decode websocket message"),
+            _ => panic!("Did not receive close frame"),
         };
 
         assert!(msg.request.is_some());
         assert!(client.pending_requests.len() != 0);
         let req = msg.request.unwrap();
-        
+
         assert!(req.verb.unwrap() == "PUT");
         assert!(req.path.unwrap() == "/api/v1/message");
         assert!(req.headers.len() == 2);
@@ -362,7 +364,7 @@ pub(crate) mod test {
 
     #[ignore = "Not implemented"]
     #[tokio::test]
-    async fn test_on_receive(){
+    async fn test_on_receive() {
         todo!()
     }
 }

@@ -1,6 +1,6 @@
-use common::web_api::{SignalMessage, SignalMessages};
-use common::signal_protobuf::{envelope, Envelope};
 use crate::account::Account;
+use common::signal_protobuf::{envelope, Envelope};
+use common::web_api::{SignalMessage, SignalMessages};
 use libsignal_core::{DeviceId, ServiceId};
 
 pub trait ToEnvelope {
