@@ -43,9 +43,6 @@ where
         let cache_has_messages = self.message_cache.has_messages(user_id, device_id).await?;
         let db_has_messages = self.has_messages(user_id, device_id).await?;
 
-        // assert_eq!(cache_has_messages, true);
-        // assert_eq!(db_has_messages, true);
-
         let outcome = if (cache_has_messages && db_has_messages) {
             "both"
         } else if (cache_has_messages) {
@@ -258,14 +255,49 @@ mod message_manager_tests {
             )
             .await;
 
-        let result = msg_manager
+        let may_have_messages = msg_manager
             .may_have_persisted_messages(&user_id, device_id)
             .await
             .unwrap();
 
         teardown(&msg_manager);
 
-        assert_eq!(result, (true, "cached"));
+        assert_eq!(may_have_messages, (true, "cached"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_may_have_persisted_persisted_messages() {
+        let msg_manager = init_manager().await.unwrap();
+        let account = create_account();
+        let account_aci = account.aci().service_id_string();
+        let user_id = Uuid::new_v4().to_string();
+        let device_id = create_device(0, &user_id).device_id();
+        let envelope = generate_random_envelope(&account, "Hello Bob");
+
+        // DB
+        msg_manager.message_db.add_account(&account).await.unwrap();
+
+        let address = ProtocolAddress::new(account_aci.clone(), device_id);
+        msg_manager
+            .message_db
+            .push_message_queue(&address, vec![&envelope])
+            .await
+            .unwrap();
+
+        let may_have_messages = msg_manager
+            .may_have_persisted_messages(&account_aci.to_string().as_str(), device_id)
+            .await
+            .unwrap();
+
+        // Teardown DB
+        msg_manager
+            .message_db
+            .delete_account(&ServiceId::Aci(account.aci()))
+            .await
+            .unwrap();
+
+        assert_eq!(may_have_messages, (true, "persisted"));
     }
 
     #[tokio::test]
@@ -326,6 +358,7 @@ mod message_manager_tests {
         let device_id = create_device(0, &user_id).device_id();
         let envelope = generate_random_envelope(&account, "Hello Bob");
 
+        // DB
         msg_manager.message_db.add_account(&account).await.unwrap();
 
         let address = ProtocolAddress::new(account_aci, device_id);
