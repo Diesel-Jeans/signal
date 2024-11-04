@@ -30,6 +30,10 @@ impl PostgresDatabase {
         Ok(Self { pool })
     }
 
+    pub fn pool(&self) -> &Pool<Postgres> {
+        &self.pool
+    }
+
     async fn store_aci_signed_pre_key(
         &self,
         spk: &UploadSignedPreKey,
@@ -1760,7 +1764,7 @@ mod db_tests {
             service_id.service_id_string(),
             device_id.to_string()
         )
-        .fetch_one(&db.pool)
+        .fetch_one(db.pool())
         .await
         .map(|row| UploadSignedPreKey {
             key_id: row.key_id.parse().unwrap(),
