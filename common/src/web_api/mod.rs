@@ -295,6 +295,13 @@ impl PreKeyResponse {
     pub fn new(identity_key: IdentityKey, keys: Vec<PreKeyResponseItem>) -> Self {
         Self { identity_key, keys }
     }
+
+    pub fn identity_key(&self) -> &IdentityKey {
+        &self.identity_key
+    }
+    pub fn keys(&self) -> &Vec<PreKeyResponseItem> {
+        &self.keys
+    }
 }
 
 #[derive(Debug)]
@@ -322,6 +329,21 @@ impl PreKeyResponseItem {
             pq_pre_key,
             signed_pre_key,
         }
+    }
+    pub fn device_id(&self) -> &DeviceId {
+        &self.device_id
+    }
+    pub fn registration_id(&self) -> u32 {
+        self.registration_id
+    }
+    pub fn pre_key(&self) -> &UploadPreKey {
+        &self.pre_key
+    }
+    pub fn pq_pre_key(&self) -> &UploadSignedPreKey {
+        &self.pq_pre_key
+    }
+    pub fn signed_pre_key(&self) -> &UploadSignedPreKey {
+        &self.signed_pre_key
     }
 }
 
