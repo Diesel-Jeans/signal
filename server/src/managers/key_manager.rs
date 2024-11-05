@@ -720,7 +720,10 @@ mod key_manager_tests {
             .await
             .unwrap();
 
-        database.delete_account(&ServiceId::Pni(auth_device.account().pni()));
+        database
+            .delete_account(&ServiceId::Pni(auth_device.account().pni()))
+            .await
+            .unwrap();
 
         assert!(res);
     }
