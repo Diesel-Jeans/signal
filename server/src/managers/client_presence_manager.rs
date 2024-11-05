@@ -259,7 +259,7 @@ mod client_presence_manager_test {
             .await
             .evoke_handle_displacement;
 
-        assert_eq!(true, is_handle_displacement_invoked);
+        assert!(is_handle_displacement_invoked);
         teardown(connection);
     }
 
@@ -307,7 +307,7 @@ mod client_presence_manager_test {
             .await
             .evoke_handle_displacement;
 
-        assert_eq!(false, is_handle_displacement_invoked);
+        assert!(!is_handle_displacement_invoked);
 
         teardown(connection);
     }

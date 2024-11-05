@@ -429,7 +429,7 @@ pub mod message_cache_tests {
             .await
             .unwrap();
 
-        assert_eq!(websocket.lock().await.evoked_handle_new_messages, true);
+        assert!(websocket.lock().await.evoked_handle_new_messages);
     }
 
     #[tokio::test]

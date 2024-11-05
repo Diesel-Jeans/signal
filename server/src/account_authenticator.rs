@@ -90,7 +90,7 @@ async fn authenticate_device<T: SignalDatabase>(
         })?
         .to_owned();
 
-    if verify_password(&device.auth_token(), &device.salt(), password).await? {
+    if verify_password(device.auth_token(), device.salt(), password).await? {
         Ok(AuthenticatedDevice::new(account, device))
     } else {
         Err(ApiError {
@@ -100,11 +100,7 @@ async fn authenticate_device<T: SignalDatabase>(
     }
 }
 
-async fn verify_password(
-    auth_token: &Vec<u8>,
-    salt: &str,
-    password: &str,
-) -> Result<bool, ApiError> {
+async fn verify_password(auth_token: &[u8], salt: &str, password: &str) -> Result<bool, ApiError> {
     let password_hash = HKDF_DeriveSecrets(
         32,
         password.as_bytes(),

@@ -42,24 +42,26 @@ pub trait SignalDatabase: Clone {
     /// Send a message to a given [ProtocolAddress].
     async fn push_message_queue(
         &self,
-        address: ProtocolAddress,
+        address: &ProtocolAddress,
         messages: Vec<Envelope>,
     ) -> Result<()>;
 
     /// Retreive a message that was sent to the given [ProtocolAddress].
     async fn pop_msg_queue(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>>;
 
-    /// Stores a single aci signed pre key
-    async fn store_aci_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()>;
+    /// Stores a single signed pre key
+    async fn store_signed_pre_key(
+        &self,
+        spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()>;
 
-    /// Stores a single pni signed pre key
-    async fn store_pni_signed_pre_key(&self, spk: &UploadSignedPreKey) -> Result<()>;
-
-    /// Stores a single pq aci signed pre key
-    async fn store_pq_aci_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()>;
-
-    /// Stores a single pq pni signed pre key
-    async fn store_pq_pni_signed_pre_key(&self, pq_spk: &UploadSignedPreKey) -> Result<()>;
+    /// Stores a single pq signed pre key
+    async fn store_pq_signed_pre_key(
+        &self,
+        pq_spk: &UploadSignedPreKey,
+        address: &ProtocolAddress,
+    ) -> Result<()>;
 
     /// Store the keys that are needed to start a conversation with the device that
     /// corrosponds to the given [ProtocolAddress].

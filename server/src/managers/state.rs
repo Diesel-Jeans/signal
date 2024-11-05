@@ -1,26 +1,30 @@
 use crate::{
-    account::{self, Account, Device},
+    account::{self, Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
     error::ApiError,
-    in_memory_db::InMemorySignalDatabase,
     postgres::PostgresDatabase,
-    socket::SocketManager,
 };
-use anyhow::Result;
+use anyhow::{Ok, Result};
 use common::web_api::{
     AccountAttributes, DevicePreKeyBundle, PreKeyResponse, SetKeyRequest, UploadPreKey,
     UploadSignedPreKey,
 };
-use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
+use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKind};
 use libsignal_protocol::IdentityKey;
 
-use super::{account_manager::AccountManager, key_manager::KeyManager};
+use super::{
+    account_manager::AccountManager, key_manager::KeyManager,
+    websocket::websocket_manager::WebSocketManager,
+};
 use axum::extract::ws::WebSocket;
+
+#[cfg(test)]
+use super::mock_db::MockDB;
 
 #[derive(Clone, Debug)]
 pub struct SignalServerState<T: SignalDatabase> {
     db: T,
-    socket_manager: SocketManager<WebSocket>,
+    websocket_manager: WebSocketManager<WebSocket>,
     account_manager: AccountManager,
     key_manager: KeyManager,
 }
@@ -29,8 +33,8 @@ impl<T: SignalDatabase> SignalServerState<T> {
     pub(self) fn database(&self) -> T {
         self.db.clone()
     }
-    pub fn socket_manager(&self) -> &SocketManager<WebSocket> {
-        &self.socket_manager
+    pub fn websocket_manager(&self) -> &WebSocketManager<WebSocket> {
+        &self.websocket_manager
     }
     pub fn account_manager(&self) -> &AccountManager {
         &self.account_manager
@@ -40,11 +44,12 @@ impl<T: SignalDatabase> SignalServerState<T> {
     }
 }
 
-impl SignalServerState<InMemorySignalDatabase> {
-    fn new() -> Self {
+#[cfg(test)]
+impl SignalServerState<MockDB> {
+    pub fn new() -> Self {
         Self {
-            db: InMemorySignalDatabase::new(),
-            socket_manager: SocketManager::new(),
+            db: MockDB {},
+            websocket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),
         }
@@ -54,10 +59,10 @@ impl SignalServerState<InMemorySignalDatabase> {
 impl SignalServerState<PostgresDatabase> {
     pub async fn new() -> Self {
         Self {
-            db: PostgresDatabase::connect()
+            db: PostgresDatabase::connect("DATABASE_URL".to_string())
                 .await
                 .expect("Failed to connect to the database."),
-            socket_manager: SocketManager::new(),
+            websocket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),
         }
@@ -73,7 +78,7 @@ impl<T: SignalDatabase> SignalServerState<T> {
         pni_identity_key: IdentityKey,
         primary_device: Device,
         key_bundle: DevicePreKeyBundle,
-    ) -> Result<()> {
+    ) -> Result<Account> {
         let device_id = primary_device.device_id();
         let account = self
             .account_manager
@@ -91,7 +96,9 @@ impl<T: SignalDatabase> SignalServerState<T> {
             &key_bundle,
             &ProtocolAddress::new(account.pni().service_id_string(), device_id),
         )
-        .await
+        .await?;
+
+        Ok(account)
     }
 
     pub async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
@@ -142,32 +149,41 @@ impl<T: SignalDatabase> SignalServerState<T> {
 
     pub async fn handle_put_keys(
         &self,
-        address: &ProtocolAddress,
+        auth_device: &AuthenticatedDevice,
         bundle: SetKeyRequest,
+        kind: ServiceIdKind,
     ) -> Result<(), ApiError> {
         self.key_manager
-            .handle_put_keys(&self.db, address, bundle)
+            .handle_put_keys(&self.db, auth_device, bundle, kind)
             .await
     }
 
+    /// * `target_device_id` - device_id must be either a [Some<DeviceId>] or [None] for all devices
     pub async fn handle_get_keys<S: SignalDatabase>(
         &self,
-        service_id: &ServiceId,
-        address_and_registration_ids: Vec<(ProtocolAddress, u32)>,
+        auth_device: &AuthenticatedDevice,
+        target_service_id: ServiceId,
+        target_device_id: Option<DeviceId>,
     ) -> Result<PreKeyResponse, ApiError> {
         self.key_manager
-            .handle_get_keys(&self.db, service_id, address_and_registration_ids)
+            .handle_get_keys(
+                &self.database(),
+                auth_device,
+                target_service_id,
+                target_device_id,
+            )
             .await
     }
 
     pub async fn handle_post_keycheck<S: SignalDatabase>(
         &self,
         service_id: &ServiceId,
-        address: ProtocolAddress,
+        auth_device: &AuthenticatedDevice,
+        kind: ServiceIdKind,
         usr_digest: [u8; 32],
     ) -> Result<bool, ApiError> {
         self.key_manager
-            .handle_post_keycheck(&self.db, service_id, address, usr_digest)
+            .handle_post_keycheck(&self.db, auth_device, kind, usr_digest)
             .await
     }
 
