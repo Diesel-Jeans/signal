@@ -276,7 +276,8 @@ impl Storage for DeviceStorage {
     }
 
     fn set_private_key(&mut self, private_key: PrivateKey) {
-        self.private_key = private_key
+        self.private_key = private_key;
+        self.write();
     }
 
     fn get_public_key(&self) -> &PublicKey {
@@ -284,7 +285,8 @@ impl Storage for DeviceStorage {
     }
 
     fn set_public_key(&mut self, public_key: PublicKey) {
-        self.public_key = public_key
+        self.public_key = public_key;
+        self.write();
     }
 
     fn get_aci_registration_id(&self) -> u32 {
@@ -293,6 +295,7 @@ impl Storage for DeviceStorage {
 
     fn set_aci_registration_id(&mut self, id: u32) {
         self.aci_registration_id = id;
+        self.write();
     }
 
     fn get_pni_registration_id(&self) -> u32 {
@@ -301,5 +304,6 @@ impl Storage for DeviceStorage {
 
     fn set_pni_registration_id(&mut self, id: u32) {
         self.pni_registration_id = id;
+        self.write();
     }
 }
