@@ -10,7 +10,7 @@ libsignal-protocol = { git = "https://github.com/Diesel-Jeans/libsignal.git", ve
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 rand = "0.8.5"
 surf = { version = "2.3.2", features = ["h1-client"] }
-serde = "1.0.210"
+serde = { version = "1.0.210", features = ["derive"] }
 uuid = { version = "1.10.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
 dotenv = "0.15.0"
 anyhow = "1.0.89"
