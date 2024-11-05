@@ -125,4 +125,16 @@ impl SignalDatabase for MockDB {
     ) -> Result<UploadSignedPreKey> {
         todo!()
     }
+
+    async fn count_messages(&self, address: &ProtocolAddress) -> Result<u32> {
+        todo!()
+    }
+
+    async fn get_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
+        todo!()
+    }
+
+    async fn delete_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
+        todo!()
+    }
 }
