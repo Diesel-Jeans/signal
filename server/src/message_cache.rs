@@ -46,7 +46,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         &self,
         user_id: &str,
         device_id: DeviceId,
-        mut envelope: Envelope,
+        envelope: &mut Envelope,
         message_guid: &str,
     ) -> Result<u64> {
         let mut connection = self.pool.get().await?;
@@ -413,8 +413,7 @@ pub mod message_cache_tests {
             MessageCache::connect().await.unwrap();
         let mut connection = message_cache.pool.get().await.unwrap();
         let uuid = generate_uuid();
-        let mut envelope =
-            generate_random_envelope("Hello this is a test of insert()", &uuid);
+        let mut envelope = generate_random_envelope("Hello this is a test of insert()", &uuid);
         let account_id = Uuid::new_v4().to_string();
         let device_id = 1;
 
@@ -425,7 +424,7 @@ pub mod message_cache_tests {
             .await;
 
         let message_id = message_cache
-            .insert(&account_id, device_id.into(), envelope.clone(), &uuid)
+            .insert(&account_id, device_id.into(), &mut envelope, &uuid)
             .await
             .unwrap();
 
@@ -441,14 +440,13 @@ pub mod message_cache_tests {
 
         let uuid = generate_uuid();
         let device_id = 1;
-        let mut envelope =
-            generate_random_envelope("Hello this is a test of insert()", &uuid);
+        let mut envelope = generate_random_envelope("Hello this is a test of insert()", &uuid);
 
         let message_id = message_cache
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c5051",
                 device_id.into(),
-                envelope.clone(),
+                &mut envelope,
                 &uuid,
             )
             .await
@@ -459,7 +457,8 @@ pub mod message_cache_tests {
                 MessageCache::<MockWebSocketConnection>::get_message_queue_key(
                     "b0231ab5-4c7e-40ea-a544-f925c5051",
                     device_id.into(),
-            ))
+                ),
+            )
             .arg(message_id)
             .arg(message_id)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
@@ -483,13 +482,13 @@ pub mod message_cache_tests {
         let msg_guid = generate_uuid();
         let device_id = 1;
         let mut envelope1 = generate_random_envelope("This is a message", &msg_guid);
-        let envelope2 = generate_random_envelope("This is another message", &msg_guid);
+        let mut envelope2 = generate_random_envelope("This is another message", &msg_guid);
 
         let message_id = message_cache
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c5052",
                 device_id.into(),
-                envelope1.clone(),
+                &mut envelope1,
                 &msg_guid,
             )
             .await
@@ -500,7 +499,7 @@ pub mod message_cache_tests {
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c5052",
                 device_id.into(),
-                envelope2.clone(),
+                &mut envelope2,
                 &msg_guid,
             )
             .await
@@ -513,7 +512,8 @@ pub mod message_cache_tests {
                 MessageCache::<MockWebSocketConnection>::get_message_queue_key(
                     "b0231ab5-4c7e-40ea-a544-f925c5052",
                     device_id.into(),
-            ))
+                ),
+            )
             .arg(message_id_2)
             .arg(message_id_2)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
@@ -545,7 +545,7 @@ pub mod message_cache_tests {
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c5053",
                 device_id.into(),
-                envelope1.clone(),
+                &mut envelope1,
                 &generate_uuid(),
             )
             .await
@@ -554,7 +554,7 @@ pub mod message_cache_tests {
             .insert(
                 "b0231ab5-4c7e-40ea-a544-f925c5053",
                 device_id.into(),
-                envelope2.clone(),
+                &mut envelope2,
                 &generate_uuid(),
             )
             .await
@@ -569,7 +569,8 @@ pub mod message_cache_tests {
                 MessageCache::<MockWebSocketConnection>::get_message_queue_key(
                     "b0231ab5-4c7e-40ea-a544-f925c5053",
                     device_id.into(),
-            ))
+                ),
+            )
             .arg(message_id)
             .arg(message_id)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
@@ -581,7 +582,8 @@ pub mod message_cache_tests {
                 MessageCache::<MockWebSocketConnection>::get_message_queue_key(
                     "b0231ab5-4c7e-40ea-a544-f925c5053",
                     device_id.into(),
-            ))
+                ),
+            )
             .arg(message_id_2)
             .arg(message_id_2)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
@@ -608,7 +610,7 @@ pub mod message_cache_tests {
         let mut envelope = generate_random_envelope("This is a test of remove()", &msg_guid);
 
         let message_id = message_cache
-            .insert(user_id, 1.into(), envelope.clone(), &msg_guid)
+            .insert(user_id, 1.into(), &mut envelope, &msg_guid)
             .await
             .unwrap();
 
@@ -635,10 +637,10 @@ pub mod message_cache_tests {
 
         for i in 0..10 {
             let uuid = generate_uuid();
-            let envelope =
+            let mut envelope =
                 generate_random_envelope(&format!("This is message nr. {}", i + 1), &uuid);
             let msg_id = message_cache
-                .insert(user_id.clone(), 1.into(), envelope.clone(), &uuid)
+                .insert(user_id.clone(), 1.into(), &mut envelope, &uuid)
                 .await
                 .unwrap();
             envelopes.push(envelope);
@@ -668,7 +670,7 @@ pub mod message_cache_tests {
         let user_id = "b0231ab5-4c7e-40ea-a544-f925c5051";
         let device_id = 1;
         let msg_guid = generate_uuid();
-        let envelope =
+        let mut envelope =
             generate_random_envelope("Hello this is a test of has_messages()", &msg_guid);
 
         let does_not_has_messages = message_cache
@@ -679,7 +681,7 @@ pub mod message_cache_tests {
         assert!(!does_not_has_messages);
 
         let message_id = message_cache
-            .insert(user_id, device_id.into(), envelope.clone(), &msg_guid)
+            .insert(user_id, device_id.into(), &mut envelope, &msg_guid)
             .await
             .unwrap();
 
@@ -703,10 +705,10 @@ pub mod message_cache_tests {
         let device_id = 1;
         let message_guid = generate_uuid();
 
-        let mut message = generate_random_envelope("Hello this is a test", &message_guid);
+        let mut envelope = generate_random_envelope("Hello this is a test", &message_guid);
 
         let message_id = message_cache
-            .insert(user_id, device_id.into(), message, &message_guid)
+            .insert(user_id, device_id.into(), &mut envelope, &message_guid)
             .await
             .unwrap();
 
