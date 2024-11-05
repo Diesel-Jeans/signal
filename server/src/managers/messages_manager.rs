@@ -110,7 +110,11 @@ where
             .map(|m| m.server_guid().to_string())
             .collect();
 
-        // TODO: store in DB first
+        let address = ProtocolAddress::new(user_id.to_string(), device_id);
+
+        self.message_db
+            .push_message_queue(&address, messages)
+            .await?;
 
         let removed_from_cache = self
             .message_cache
@@ -194,6 +198,7 @@ mod message_manager_tests {
         let created = 0;
         let auth_token = vec![0];
         let salt = String::from("salt");
+        let registration_id = 0;
         return Device::new(
             device_id.into(),
             name.to_string(),
@@ -201,6 +206,7 @@ mod message_manager_tests {
             created,
             auth_token,
             salt,
+            registration_id,
         );
     }
 
@@ -296,7 +302,7 @@ mod message_manager_tests {
 
         msg_manager
             .message_db
-            .push_message_queue(&address, vec![&envelope])
+            .push_message_queue(&address, vec![envelope])
             .await
             .unwrap();
 
@@ -342,7 +348,7 @@ mod message_manager_tests {
 
         msg_manager
             .message_db
-            .push_message_queue(&address, vec![&envelope])
+            .push_message_queue(&address, vec![envelope])
             .await
             .unwrap();
 
@@ -385,7 +391,7 @@ mod message_manager_tests {
 
         msg_manager
             .message_db
-            .push_message_queue(&address, vec![&envelope])
+            .push_message_queue(&address, vec![envelope])
             .await
             .unwrap();
 
@@ -437,7 +443,7 @@ mod message_manager_tests {
 
         msg_manager
             .message_db
-            .push_message_queue(&address, vec![&envelope1, &envelope2])
+            .push_message_queue(&address, vec![envelope1, envelope2])
             .await
             .unwrap();
 
@@ -484,7 +490,7 @@ mod message_manager_tests {
 
         msg_manager
             .message_db
-            .push_message_queue(&address, vec![&envelope])
+            .push_message_queue(&address, vec![envelope])
             .await
             .unwrap();
 
@@ -518,7 +524,7 @@ mod message_manager_tests {
         let msg_manager = init_manager().await.unwrap();
 
         let user_id = Uuid::new_v4().to_string();
-        let device = create_device(0, &user_id);
+        let device = create_device(1, &user_id);
         let device_id = device.device_id();
 
         let account = create_account(device);
@@ -539,12 +545,12 @@ mod message_manager_tests {
 
         msg_manager
             .message_db
-            .push_message_queue(&address, vec![&envelope1, &envelope2])
+            .push_message_queue(&address, vec![envelope1.clone(), envelope2.clone()])
             .await
             .unwrap();
 
         // Act
-        let messages_for_device = msg_manager
+        let messages_for_device_db_and_cache = msg_manager
             .get_messages_for_device(address.name(), address.device_id(), false)
             .await
             .unwrap();
@@ -570,7 +576,68 @@ mod message_manager_tests {
 
         teardown(&msg_manager);
 
-        assert_eq!(messages_for_device.len(), 3);
+        assert_eq!(messages_for_device_db_and_cache.len(), 3);
         assert_eq!(deleted_messages.len(), 3);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_persist_messages() {
+        let msg_manager = init_manager().await.unwrap();
+
+        let user_id = Uuid::new_v4().to_string();
+        let device = create_device(1, &user_id);
+        let device_id = device.device_id();
+
+        let account = create_account(device);
+        let account_aci = account.aci().service_id_string();
+
+        let address = ProtocolAddress::new(account_aci.clone(), device_id);
+
+        let mut envelope1 = generate_random_envelope(&account, "Hello Bob");
+        let mut envelope2 = generate_random_envelope(&account, "How are you?");
+
+        // Cache
+        msg_manager
+            .insert(address.name(), address.device_id(), &mut envelope1)
+            .await;
+
+        msg_manager
+            .insert(address.name(), address.device_id(), &mut envelope2)
+            .await;
+
+        // DB
+        msg_manager.message_db.add_account(&account).await.unwrap();
+
+        // Act
+        let messages_in_cache = msg_manager
+            .get_messages_for_device(address.name(), address.device_id(), true)
+            .await
+            .unwrap();
+
+        let messages_in_db =
+            msg_manager.message_db.get_messages(&address).await.unwrap();
+
+        let count_persisted_in_db = msg_manager
+            .persist_messages(
+                address.name(),
+                address.device_id(),
+                vec![envelope1, envelope2],
+            )
+            .await
+            .unwrap();
+
+        // Teardown DB and cache
+        msg_manager
+            .message_db
+            .delete_account(&ServiceId::Aci(account.aci()))
+            .await
+            .unwrap();
+
+        teardown(&msg_manager);
+
+        assert_eq!(messages_in_cache.len(), 2);
+        assert_eq!(messages_in_db.len(), 0);
+        assert_eq!(count_persisted_in_db, 2);
     }
 }
