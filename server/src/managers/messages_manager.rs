@@ -6,6 +6,7 @@ use common::signal_protobuf::{envelope, Envelope};
 use libsignal_core::{DeviceId, ProtocolAddress};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 pub struct MessagesManager<T, U>
 where
@@ -25,12 +26,13 @@ where
         &self,
         user_id: &str,
         device_id: DeviceId,
-        mut envelope: Envelope,
-        message_guid: &str,
+        envelope: &mut Envelope,
     ) -> Result<u64> {
+        let message_guid = Uuid::new_v4().to_string();
+
         Ok(self
             .message_cache
-            .insert(user_id, device_id, envelope, message_guid)
+            .insert(user_id, device_id, envelope, &message_guid)
             .await
             .unwrap())
     }
@@ -62,14 +64,20 @@ where
         device_id: DeviceId,
         cached_msg_only: bool,
     ) -> Result<Vec<Envelope>> {
+        let address = ProtocolAddress::new(user_id.to_string(), device_id);
+
         let cached_messages = self
             .message_cache
             .get_all_messages(user_id, device_id)
             .await?;
 
-        // TODO: get all DB messages
+        let db_messages = if !cached_msg_only {
+            self.message_db.get_messages(&address).await?
+        } else {
+            vec![]
+        };
 
-        Ok([cached_messages].concat())
+        Ok([cached_messages, db_messages].concat())
     }
 
     pub async fn delete(
@@ -78,14 +86,16 @@ where
         device_id: DeviceId,
         message_guids: Vec<String>,
     ) -> Result<Vec<Envelope>> {
-        let removed_messages = self
+        let address = ProtocolAddress::new(user_id.to_string(), device_id);
+
+        let cache_removed_messages = self
             .message_cache
             .remove(user_id, device_id, message_guids)
             .await?;
 
-        // TODO: deleteMessage in DB
+        let db_removed_messages = self.message_db.delete_messages(&address).await?;
 
-        Ok(removed_messages)
+        Ok([cache_removed_messages, db_removed_messages].concat())
     }
 
     /// Remove messages from cache and store in DB
@@ -133,7 +143,7 @@ where
 {
     async fn has_messages(&self, user_id: &str, device_id: DeviceId) -> Result<bool> {
         let address = ProtocolAddress::new(user_id.to_string(), device_id);
-        let count = self.message_db.has_messages(&address).await?;
+        let count = self.message_db.count_messages(&address).await?;
         Ok(count > 0)
     }
 }
@@ -175,8 +185,6 @@ mod message_manager_tests {
     fn generate_random_envelope(account: &Account, message: &str) -> Envelope {
         Envelope {
             content: Some(bincode::serialize(message).unwrap()),
-            server_guid: Some(Uuid::new_v4().to_string()),
-            destination_service_id: Some(account.aci().service_id_string()),
             ..Default::default()
         }
     }
@@ -218,9 +226,8 @@ mod message_manager_tests {
         };
     }
 
-    fn create_account() -> Account {
+    fn create_account(device: Device) -> Account {
         let pni = Pni::from(Uuid::new_v4());
-        let device = create_device(0, "Alice");
         let pni_identity_key = create_identity_key();
         let aci_identity_key = create_identity_key();
         let phone_number = "420-1337-69";
@@ -239,27 +246,30 @@ mod message_manager_tests {
     #[serial]
     async fn test_may_have_cached_persisted_messages() {
         let msg_manager = init_manager().await.unwrap();
-        let account = create_account();
-        let account_aci = account.aci().service_id_string();
-        let user_id = Uuid::new_v4().to_string();
-        let device_id = create_device(0, &user_id).device_id();
-        let envelope = generate_random_envelope(&account, "Hello Bob");
 
+        let user_id = Uuid::new_v4().to_string();
+        let device = create_device(1, &user_id);
+        let device_id = device.device_id();
+
+        let account = create_account(device);
+        let account_aci = account.aci().service_id_string();
+
+        let address = ProtocolAddress::new(account_aci, device_id);
+
+        let mut envelope = generate_random_envelope(&account, "Hello Bob");
+
+        // Cache
         msg_manager
-            .message_cache
-            .insert(
-                &user_id,
-                device_id,
-                envelope.clone(),
-                envelope.server_guid(),
-            )
+            .insert(address.name(), address.device_id(), &mut envelope)
             .await;
 
+        // Act
         let may_have_messages = msg_manager
-            .may_have_persisted_messages(&user_id, device_id)
+            .may_have_persisted_messages(address.name(), address.device_id())
             .await
             .unwrap();
 
+        // Teardown cache
         teardown(&msg_manager);
 
         assert_eq!(may_have_messages, (true, "cached"));
@@ -269,24 +279,30 @@ mod message_manager_tests {
     #[serial]
     async fn test_may_have_persisted_persisted_messages() {
         let msg_manager = init_manager().await.unwrap();
-        let account = create_account();
-        let account_aci = account.aci().service_id_string();
+
         let user_id = Uuid::new_v4().to_string();
-        let device_id = create_device(0, &user_id).device_id();
+        let device = create_device(1, &user_id);
+        let device_id = device.device_id();
+
+        let account = create_account(device);
+        let account_aci = account.aci().service_id_string();
+
+        let address = ProtocolAddress::new(account_aci, device_id);
+
         let envelope = generate_random_envelope(&account, "Hello Bob");
 
         // DB
         msg_manager.message_db.add_account(&account).await.unwrap();
 
-        let address = ProtocolAddress::new(account_aci.clone(), device_id);
         msg_manager
             .message_db
             .push_message_queue(&address, vec![&envelope])
             .await
             .unwrap();
 
+        // Act
         let may_have_messages = msg_manager
-            .may_have_persisted_messages(&account_aci.to_string().as_str(), device_id)
+            .may_have_persisted_messages(address.name(), address.device_id())
             .await
             .unwrap();
 
@@ -304,35 +320,35 @@ mod message_manager_tests {
     #[serial]
     async fn test_may_have_both_cached_and_db_persisted_messages() {
         let msg_manager = init_manager().await.unwrap();
-        let account = create_account();
-        let account_aci = account.aci().service_id_string();
+
         let user_id = Uuid::new_v4().to_string();
-        let device_id = create_device(0, &user_id).device_id();
-        let envelope = generate_random_envelope(&account, "Hello Bob");
+        let device = create_device(1, &user_id);
+        let device_id = device.device_id();
+
+        let account = create_account(device);
+        let account_aci = account.aci().service_id_string();
+
+        let address = ProtocolAddress::new(account_aci, device_id);
+
+        let mut envelope = generate_random_envelope(&account, "Hello Bob");
 
         // Cache
         msg_manager
-            .message_cache
-            .insert(
-                &account_aci.clone().as_str(),
-                device_id,
-                envelope.clone(),
-                envelope.server_guid(),
-            )
+            .insert(address.name(), address.device_id(), &mut envelope)
             .await;
 
         // DB
         msg_manager.message_db.add_account(&account).await.unwrap();
 
-        let address = ProtocolAddress::new(account_aci.clone(), device_id);
         msg_manager
             .message_db
             .push_message_queue(&address, vec![&envelope])
             .await
             .unwrap();
 
+        // Act
         let may_have_messages = msg_manager
-            .may_have_persisted_messages(&account_aci.to_string().as_str(), device_id)
+            .may_have_persisted_messages(address.name(), address.device_id())
             .await
             .unwrap();
 
@@ -350,25 +366,35 @@ mod message_manager_tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_db_msg() {
+    async fn test_count_messages() {
         let msg_manager = init_manager().await.unwrap();
-        let account = create_account();
-        let account_aci = account.aci().service_id_string();
+
         let user_id = Uuid::new_v4().to_string();
-        let device_id = create_device(0, &user_id).device_id();
+        let device = create_device(1, &user_id);
+        let device_id = device.device_id();
+
+        let account = create_account(device);
+        let account_aci = account.aci().service_id_string();
+
+        let address = ProtocolAddress::new(account_aci, device_id);
+
         let envelope = generate_random_envelope(&account, "Hello Bob");
 
         // DB
         msg_manager.message_db.add_account(&account).await.unwrap();
 
-        let address = ProtocolAddress::new(account_aci, device_id);
         msg_manager
             .message_db
             .push_message_queue(&address, vec![&envelope])
             .await
             .unwrap();
 
-        let count = msg_manager.message_db.has_messages(&address).await.unwrap();
+        // Act
+        let count = msg_manager
+            .message_db
+            .count_messages(&address)
+            .await
+            .unwrap();
 
         // Teardown DB
         msg_manager
@@ -378,5 +404,173 @@ mod message_manager_tests {
             .unwrap();
 
         assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_messages_for_device() {
+        let msg_manager = init_manager().await.unwrap();
+
+        let user_id = Uuid::new_v4().to_string();
+        let device = create_device(0, &user_id);
+        let device_id = device.device_id();
+
+        let account = create_account(device);
+        let account_aci = account.aci().service_id_string();
+
+        let address = ProtocolAddress::new(account_aci, device_id);
+
+        let mut envelope1 = generate_random_envelope(&account, "Hello Bob");
+        let mut envelope2 = generate_random_envelope(&account, "How are you?");
+
+        // Cache
+        msg_manager
+            .insert(address.name(), address.device_id(), &mut envelope1)
+            .await;
+
+        msg_manager
+            .insert(address.name(), address.device_id(), &mut envelope2)
+            .await;
+
+        // DB
+        msg_manager.message_db.add_account(&account).await.unwrap();
+
+        msg_manager
+            .message_db
+            .push_message_queue(&address, vec![&envelope1, &envelope2])
+            .await
+            .unwrap();
+
+        let messages_for_device_cache_and_db = msg_manager
+            .get_messages_for_device(address.name(), address.device_id(), false)
+            .await
+            .unwrap();
+
+        // Teardown DB and cache
+        msg_manager
+            .message_db
+            .delete_account(&ServiceId::Aci(account.aci()))
+            .await
+            .unwrap();
+
+        teardown(&msg_manager);
+
+        assert_eq!(messages_for_device_cache_and_db.len(), 4);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_cache_only_messages_for_device() {
+        let msg_manager = init_manager().await.unwrap();
+
+        let user_id = Uuid::new_v4().to_string();
+        let device = create_device(1, &user_id);
+        let device_id = device.device_id();
+
+        let account = create_account(device);
+        let account_aci = account.aci().service_id_string();
+
+        let address = ProtocolAddress::new(account_aci, device_id);
+
+        let mut envelope = generate_random_envelope(&account, "Hello Bob");
+
+        // Cache
+        msg_manager
+            .insert(address.name(), address.device_id(), &mut envelope)
+            .await;
+
+        // DB
+        msg_manager.message_db.add_account(&account).await.unwrap();
+
+        msg_manager
+            .message_db
+            .push_message_queue(&address, vec![&envelope])
+            .await
+            .unwrap();
+
+        // Act
+        let messages_for_device_cache_only = msg_manager
+            .get_messages_for_device(address.name(), address.device_id(), true)
+            .await
+            .unwrap();
+
+        let messages_for_device_db_and_cache = msg_manager
+            .get_messages_for_device(address.name(), address.device_id(), false)
+            .await
+            .unwrap();
+
+        // Teardown DB and cache
+        msg_manager
+            .message_db
+            .delete_account(&ServiceId::Aci(account.aci()))
+            .await
+            .unwrap();
+
+        teardown(&msg_manager);
+
+        assert_eq!(messages_for_device_cache_only.len(), 1);
+        assert_eq!(messages_for_device_db_and_cache.len(), 2);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_delete_messages() {
+        let msg_manager = init_manager().await.unwrap();
+
+        let user_id = Uuid::new_v4().to_string();
+        let device = create_device(0, &user_id);
+        let device_id = device.device_id();
+
+        let account = create_account(device);
+        let account_aci = account.aci().service_id_string();
+
+        let address = ProtocolAddress::new(account_aci.clone(), device_id);
+
+        let mut envelope1 = generate_random_envelope(&account, "Hello Bob");
+        let mut envelope2 = generate_random_envelope(&account, "How are you?");
+
+        // Cache
+        msg_manager
+            .insert(address.name(), address.device_id(), &mut envelope1)
+            .await;
+
+        // DB
+        msg_manager.message_db.add_account(&account).await.unwrap();
+
+        msg_manager
+            .message_db
+            .push_message_queue(&address, vec![&envelope1, &envelope2])
+            .await
+            .unwrap();
+
+        // Act
+        let messages_for_device = msg_manager
+            .get_messages_for_device(address.name(), address.device_id(), false)
+            .await
+            .unwrap();
+
+        let deleted_messages = msg_manager
+            .delete(
+                address.name(),
+                address.device_id(),
+                vec![
+                    envelope1.server_guid().to_string(),
+                    envelope2.server_guid().to_string(),
+                ],
+            )
+            .await
+            .unwrap();
+
+        // Teardown DB and cache
+        msg_manager
+            .message_db
+            .delete_account(&ServiceId::Aci(account.aci()))
+            .await
+            .unwrap();
+
+        teardown(&msg_manager);
+
+        assert_eq!(messages_for_device.len(), 3);
+        assert_eq!(deleted_messages.len(), 3);
     }
 }
