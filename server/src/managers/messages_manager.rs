@@ -22,28 +22,22 @@ where
     T: SignalDatabase,
     U: MessageAvailabilityListener,
 {
-    pub async fn insert(
-        &self,
-        user_id: &str,
-        device_id: DeviceId,
-        envelope: &mut Envelope,
-    ) -> Result<u64> {
+    pub async fn insert(&self, address: &ProtocolAddress, envelope: &mut Envelope) -> Result<u64> {
         let message_guid = Uuid::new_v4().to_string();
 
         Ok(self
             .message_cache
-            .insert(user_id, device_id, envelope, &message_guid)
+            .insert(address, envelope, &message_guid)
             .await
             .unwrap())
     }
 
     pub async fn may_have_persisted_messages(
         &self,
-        user_id: &str,
-        device_id: DeviceId,
+        address: &ProtocolAddress,
     ) -> Result<(bool, &str)> {
-        let cache_has_messages = self.message_cache.has_messages(user_id, device_id).await?;
-        let db_has_messages = self.has_messages(user_id, device_id).await?;
+        let cache_has_messages = self.message_cache.has_messages(address).await?;
+        let db_has_messages = self.has_messages(address).await?;
 
         let outcome = if (cache_has_messages && db_has_messages) {
             "both"
@@ -60,19 +54,13 @@ where
 
     pub async fn get_messages_for_device(
         &self,
-        user_id: &str,
-        device_id: DeviceId,
+        address: &ProtocolAddress,
         cached_msg_only: bool,
     ) -> Result<Vec<Envelope>> {
-        let address = ProtocolAddress::new(user_id.to_string(), device_id);
-
-        let cached_messages = self
-            .message_cache
-            .get_all_messages(user_id, device_id)
-            .await?;
+        let cached_messages = self.message_cache.get_all_messages(address).await?;
 
         let db_messages = if !cached_msg_only {
-            self.message_db.get_messages(&address).await?
+            self.message_db.get_messages(address).await?
         } else {
             vec![]
         };
@@ -82,18 +70,12 @@ where
 
     pub async fn delete(
         &self,
-        user_id: &str,
-        device_id: DeviceId,
+        address: &ProtocolAddress,
         message_guids: Vec<String>,
     ) -> Result<Vec<Envelope>> {
-        let address = ProtocolAddress::new(user_id.to_string(), device_id);
+        let cache_removed_messages = self.message_cache.remove(address, message_guids).await?;
 
-        let cache_removed_messages = self
-            .message_cache
-            .remove(user_id, device_id, message_guids)
-            .await?;
-
-        let db_removed_messages = self.message_db.delete_messages(&address).await?;
+        let db_removed_messages = self.message_db.delete_messages(address).await?;
 
         Ok([cache_removed_messages, db_removed_messages].concat())
     }
@@ -101,8 +83,7 @@ where
     /// Remove messages from cache and store in DB
     pub async fn persist_messages(
         &self,
-        user_id: &str,
-        device_id: DeviceId,
+        address: &ProtocolAddress,
         messages: Vec<Envelope>,
     ) -> Result<usize> {
         let message_guids: Vec<String> = messages
@@ -110,33 +91,27 @@ where
             .map(|m| m.server_guid().to_string())
             .collect();
 
-        let address = ProtocolAddress::new(user_id.to_string(), device_id);
-
         self.message_db
-            .push_message_queue(&address, messages)
+            .push_message_queue(address, messages)
             .await?;
 
-        let removed_from_cache = self
-            .message_cache
-            .remove(user_id, device_id, message_guids)
-            .await?;
+        let removed_from_cache = self.message_cache.remove(address, message_guids).await?;
 
         Ok(removed_from_cache.len())
     }
 
     pub fn add_message_availability_listener(
         &mut self,
-        user_id: &str,
-        device_id: DeviceId,
+        address: &ProtocolAddress,
         listener: Arc<Mutex<U>>,
     ) {
         self.message_cache
-            .add_message_availability_listener(user_id, device_id, listener);
+            .add_message_availability_listener(address, listener);
     }
 
-    pub fn remove_message_availability_listener(&mut self, user_id: &str, device_id: DeviceId) {
+    pub fn remove_message_availability_listener(&mut self, address: &ProtocolAddress) {
         self.message_cache
-            .remove_message_availability_listener(user_id, device_id);
+            .remove_message_availability_listener(address);
     }
 }
 
@@ -145,9 +120,8 @@ where
     T: SignalDatabase,
     U: MessageAvailabilityListener,
 {
-    async fn has_messages(&self, user_id: &str, device_id: DeviceId) -> Result<bool> {
-        let address = ProtocolAddress::new(user_id.to_string(), device_id);
-        let count = self.message_db.count_messages(&address).await?;
+    async fn has_messages(&self, address: &ProtocolAddress) -> Result<bool> {
+        let count = self.message_db.count_messages(address).await?;
         Ok(count > 0)
     }
 }
@@ -265,13 +239,11 @@ mod message_manager_tests {
         let mut envelope = generate_random_envelope(&account, "Hello Bob");
 
         // Cache
-        msg_manager
-            .insert(address.name(), address.device_id(), &mut envelope)
-            .await;
+        msg_manager.insert(&address, &mut envelope).await;
 
         // Act
         let may_have_messages = msg_manager
-            .may_have_persisted_messages(address.name(), address.device_id())
+            .may_have_persisted_messages(&address)
             .await
             .unwrap();
 
@@ -308,7 +280,7 @@ mod message_manager_tests {
 
         // Act
         let may_have_messages = msg_manager
-            .may_have_persisted_messages(address.name(), address.device_id())
+            .may_have_persisted_messages(&address)
             .await
             .unwrap();
 
@@ -339,9 +311,7 @@ mod message_manager_tests {
         let mut envelope = generate_random_envelope(&account, "Hello Bob");
 
         // Cache
-        msg_manager
-            .insert(address.name(), address.device_id(), &mut envelope)
-            .await;
+        msg_manager.insert(&address, &mut envelope).await;
 
         // DB
         msg_manager.message_db.add_account(&account).await.unwrap();
@@ -354,7 +324,7 @@ mod message_manager_tests {
 
         // Act
         let may_have_messages = msg_manager
-            .may_have_persisted_messages(address.name(), address.device_id())
+            .may_have_persisted_messages(&address)
             .await
             .unwrap();
 
@@ -430,13 +400,9 @@ mod message_manager_tests {
         let mut envelope2 = generate_random_envelope(&account, "How are you?");
 
         // Cache
-        msg_manager
-            .insert(address.name(), address.device_id(), &mut envelope1)
-            .await;
+        msg_manager.insert(&address, &mut envelope1).await;
 
-        msg_manager
-            .insert(address.name(), address.device_id(), &mut envelope2)
-            .await;
+        msg_manager.insert(&address, &mut envelope2).await;
 
         // DB
         msg_manager.message_db.add_account(&account).await.unwrap();
@@ -448,7 +414,7 @@ mod message_manager_tests {
             .unwrap();
 
         let messages_for_device_cache_and_db = msg_manager
-            .get_messages_for_device(address.name(), address.device_id(), false)
+            .get_messages_for_device(&address, false)
             .await
             .unwrap();
 
@@ -481,9 +447,7 @@ mod message_manager_tests {
         let mut envelope = generate_random_envelope(&account, "Hello Bob");
 
         // Cache
-        msg_manager
-            .insert(address.name(), address.device_id(), &mut envelope)
-            .await;
+        msg_manager.insert(&address, &mut envelope).await;
 
         // DB
         msg_manager.message_db.add_account(&account).await.unwrap();
@@ -496,12 +460,12 @@ mod message_manager_tests {
 
         // Act
         let messages_for_device_cache_only = msg_manager
-            .get_messages_for_device(address.name(), address.device_id(), true)
+            .get_messages_for_device(&address, true)
             .await
             .unwrap();
 
         let messages_for_device_db_and_cache = msg_manager
-            .get_messages_for_device(address.name(), address.device_id(), false)
+            .get_messages_for_device(&address, false)
             .await
             .unwrap();
 
@@ -536,9 +500,7 @@ mod message_manager_tests {
         let mut envelope2 = generate_random_envelope(&account, "How are you?");
 
         // Cache
-        msg_manager
-            .insert(address.name(), address.device_id(), &mut envelope1)
-            .await;
+        msg_manager.insert(&address, &mut envelope1).await;
 
         // DB
         msg_manager.message_db.add_account(&account).await.unwrap();
@@ -551,14 +513,13 @@ mod message_manager_tests {
 
         // Act
         let messages_for_device_db_and_cache = msg_manager
-            .get_messages_for_device(address.name(), address.device_id(), false)
+            .get_messages_for_device(&address, false)
             .await
             .unwrap();
 
         let deleted_messages = msg_manager
             .delete(
-                address.name(),
-                address.device_id(),
+                &address,
                 vec![
                     envelope1.server_guid().to_string(),
                     envelope2.server_guid().to_string(),
@@ -598,32 +559,23 @@ mod message_manager_tests {
         let mut envelope2 = generate_random_envelope(&account, "How are you?");
 
         // Cache
-        msg_manager
-            .insert(address.name(), address.device_id(), &mut envelope1)
-            .await;
+        msg_manager.insert(&address, &mut envelope1).await;
 
-        msg_manager
-            .insert(address.name(), address.device_id(), &mut envelope2)
-            .await;
+        msg_manager.insert(&address, &mut envelope2).await;
 
         // DB
         msg_manager.message_db.add_account(&account).await.unwrap();
 
         // Act
         let messages_in_cache = msg_manager
-            .get_messages_for_device(address.name(), address.device_id(), true)
+            .get_messages_for_device(&address, true)
             .await
             .unwrap();
 
-        let messages_in_db =
-            msg_manager.message_db.get_messages(&address).await.unwrap();
+        let messages_in_db = msg_manager.message_db.get_messages(&address).await.unwrap();
 
         let count_persisted_in_db = msg_manager
-            .persist_messages(
-                address.name(),
-                address.device_id(),
-                vec![envelope1, envelope2],
-            )
+            .persist_messages(&address, vec![envelope1, envelope2])
             .await
             .unwrap();
 
