@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::encryption::{decrypt, encrypt};
 use anyhow::Result;
 use common::signal_protobuf::{
@@ -14,9 +15,12 @@ use std::env;
 use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::net::ToSocketAddrs;
+use std::ops::Deref;
+use std::pin::Pin;
+use std::process::Output;
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use surf::http::headers::ToHeaderValues;
 use tokio::net::TcpStream;
 use tokio::runtime::Handle;
@@ -25,11 +29,29 @@ use tokio::task::{JoinHandle, Unconstrained};
 use tokio::*;
 use tokio_native_tls::TlsConnector;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::tungstenite::protocol::{frame, WebSocketConfig};
 use tokio_tungstenite::tungstenite::WebSocket;
 use tokio_tungstenite::*;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use url::Url;
+
+//Constants used by Signal, and therefore also used in our project
+const SECOND: u32 = 1000;
+const MINUTE: u32 = SECOND * 60;
+const HOUR: u32 = MINUTE * 60;
+const DAY: u32 = HOUR * 24;
+const WEEK: u32 = DAY * 7;
+const MONTH: u32 = DAY * 30;
+// 30 seconds + 5 seconds for closing the socket above.
+const KEEPALIVE_INTERVAL_MS: u32 = 30 * SECOND;
+
+// If the machine was in suspended mode for more than 5 minutes - trigger
+// immediate disconnect.
+const STALE_THRESHOLD_MS: u32 = 5 * MINUTE;
+
+// If we don't receive a response to keepalive request within 30 seconds -
+// close the socket.
+const KEEPALIVE_TIMEOUT_MS: u32 = 30 * SECOND;
 
 struct StreamHandler {
     pub stream: WebSocketStream<tokio_native_tls::TlsStream<TcpStream>>,
@@ -42,39 +64,130 @@ impl StreamHandler {
     }
 }
 
+type BoxedFuture = Pin<Box<dyn Future<Output=()> + Send>>;
+
+//Rust can suck my fucking dick. Everything must be wrapped in an Arc because fuck you that's why.
+#[derive(Clone)]
 pub(crate) struct WebsocketHandler {
     pub(crate) socket: Arc<Mutex<StreamHandler>>,
+    handle: Arc<thread::JoinHandle<()>>,
+    rec_channel: Arc<mpsc::Receiver<Message>>,
+    outgoing_id: u32,
+    outgoing_map: Arc<Mutex<HashMap<u32, JoinHandle<()>>>>,
+    incoming_response: Arc<Mutex<HashMap<u32, WebSocketResponseMessage>>>,
+    keepalive_bool: bool,
 }
 impl WebsocketHandler {
     pub async fn try_new() -> Result<WebsocketHandler> {
-        Ok(WebsocketHandler {
-            socket: Arc::new(Mutex::new(StreamHandler::try_new().await?)),
-        })
+        let socket = Arc::new(Mutex::new(StreamHandler::try_new().await?));
+        let (handle, rec_channel) = get_handle_for_ws_listener(socket.clone());
+        rec_channel.
+            Ok(WebsocketHandler {
+                socket,
+                handle: Arc::new(handle),
+                rec_channel: Arc::new(rec_channel),
+                outgoing_id: 0,
+                outgoing_map: Arc::new(Mutex::new(HashMap::new())),
+                keepalive_bool: true,
+                incoming_response: Arc::new(Mutex::new(HashMap::new())),
+            })
     }
 
-    async fn send_message(self, msg: Message) -> Result<()> {
-        let mut guard = self.socket.try_lock()?;
-        guard.stream.send(msg).await?;
-        Ok(())
+    fn get_handle_for_ws_listener(
+        mut sock: Arc<Mutex<StreamHandler>>,
+    ) -> (std::thread::JoinHandle<()>, mpsc::Receiver<Message>) {
+        let (mut tx, mut rx) = mpsc::channel::<Message>();
+        let handle = Handle::current();
+        let mtx = tx.clone();
+
+        let hand = std::thread::spawn(move || {
+            handle.block_on(async move {
+                while let Ok(msg) = sock.lock().await.stream.next().await.unwrap() {
+                    if let Err(e) = tx.send(msg) {
+                        break;
+                    }
+
+                    std::thread::yield_now();
+                }
+            })
+        });
+        (hand, rx)
+    }
+
+    fn on_message(message: Message) {}
+
+
+    //TODO: rename to send_request and ensure it only sends requests.
+    async fn send_request(&mut self, msg: Message) -> Result<(WebSocketResponseMessage)> {
+        let id = self.outgoing_id;
+        let id_string = id.to_string();
+
+        if self.outgoing_map.lock().await.contains_key(&id) {
+            anyhow::bail!("Duplicate outgoing request")
+        }
+
+        self.outgoing_id = id + 1;
+
+        //Make the protobuf message
+
+        //Send the message over ws
+        let mut guard = self.socket.lock().await.stream.send(msg).await?;
+
+        let mut self_clone = self.clone();
+
+        let promise = spawn(async move {
+            if self_clone.keepalive_bool {
+                tokio::time::timeout(Duration::from_secs(KEEPALIVE_TIMEOUT_MS.into()), async {
+                    self_clone.outgoing_map.lock().await.remove(&id);
+                    self_clone.socket.lock().await.stream.send(Message::Close(Some(frame::CloseFrame { code: 3001.into(), reason: "Timed out".into() }))).await;
+                    //TODO: Kill the listener process
+                    anyhow::bail!("Timed out");
+                });
+            }
+            ()
+        });
+
+        //Add future to hashmap
+        self.outgoing_map.lock().await.insert(id, promise);
+
+        promise.await?;
+
+        if let Some(incoming) = self.incoming_response.lock().await.get(&id) {
+            Ok(incoming.clone())
+        } else {
+            anyhow::bail!("Incoming response missing")
+        }
     }
 }
 
-pub(crate) async fn send_ws_message(
-    mut ws_stream: WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
-    msg: String,
-    id: u32,
-    recipient: String,
-) -> Result<()> {
-    let wsrm = WebSocketRequestMessage {
-        verb: Some("PUT".to_owned()),
-        path: Some(("/v1/messages/".to_owned() + &recipient).to_owned()),
-        body: Some(msg.into_bytes()),
-        headers: vec!["".to_string()],
-        id: Some(id.into()),
-    };
-    ws_stream.send(Message::Binary(wsrm.encode_to_vec()))?;
+pub struct KeepAliveOptions {
+    path: Option<String>,
+}
 
-    Ok(())
+pub struct KeepAlive {
+    ws: WebsocketHandler,
+    receiver: Arc<Mutex<mpsc::Receiver<Message>>>,
+    keepalive_options: KeepAliveOptions,
+    path: String,
+    keepalive_timer: Instant,
+    last_alive_at: Instant,
+}
+
+impl KeepAlive {
+    pub fn new() -> KeepAlive {
+        todo!()
+    }
+
+    pub fn reset(mut self) {
+        todo!()
+    }
+
+    //KeepAlive contains two send methods to replicate the functionality of Signal-Desktop to the best of my ability
+    pub async fn super_send(mut self) {}
+
+    pub fn send() {
+        todo!()
+    }
 }
 
 pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocketStream<tokio_native_tls::TlsStream<TcpStream>>> {
@@ -123,13 +236,7 @@ pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocket
         ..WebSocketConfig::default()
     };
 
-    let (ws_stream, _) = client_async_with_config(
-        ws_url,
-        tls_stream,
-        Some(conf),
-        //Some(tokio_tungstenite::Connector::NativeTls(connector)),
-    )
-        .await?;
+    let (ws_stream, _) = client_async_with_config(ws_url, tls_stream, Some(conf)).await?;
 
     Ok(ws_stream)
 }
@@ -145,12 +252,7 @@ fn get_certs() -> Result<Vec<Certificate>> {
 
 fn get_handle_for_ws_listener(
     mut sock: Arc<Mutex<StreamHandler>>,
-) -> (
-    // Unconstrained<impl Future<Output=()> + Sized>,
-    std::thread::JoinHandle<()>,
-    mpsc::Receiver<Message>,
-) {
-    println!("Entered handle function");
+) -> (std::thread::JoinHandle<()>, mpsc::Receiver<Message>) {
     let (mut tx, mut rx) = mpsc::channel::<Message>();
     let handle = Handle::current();
     let mtx = tx.clone();
@@ -179,7 +281,7 @@ fn get_handle_for_ws_listener(
 }
 
 #[cfg(test)]
-mod tests {
+mod wstests {
     use super::*;
     use async_std::prelude::FutureExt as pFutureExt;
     use axum::response::IntoResponseParts;
@@ -198,54 +300,33 @@ mod tests {
     #[tokio::test]
     async fn test_websocket() {
         dotenv::dotenv().ok();
-        let handler = WebsocketHandler::try_new().await.unwrap();
+        let mut handler = WebsocketHandler::try_new().await.unwrap();
         let hand = handler.socket.clone();
 
-        // handler.send_message(Message::Text(format!(
-        //     "Hello World! {}",
-        //     SystemTime::now()
-        //         .duration_since(std::time::UNIX_EPOCH)
-        //         .unwrap()
-        //         .as_secs()
-        // )));
-
         handler
-            .socket
-            .try_lock()
-            .unwrap()
-            .stream
-            .send(Message::Text(format!(
+            .send_request(Message::Text(format!(
                 "Hello World! {}",
                 SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs()
             )))
             .await
             .unwrap();
+
         handler
-            .socket
-            .try_lock()
-            .unwrap()
-            .stream
-            .send(Message::Text("Hello, World!".into()))
+            .send_request(Message::Text("Hello, world!".to_string()))
             .await
             .unwrap();
 
         handler
-            .socket
-            .try_lock()
-            .unwrap()
-            .stream
-            .send(Message::Ping(vec![1, 2, 3].into()))
+            .send_request(Message::Ping(vec![1, 2, 3].into()))
             .await
             .unwrap();
-
-        let (x, y) = get_handle_for_ws_listener(hand);
 
         sleep(Duration::from_millis(100));
 
-        while let Ok(msg) = y.try_recv() {
+        while let Ok(msg) = handler.rec_channel.try_recv() {
             match msg {
                 Message::Text(msg) => println!("{}", msg),
                 Message::Ping(payload) => {
@@ -260,7 +341,6 @@ mod tests {
                         payload.iter().map(|x| x.to_string()).collect::<String>()
                     )
                 }
-
                 _ => println!("Non-text message"),
             }
         }
