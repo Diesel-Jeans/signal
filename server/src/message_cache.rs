@@ -1,5 +1,5 @@
 use anyhow::Result;
-use common::signal_protobuf::Envelope;
+use common::signalservice::Envelope;
 use deadpool_redis::redis::cmd;
 use deadpool_redis::{Config, Runtime};
 use futures_util::task::SpawnExt;

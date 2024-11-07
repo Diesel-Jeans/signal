@@ -1,9 +1,6 @@
 #![allow(unused)]
 pub mod web_api;
 
-pub mod signal_protobuf {
-    tonic::include_proto!("textsecure"); // The string specified here must match the proto package name
-    tonic::include_proto!("signalservice");
-}
+include!(concat!(env!("OUT_DIR"), "/_includes.rs"));
 
 pub mod pre_key;

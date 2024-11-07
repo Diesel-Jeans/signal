@@ -1,5 +1,5 @@
 use axum::http::Uri;
-use common::signal_protobuf::{
+use common::signalservice::{
     web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
 };
 use common::web_api::SignalMessages;
@@ -134,7 +134,7 @@ pub(crate) mod test {
 
     use super::{create_request, create_response, unpack_messages, PathExtractor};
     use axum::http::Uri;
-    use common::signal_protobuf::web_socket_message;
+    use common::signalservice::web_socket_message;
 
     #[test]
     fn test_path_extractor() {

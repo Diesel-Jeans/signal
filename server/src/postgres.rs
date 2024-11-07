@@ -5,7 +5,7 @@ use crate::{
 use anyhow::{anyhow, bail, Result};
 use axum::async_trait;
 use common::{
-    signal_protobuf::Envelope,
+    signalservice::Envelope,
     web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
 };
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
@@ -996,7 +996,7 @@ async fn store_pq_pni_signed_pre_key(
 mod db_tests {
     use anyhow::Result;
     use common::{
-        signal_protobuf::Envelope,
+        signalservice::Envelope,
         web_api::{
             AccountAttributes, DeviceCapabilities, DevicePreKeyBundle, UploadPreKey,
             UploadSignedPreKey,
@@ -1433,7 +1433,7 @@ mod db_tests {
             r#type: Some(0),
             source_service_id: Some(ServiceId::Aci(Aci::from(Uuid::new_v4())).service_id_string()),
             source_device: Some(1),
-            client_timestamp: Some(0),
+            timestamp: Some(0),
             content: Some(bincode::serialize("SECRET_TEXT").unwrap()),
             server_guid: Some("server_guid".to_string()),
             server_timestamp: Some(0),
@@ -1442,8 +1442,7 @@ mod db_tests {
             urgent: Some(true),
             updated_pni: None,
             story: None,
-            report_spam_token: None,
-            shared_mrm_key: None,
+            reporting_token: None,
         };
         let address = ProtocolAddress::new(account.aci().service_id_string(), device_id);
 

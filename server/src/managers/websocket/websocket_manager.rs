@@ -19,7 +19,7 @@ use std::thread::current;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{Mutex, MutexGuard, RwLock};
 
-use common::signal_protobuf::{
+use common::signalservice::{
     envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };

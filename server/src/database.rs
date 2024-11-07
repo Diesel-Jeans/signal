@@ -3,7 +3,7 @@ use std::option;
 use crate::account::{Account, Device};
 use anyhow::Result;
 use axum::async_trait;
-use common::signal_protobuf::Envelope;
+use common::signalservice::Envelope;
 use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use sqlx::Transaction;

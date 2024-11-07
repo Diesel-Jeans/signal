@@ -3,7 +3,7 @@ use crate::database::SignalDatabase;
 use anyhow::{anyhow, Result};
 use axum::async_trait;
 use common::pre_key::PreKeyType;
-use common::signal_protobuf::Envelope;
+use common::signalservice::Envelope;
 use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use std::collections::{HashMap, VecDeque};

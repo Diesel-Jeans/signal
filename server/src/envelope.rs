@@ -1,5 +1,5 @@
 use crate::account::Account;
-use common::signal_protobuf::{envelope, Envelope};
+use common::signalservice::{envelope, Envelope};
 use common::web_api::{SignalMessage, SignalMessages};
 use libsignal_core::{DeviceId, ServiceId};
 

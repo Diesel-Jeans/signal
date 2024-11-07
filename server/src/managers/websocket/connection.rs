@@ -1,6 +1,6 @@
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::Error;
-use common::signal_protobuf::{
+use common::signalservice::{
     envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
@@ -175,7 +175,7 @@ pub(crate) mod test {
     use std::str::FromStr;
 
     use crate::managers::websocket::net_helper::{self, unpack_messages};
-    use common::signal_protobuf::{envelope, Envelope, WebSocketMessage, WebSocketRequestMessage};
+    use common::signalservice::{envelope, Envelope, WebSocketMessage, WebSocketRequestMessage};
     use common::web_api::SignalMessages;
     use libsignal_core::ProtocolAddress;
     use sha2::digest::consts::False;
@@ -235,7 +235,7 @@ pub(crate) mod test {
             r#type: Some(envelope::Type::PlaintextContent as i32),
             source_service_id: Some("aaa".to_string()),
             source_device: Some(1),
-            client_timestamp: Some(1730217386),
+            timestamp: Some(1730217386),
             content: Some("Hello".as_bytes().to_vec()),
             server_guid: Some("a".to_string()),
             server_timestamp: Some(1730217387),
@@ -244,8 +244,7 @@ pub(crate) mod test {
             urgent: Some(true),
             updated_pni: Some("b?".to_string()),
             story: Some(false),
-            report_spam_token: None,
-            shared_mrm_key: None,
+            reporting_token: None,
         }
     }
 

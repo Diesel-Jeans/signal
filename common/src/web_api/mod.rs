@@ -1,5 +1,5 @@
 pub mod authorization;
-use crate::signal_protobuf::Envelope;
+use crate::signalservice::Envelope;
 use anyhow::{anyhow, bail, Error};
 use libsignal_protocol::{
     DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyRecord, ServiceId,

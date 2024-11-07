@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
-use common::signal_protobuf::Envelope;
+use common::signalservice::Envelope;
 use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{
     DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SetKeyRequest, SignalMessages,
