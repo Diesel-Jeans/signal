@@ -2,15 +2,16 @@
 name = "common"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
 prost = "0.13.3"
-tonic = "0.12.3"
 serde = { version = "1.0.210", features = ["derive"] }
 libsignal-protocol = { git = "https://github.com/Diesel-Jeans/libsignal.git", version = "0.1.0" }
 anyhow = "1.0.89"
 uuid = {version = "1.11.0", features = ["serde"] }
 base64 = "0.22.1"
+prost-build = "0.13.3"
 
 [build-dependencies]
-tonic-build = "0.12.3"
+prost-build = "0.13.3"

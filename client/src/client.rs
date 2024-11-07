@@ -1,7 +1,7 @@
 use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use common::{
-    signal_protobuf::WebSocketResponseMessage,
+    signalservice::WebSocketResponseMessage,
     web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse},
 };
 use core::str;

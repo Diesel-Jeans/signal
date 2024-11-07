@@ -6,8 +6,11 @@ use crate::{
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
 use common::{
-    signal_protobuf::{WebSocketRequestMessage, WebSocketResponseMessage},
-    web_api::{authorization::BasicAuthorizationHeader, RegistrationRequest},
+    signalservice::{WebSocketRequestMessage, WebSocketResponseMessage},
+    web_api::{
+        authorization::BasicAuthorizationHeader, AccountAttributes, RegistrationRequest,
+        UploadSignedPreKey,
+    },
 };
 use http_client::h1::H1Client;
 use std::{

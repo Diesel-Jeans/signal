@@ -167,7 +167,7 @@ mod message_persister_tests {
             user::new_account_and_address,
         },
     };
-    use common::signal_protobuf::Envelope;
+    use common::signalservice::Envelope;
     use libsignal_core::ProtocolAddress;
     use redis::cmd;
     use std::{

@@ -920,9 +920,8 @@ dependencies = [
  "base64 0.22.1",
  "libsignal-protocol",
  "prost",
+ "prost-build",
  "serde",
- "tonic",
- "tonic-build",
  "uuid",
 ]
 

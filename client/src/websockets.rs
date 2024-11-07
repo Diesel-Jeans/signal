@@ -1,8 +1,6 @@
 use anyhow::{bail, Result};
 use base64::{engine::general_purpose, Engine as _};
-use common::signal_protobuf::{
-    WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
-};
+use common::signalservice::{WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage};
 use futures_util::{SinkExt, StreamExt};
 use native_tls::{Certificate, TlsConnector as NativeTlsConnector};
 use prost::Message as ProstMessage;

@@ -3,8 +3,8 @@ use crate::{
     message_cache::{MessageAvailabilityListener, MessageCache},
 };
 use anyhow::{Ok, Result};
-use common::signal_protobuf::Envelope;
-use libsignal_core::ProtocolAddress;
+use common::signalservice::{envelope, Envelope};
+use libsignal_core::{DeviceId, ProtocolAddress};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
