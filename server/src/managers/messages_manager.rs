@@ -22,6 +22,7 @@ where
     T: SignalDatabase,
     U: MessageAvailabilityListener,
 {
+    /// Add message to cache
     pub async fn insert(&self, address: &ProtocolAddress, envelope: &mut Envelope) -> Result<u64> {
         let message_guid = Uuid::new_v4().to_string();
 
@@ -32,6 +33,7 @@ where
             .unwrap())
     }
 
+    /// Check if user has persisted messages
     pub async fn may_have_persisted_messages(
         &self,
         address: &ProtocolAddress,
@@ -52,6 +54,7 @@ where
         Ok((cache_has_messages || db_has_messages, outcome))
     }
 
+    /// Get all messages for a user
     pub async fn get_messages_for_device(
         &self,
         address: &ProtocolAddress,
@@ -68,6 +71,7 @@ where
         Ok([cached_messages, db_messages].concat())
     }
 
+    /// Delete messages from cache and DB
     pub async fn delete(
         &self,
         address: &ProtocolAddress,
