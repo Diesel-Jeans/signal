@@ -1,7 +1,7 @@
 #[cfg(test)]
 use crate::test_utils::random_string;
 use anyhow::Result;
-use common::signal_protobuf::Envelope;
+use common::signalservice::Envelope;
 use deadpool_redis::{redis::cmd, Config, Connection, Runtime};
 use libsignal_core::ProtocolAddress;
 use std::{

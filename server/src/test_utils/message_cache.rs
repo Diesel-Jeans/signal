@@ -1,5 +1,5 @@
 use crate::message_cache::MessageAvailabilityListener;
-use common::signal_protobuf::Envelope;
+use common::signalservice::Envelope;
 use redis::cmd;
 use uuid::Uuid;
 
