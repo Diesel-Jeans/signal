@@ -29,8 +29,7 @@ where
         Ok(self
             .message_cache
             .insert(address, envelope, &message_guid)
-            .await
-            .unwrap())
+            .await?)
     }
 
     /// Check if user has persisted messages

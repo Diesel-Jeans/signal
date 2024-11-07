@@ -59,14 +59,14 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 
         let message_guid_exists = cmd("HEXISTS")
             .arg(&queue_metadata_key)
-            .arg(&message_guid)
+            .arg(message_guid)
             .query_async::<u8>(&mut connection)
             .await?;
 
         if (message_guid_exists == 1) {
             let num = cmd("HGET")
                 .arg(&queue_metadata_key)
-                .arg(&message_guid)
+                .arg(message_guid)
                 .query_async::<String>(&mut connection)
                 .await?;
 
@@ -93,7 +93,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 
         cmd("HSET")
             .arg(&queue_metadata_key)
-            .arg(&message_guid)
+            .arg(message_guid)
             .arg(message_id)
             .query_async::<()>(&mut connection)
             .await?;
@@ -669,7 +669,7 @@ pub mod message_cache_tests {
         let message_guid = generate_uuid();
         let mut envelope = generate_random_envelope("Hello this is a test", &message_guid);
 
-        let message_id = message_cache
+        message_cache
             .insert(&address, &mut envelope, &message_guid)
             .await
             .unwrap();
