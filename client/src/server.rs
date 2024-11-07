@@ -1,19 +1,28 @@
+use crate::client::VerifiedSession;
 use crate::contact_manager::Contact;
+use async_native_tls::{Certificate, TlsConnector};
+use common::web_api::authorization::BasicAuthorizationHeader;
+use common::web_api::{AccountAttributes, RegistrationRequest, UploadSignedPreKey};
 use http::StatusCode;
+use http_client::h1::H1Client;
+use libsignal_protocol::IdentityKey;
 use std::fmt::Display;
-use std::io::{Error, ErrorKind};
+use std::io::{BufReader, Error, ErrorKind, Read};
+use std::sync::Arc;
 use std::time::Duration;
+use std::{env, fs};
 use surf::http::convert::json;
-use surf::{http, Client, Config, Response, Url};
+use surf::{http, Client, Config, HttpClient, RequestBuilder, Response, Url};
 use tokio_tungstenite::connect_async;
 
 const CLIENT_URI: &str = "/client";
 const MSG_URI: &str = "v1/messages";
+const REGISTER_URI: &str = "v1/registration";
 const DEVICE_URI: &str = "/device";
 const BUNDLE_URI: &str = "/bundle";
 
 pub struct ServerAPI {
-    pub client: Client,
+    client: Client,
 }
 
 enum ReqType {
@@ -48,7 +57,10 @@ pub trait Server {
     async fn fetch_bundle(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
     async fn register_client(
         &self,
-        client_info: &Contact,
+        phone_number: String,
+        password: String,
+        registration_request: RegistrationRequest,
+        session: Option<&VerifiedSession>,
     ) -> Result<Response, Box<dyn std::error::Error>>;
     async fn register_device(
         &self,
@@ -66,12 +78,12 @@ pub trait Server {
     ) -> Result<Response, Box<dyn std::error::Error>>;
     async fn delete_client(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
     async fn delete_device(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
-    fn new() -> Result<ServerAPI, Box<dyn std::error::Error>>;
+    fn new() -> Self;
 }
 
 impl Server for ServerAPI {
     async fn connect() {
-        let server_url = "ws://127.0.0.1:50051";
+        let server_url = "ws://127.0.0.1:4444";
         let (ws, _) = connect_async(server_url).await.expect("Failed to connect");
 
         println!("connected!");
@@ -93,14 +105,19 @@ impl Server for ServerAPI {
 
     async fn register_client(
         &self,
-        client_info: &Contact,
+        phone_number: String,
+        password: String,
+        registration_request: RegistrationRequest,
+        session: Option<&VerifiedSession>,
     ) -> Result<Response, Box<dyn std::error::Error>> {
-        let payload = json!({
-            "aci": client_info.uuid // TODO: Change this to username or aci when implemented.
-        });
-
-        self.make_request(ReqType::Post(payload), CLIENT_URI.to_string())
-            .await
+        let payload = json!(registration_request);
+        let auth_header = BasicAuthorizationHeader::new(phone_number, 1, password);
+        Ok(self
+            .client
+            .post(REGISTER_URI)
+            .body(payload)
+            .header("Authorization", auth_header.encode())
+            .await?)
     }
 
     async fn register_device(
@@ -112,7 +129,7 @@ impl Server for ServerAPI {
         });
         let uri = format!("{}/{}", DEVICE_URI, client_info.uuid);
 
-        self.make_request(ReqType::Post(payload), uri).await
+        self.make_request(ReqType::Put(payload), uri).await
     }
 
     async fn send_msg(
@@ -158,15 +175,26 @@ impl Server for ServerAPI {
         self.make_request(ReqType::Delete(payload), uri).await
     }
 
-    fn new() -> Result<ServerAPI, Box<dyn std::error::Error>> {
-        let test_client = Config::new()
-            .set_base_url(Url::parse("http://127.0.0.1:50051")?)
-            .set_timeout(Some(Duration::from_secs(5)))
-            .try_into()?;
+    fn new() -> Self {
+        let cert_bytes =
+            fs::read("../server/cert/rootCA.crt").expect("Could not read certificate.");
+        let crt = Certificate::from_pem(&cert_bytes).expect("Could not parse certificate.");
 
-        Ok(ServerAPI {
-            client: test_client,
-        })
+        let address =
+            env::var("SERVER_URL").expect("Could not read SERVER_URL environment variable.");
+
+        let tls_config = Arc::new(TlsConnector::new().add_root_certificate(crt));
+        let http_client: H1Client = http_client::Config::new()
+            .set_timeout(Some(Duration::from_secs(5)))
+            .set_tls_config(Some(tls_config))
+            .try_into()
+            .expect("Could not create HTTP client");
+        let client = Config::new()
+            .set_http_client(http_client)
+            .set_base_url(Url::parse(&address).expect("Could not parse URL for server"))
+            .try_into()
+            .expect("Could not connect to server.");
+        ServerAPI { client }
     }
 }
 impl ServerAPI {

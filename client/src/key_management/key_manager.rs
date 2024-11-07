@@ -1,215 +1,126 @@
-use anyhow::{bail, Result};
-use common::pre_key::PreKey;
-use libsignal_protocol::*;
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use common::pre_key::PreKeyType;
+use libsignal_protocol::{
+    kem, GenericSignedPreKey, IdentityKeyStore, InMemSignalProtocolStore, KeyPair, KyberPreKeyId,
+    KyberPreKeyRecord, KyberPreKeyStore, PreKeyId, PreKeyRecord, PreKeyStore, SignalProtocolError,
+    SignedPreKeyId, SignedPreKeyRecord, SignedPreKeyStore, Timestamp,
+};
 use rand::{CryptoRng, Rng};
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use surf::utils::async_trait;
 
-pub enum KeyType {
-    KemKey(kem::KeyPair),
-    KeyPair(KeyPair),
+pub struct InMemoryKeyManager {
+    store: InMemSignalProtocolStore,
+    key_incrementer_map: HashMap<PreKeyType, u32>,
 }
 
-struct KeyManager {
-    key_incrementer_map: HashMap<PreKey, u32>,
-}
-
-impl KeyManager {
-    pub fn new() -> KeyManager {
+impl InMemoryKeyManager {
+    pub fn new(store: InMemSignalProtocolStore) -> Self {
         Self {
+            store,
             key_incrementer_map: HashMap::from([
-                (PreKey::Signed, 0u32),
-                (PreKey::Kyber, 0u32),
-                (PreKey::OneTime, 0u32),
+                (PreKeyType::Signed, 0u32),
+                (PreKeyType::Kyber, 0u32),
+                (PreKeyType::OneTime, 0u32),
             ]),
         }
     }
-
-    fn get_new_key_id(&mut self, key_type: &PreKey) -> u32 {
-        let id = self.key_incrementer_map.get(key_type).unwrap().clone();
+    fn get_new_key_id(&mut self, key_type: &PreKeyType) -> u32 {
+        let id = *self.key_incrementer_map.get(key_type).unwrap();
         *self.key_incrementer_map.get_mut(key_type).unwrap() += 1u32;
         id
     }
+}
 
-    async fn compute_signature<R: Rng + CryptoRng>(
-        &self,
-        rng: &mut R,
-        store: &InMemSignalProtocolStore,
-        serialized_public_key: Box<[u8]>,
-    ) -> Result<Box<[u8]>> {
-        Ok(store
+type Signature = Box<[u8]>;
+
+#[async_trait(?Send)]
+pub trait KeyManager<Key, KeyId> {
+    async fn store(&mut self, key: &Key) -> Result<(), SignalProtocolError>;
+    async fn generate<R: Rng + CryptoRng>(
+        &mut self,
+        csprng: &mut R,
+    ) -> Result<Key, SignalProtocolError>;
+}
+
+fn time_now() -> Timestamp {
+    Timestamp::from_epoch_millis(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Now is later than epoch")
+            .as_millis()
+            .try_into()
+            .expect("Living in the future is not allowed"),
+    )
+}
+
+#[async_trait(?Send)]
+impl KeyManager<SignedPreKeyRecord, SignedPreKeyId> for InMemoryKeyManager {
+    async fn store(&mut self, key: &SignedPreKeyRecord) -> Result<(), SignalProtocolError> {
+        self.store
+            .save_signed_pre_key(key.id().expect("Can always get ID"), key)
+            .await
+            .map(|_| ())
+    }
+    async fn generate<R: Rng + CryptoRng>(
+        &mut self,
+        csprng: &mut R,
+    ) -> Result<SignedPreKeyRecord, SignalProtocolError> {
+        let signed_pre_key_pair = KeyPair::generate(csprng);
+        let signature = self
+            .store
             .get_identity_key_pair()
             .await?
             .private_key()
-            .calculate_signature(&serialized_public_key, rng)?)
-    }
+            .calculate_signature(&signed_pre_key_pair.public_key.serialize(), csprng)?;
+        let id = self.get_new_key_id(&PreKeyType::Signed).into();
+        let timestamp = time_now();
+        let record = SignedPreKeyRecord::new(id, timestamp, &signed_pre_key_pair, &signature);
 
-    pub async fn generate_key<R: Rng + CryptoRng>(
-        &mut self,
-        mut rng: R,
-        store: &mut InMemSignalProtocolStore,
-        key_type: PreKey,
-    ) -> Result<(KeyType, Option<Box<[u8]>>)> {
-        match key_type {
-            PreKey::Kyber => {
-                let kyper_pre_key_pair = kem::KeyPair::generate(kem::KeyType::Kyber1024);
-                let signature = self
-                    .compute_signature(&mut rng, &store, kyper_pre_key_pair.public_key.serialize())
-                    .await?;
-                let id = self.get_new_key_id(&key_type);
+        self.store.save_signed_pre_key(id, &record).await?;
 
-                store
-                    .save_kyber_pre_key(
-                        id.into(),
-                        &KyberPreKeyRecord::new(
-                            id.into(),
-                            Timestamp::from_epoch_millis(
-                                SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_millis()
-                                    .try_into()?,
-                            ),
-                            &kyper_pre_key_pair,
-                            &signature,
-                        ),
-                    )
-                    .await?;
-
-                Ok((KeyType::KemKey(kyper_pre_key_pair), Some(signature)))
-            }
-            PreKey::Signed => {
-                let signed_pre_key_pair = KeyPair::generate(&mut rng);
-                let signature = self
-                    .compute_signature(&mut rng, &store, signed_pre_key_pair.public_key.serialize())
-                    .await?;
-                let id = self.get_new_key_id(&key_type);
-
-                store
-                    .save_signed_pre_key(
-                        id.into(),
-                        &SignedPreKeyRecord::new(
-                            id.into(),
-                            Timestamp::from_epoch_millis(
-                                SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_millis()
-                                    .try_into()?,
-                            ),
-                            &signed_pre_key_pair,
-                            &signature,
-                        ),
-                    )
-                    .await?;
-
-                Ok((KeyType::KeyPair(signed_pre_key_pair), Some(signature)))
-            }
-            PreKey::OneTime => {
-                let onetime_pre_key_pair = KeyPair::generate(&mut rng);
-                let id = self.get_new_key_id(&key_type);
-
-                store
-                    .save_pre_key(
-                        id.into(),
-                        &PreKeyRecord::new(id.into(), &onetime_pre_key_pair),
-                    )
-                    .await?;
-
-                Ok((KeyType::KeyPair(onetime_pre_key_pair), None))
-            }
-            _ => bail!("Unexpected key"),
-        }
+        Ok(record)
     }
 }
 
-#[cfg(test)]
-mod key_manager_tests {
-    use super::*;
-    use core::panic;
-    use rand::rngs::OsRng;
-
-    fn store(reg: u32) -> InMemSignalProtocolStore {
-        let mut rng = OsRng;
-        let p = KeyPair::generate(&mut rng).into();
-        InMemSignalProtocolStore::new(p, reg).unwrap()
+#[async_trait(?Send)]
+impl KeyManager<KyberPreKeyRecord, KyberPreKeyId> for InMemoryKeyManager {
+    async fn store(&mut self, key: &KyberPreKeyRecord) -> Result<(), SignalProtocolError> {
+        todo!()
     }
+    async fn generate<R: Rng + CryptoRng>(
+        &mut self,
+        csprng: &mut R,
+    ) -> Result<KyberPreKeyRecord, SignalProtocolError> {
+        let id = self.get_new_key_id(&PreKeyType::Kyber).into();
+        let record = KyberPreKeyRecord::generate(
+            kem::KeyType::Kyber1024,
+            id,
+            self.store.get_identity_key_pair().await?.private_key(),
+        )?;
 
-    #[test]
-    fn get_id_test() {
-        let mut manager = KeyManager::new();
-        let id0 = manager.get_new_key_id(&PreKey::OneTime);
-        assert_eq!(id0, 0);
-        let id1 = manager.get_new_key_id(&PreKey::OneTime);
-        assert_eq!(id1, 1);
+        self.store.save_kyber_pre_key(id, &record);
+        Ok(record)
     }
+}
 
-    #[tokio::test]
-    async fn generate_kyper_key() {
-        let rng = OsRng;
-        let mut store = store(0);
-        let mut manager = KeyManager::new();
-        let (key, sign) = manager
-            .generate_key(rng, &mut store, PreKey::Kyber)
-            .await
-            .unwrap();
-
-        assert!(matches!(key, KeyType::KemKey(_)));
-
-        let stored_sign = store
-            .get_kyber_pre_key(store.all_kyber_pre_key_ids().next().unwrap().to_owned())
-            .await
-            .unwrap()
-            .signature()
-            .unwrap();
-
-        assert_eq!(sign.unwrap().to_vec(), stored_sign);
+#[async_trait(?Send)]
+impl KeyManager<PreKeyRecord, PreKeyId> for InMemoryKeyManager {
+    async fn store(&mut self, key: &PreKeyRecord) -> Result<(), SignalProtocolError> {
+        todo!()
     }
+    async fn generate<R: Rng + CryptoRng>(
+        &mut self,
+        csprng: &mut R,
+    ) -> Result<PreKeyRecord, SignalProtocolError> {
+        let id = self.get_new_key_id(&PreKeyType::Kyber).into();
 
-    #[tokio::test]
-    async fn generate_signed_key() {
-        let rng = OsRng;
-        let mut store = store(0);
-        let mut manager = KeyManager::new();
-        let (key, sign) = manager
-            .generate_key(rng, &mut store, PreKey::Signed)
-            .await
-            .unwrap();
-
-        assert!(matches!(key, KeyType::KeyPair(_)));
-
-        let stored_sign = store
-            .get_signed_pre_key(store.all_signed_pre_key_ids().next().unwrap().to_owned())
-            .await
-            .unwrap()
-            .signature()
-            .unwrap();
-
-        assert_eq!(sign.unwrap().to_vec(), stored_sign);
-    }
-
-    #[tokio::test]
-    async fn generate_onetime_key() {
-        let rng = OsRng;
-        let mut store = store(0);
-        let mut manager = KeyManager::new();
-        let (key, _) = manager
-            .generate_key(rng, &mut store, PreKey::OneTime)
-            .await
-            .unwrap();
-
-        let key_pair = if let KeyType::KeyPair(x) = key {
-            x
-        } else {
-            panic!()
-        };
-
-        let stored_key_pair = store
-            .get_pre_key(store.all_pre_key_ids().next().unwrap().to_owned())
-            .await
-            .unwrap()
-            .key_pair()
-            .unwrap();
-        assert_eq!(key_pair.public_key, stored_key_pair.public_key);
+        let key_pair = KeyPair::generate(csprng);
+        let record = PreKeyRecord::new(id, &key_pair);
+        self.store.save_pre_key(id, &record).await?;
+        Ok(record)
     }
 }

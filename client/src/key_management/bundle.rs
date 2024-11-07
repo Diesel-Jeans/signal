@@ -84,22 +84,22 @@ impl KeyBundleContent {
     }
 
     pub fn deserialize(bundle: PrimitiveKeyBundleContent) -> KeyBundleContent {
-        let one_time_key: Option<(PreKeyId, PublicKey)> =
-            if (bundle.onetime_public_key_id.is_none()
-                || bundle.onetime_public_key.is_none()
-                || bundle
-                    .onetime_public_key_id
-                    .expect("One time pre key id is somehow None after a none check - kill me")
-                    == 0)
-            {
-                None
-            } else {
-                Some((
-                    bundle.onetime_public_key_id.expect("").into(),
-                    PublicKey::deserialize(&(*bundle.onetime_public_key.to_owned().expect("")))
-                        .expect(""),
-                ))
-            };
+        let one_time_key: Option<(PreKeyId, PublicKey)> = if (bundle
+            .onetime_public_key_id
+            .is_none()
+            || bundle.onetime_public_key.is_none()
+            || bundle
+                .onetime_public_key_id
+                .expect("One time pre key id is somehow None after a none check - kill me")
+                == 0)
+        {
+            None
+        } else {
+            Some((
+                bundle.onetime_public_key_id.expect("").into(),
+                PublicKey::deserialize(&bundle.onetime_public_key.to_owned().expect("")).expect(""),
+            ))
+        };
 
         let kyber: Option<(KyberPreKeyId, kem::PublicKey, Vec<u8>)> =
             if (bundle.kyper_pre_key_id.is_none()
@@ -118,10 +118,10 @@ impl KeyBundleContent {
                         .expect("Kyber pre key id not found")
                         .into(),
                     kem::PublicKey::deserialize(
-                        &(*bundle
+                        &bundle
                             .kyper_public_key
                             .to_owned()
-                            .expect("Public key not found")),
+                            .expect("Public key not found"),
                     )
                     .expect("Public kyber key gen failed"),
                     bundle
@@ -137,11 +137,11 @@ impl KeyBundleContent {
             one_time_key,
             (
                 bundle.signed_public_key_id.into(),
-                PublicKey::deserialize(&(*bundle.signed_public_key))
+                PublicKey::deserialize(&bundle.signed_public_key)
                     .expect("Cannot generate public key"),
             ),
             bundle.signed_signature.to_owned(),
-            IdentityKey::decode(&(*bundle.identity_key)).expect("Identity key gen failed"),
+            IdentityKey::decode(&bundle.identity_key).expect("Identity key gen failed"),
             kyber,
         )
     }
@@ -192,6 +192,7 @@ pub struct PrimitiveKeyBundleContent {
     kyper_signature: Option<Vec<u8>>,
 }
 impl PrimitiveKeyBundleContent {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         registration_id: u32,
         device_id: u32,

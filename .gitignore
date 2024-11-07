@@ -1,8 +1,9 @@
 **/target/
 .idea/
+.vscode/
 client/device_info.json
-server/.env
-client/.env
+**/.env
 server/cert/rootCA.crt
 server/cert/server.crt
 server/cert/server.key
+**/client.py

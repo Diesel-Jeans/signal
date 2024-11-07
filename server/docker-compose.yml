@@ -1,5 +1,17 @@
 version: "3.8"
 services:
+  db_test:
+    container_name: postgres_container_test
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: signal_db_test
+    ports:
+      - "3306:5432"
+    volumes:
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
   db:
     container_name: postgres_container
     image: postgres
@@ -21,3 +33,9 @@ services:
       PGADMIN_DEFAULT_PASSWORD: root
     ports:
       - "5050:80"
+  redis:
+    container_name: redis_container
+    image: redis:latest
+    restart: always
+    ports:
+      - "6379:6379"
