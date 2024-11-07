@@ -6,7 +6,7 @@ use crate::{
 use anyhow::Result;
 use axum::{async_trait, extract::ws::Message, Error};
 use common::{
-    signal_protobuf::Envelope,
+    signalservice::Envelope,
     web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
 };
 use futures_util::{stream::Stream, Sink};

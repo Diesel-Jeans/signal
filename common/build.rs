@@ -1,9 +1,16 @@
+use prost_build;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tonic_build::configure()
+    prost_build::Config::new()
         .type_attribute(
             "Envelope",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
-        .compile_protos(&["signal.proto", "WebSocketProtocol.proto"], &["proto"])?;
+        .include_file("_includes.rs")
+        .compile_protos(
+            &["proto/SignalService.proto", "proto/WebSocketProtocol.proto"],
+            &["proto"],
+        )?;
+
     Ok(())
 }
