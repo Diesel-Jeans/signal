@@ -1,10 +1,10 @@
 use anyhow::Result;
 use common::signal_protobuf::Envelope;
 use deadpool_redis::redis::cmd;
-use deadpool_redis::{Config, Runtime};
+use deadpool_redis::{Config, Connection, Runtime};
 use futures_util::task::SpawnExt;
 use futures_util::StreamExt;
-use libsignal_core::DeviceId;
+use libsignal_core::ProtocolAddress;
 use redis::PubSubCommands;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,32 +38,35 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         })
     }
 
+    pub async fn get_connection(&self) -> Result<Connection> {
+        Ok(self.pool.get().await?)
+    }
+
     pub async fn insert(
         &self,
-        user_id: String,
-        device_id: DeviceId,
-        mut envelope: Envelope,
-        message_guid: String,
+        address: &ProtocolAddress,
+        envelope: &mut Envelope,
+        message_guid: &str,
     ) -> Result<u64> {
         let mut connection = self.pool.get().await?;
-        let queue_key: String =
-            MessageCache::<T>::get_message_queue_key(user_id.clone(), device_id.into());
-        let queue_metadata_key: String =
-            MessageCache::<T>::get_message_queue_metadata_key(user_id.clone(), device_id.into());
+
+        let queue_key: String = self.get_message_queue_key(address);
+        let queue_metadata_key: String = self.get_message_queue_metadata_key(address);
         let queue_total_index_key: String = self.get_queue_index_key();
-        envelope.server_guid = Some(message_guid.clone());
+
+        envelope.server_guid = Some(message_guid.to_string());
         let data = bincode::serialize(&envelope)?;
 
         let message_guid_exists = cmd("HEXISTS")
             .arg(&queue_metadata_key)
-            .arg(&message_guid)
+            .arg(message_guid)
             .query_async::<u8>(&mut connection)
             .await?;
 
         if (message_guid_exists == 1) {
             let num = cmd("HGET")
                 .arg(&queue_metadata_key)
-                .arg(&message_guid)
+                .arg(message_guid)
                 .query_async::<String>(&mut connection)
                 .await?;
 
@@ -90,7 +93,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 
         cmd("HSET")
             .arg(&queue_metadata_key)
-            .arg(&message_guid)
+            .arg(message_guid)
             .arg(message_id)
             .query_async::<()>(&mut connection)
             .await?;
@@ -119,7 +122,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
             .await?;
 
         // notifies the message availability manager
-        let queue_name = format!("{}::{}", user_id, device_id);
+        let queue_name = format!("{}::{}", address.name(), address.device_id());
         if let Some(listener) = self.hashmap.get(&queue_name) {
             listener.lock().await.handle_new_messages_available().await;
         }
@@ -129,16 +132,15 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 
     pub async fn remove(
         &self,
-        user_id: String,
-        device_id: DeviceId,
+        address: &ProtocolAddress,
         message_guids: Vec<String>,
     ) -> Result<Vec<Envelope>> {
         let mut connection = self.pool.get().await?;
-        let queue_key: String =
-            MessageCache::<T>::get_message_queue_key(user_id.clone(), device_id.into());
-        let queue_metadata_key: String =
-            MessageCache::<T>::get_message_queue_metadata_key(user_id.clone(), device_id.into());
+
+        let queue_key: String = self.get_message_queue_key(address);
+        let queue_metadata_key: String = self.get_message_queue_metadata_key(address);
         let queue_total_index_key: String = self.get_queue_index_key();
+
         let mut removed_messages: Vec<Envelope> = Vec::new();
 
         for guid in message_guids {
@@ -208,19 +210,19 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         Ok(removed_messages)
     }
 
-    pub async fn has_messages(&self, user_id: String, device_id: u32) -> Result<bool> {
+    pub async fn has_messages(&self, address: &ProtocolAddress) -> Result<bool> {
         let mut connection = self.pool.get().await?;
 
         let msg_count = cmd("ZCARD")
-            .arg(MessageCache::<T>::get_message_queue_key(user_id, device_id))
+            .arg(self.get_message_queue_key(address))
             .query_async::<u32>(&mut connection)
             .await?;
 
         Ok(msg_count > 0)
     }
 
-    pub async fn get_all_messages(&self, user_id: String, device_id: u32) -> Result<Vec<Envelope>> {
-        let messages = self.get_items(user_id, device_id, -1).await?;
+    pub async fn get_all_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
+        let messages = self.get_items(address, -1).await?;
 
         if (messages.is_empty()) {
             return Ok(Vec::new());
@@ -236,16 +238,13 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 
     async fn get_items(
         &self,
-        destination_user_id: String,
-        dest_device_id: u32,
+        address: &ProtocolAddress,
         after_message_id: i32,
     ) -> Result<Vec<Vec<u8>>> {
-        let message_sort = format!("({}", after_message_id);
         let mut connection = self.pool.get().await?;
-        let queue_key =
-            MessageCache::<T>::get_message_queue_key(destination_user_id.clone(), dest_device_id);
-        let queue_lock_key =
-            self.get_persist_in_progress_key(destination_user_id.clone(), dest_device_id);
+        let queue_key = self.get_message_queue_key(address);
+        let queue_lock_key = self.get_persist_in_progress_key(address);
+        let message_sort = format!("({}", after_message_id);
 
         let locked = cmd("GET")
             .arg(&queue_lock_key)
@@ -274,17 +273,13 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 
     pub async fn get_messages_to_persist(
         &self,
-        user_id: String,
-        device_id: DeviceId,
+        address: &ProtocolAddress,
         limit: i32,
     ) -> Result<Vec<Envelope>> {
         let mut connection = self.pool.get().await?;
 
         let messages = cmd("ZRANGE")
-            .arg(MessageCache::<T>::get_message_queue_key(
-                user_id,
-                device_id.into(),
-            ))
+            .arg(self.get_message_queue_key(address))
             .arg(0)
             .arg(limit)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
@@ -326,15 +321,11 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         Ok(results)
     }
 
-    pub async fn lock_queue_for_persistence(
-        &self,
-        account_id: String,
-        device_id: DeviceId,
-    ) -> Result<()> {
+    pub async fn lock_queue_for_persistence(&self, address: &ProtocolAddress) -> Result<()> {
         let mut connection = self.pool.get().await?;
 
         cmd("SETEX")
-            .arg(self.get_persist_in_progress_key(account_id, device_id.into()))
+            .arg(self.get_persist_in_progress_key(address))
             .arg("1")
             .query_async::<()>(&mut connection)
             .await?;
@@ -342,31 +333,39 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         Ok(())
     }
 
-    pub async fn unlock_queue_for_persistence(
-        &self,
-        account_id: String,
-        device_id: DeviceId,
-    ) -> Result<()> {
+    pub async fn unlock_queue_for_persistence(&self, address: &ProtocolAddress) -> Result<()> {
         let mut connection = self.pool.get().await?;
 
         cmd("DEL")
-            .arg(self.get_persist_in_progress_key(account_id, device_id.into()))
+            .arg(self.get_persist_in_progress_key(address))
             .query_async::<()>(&mut connection)
             .await?;
 
         Ok(())
     }
 
-    fn get_message_queue_key(user_id: String, device_id: u32) -> String {
-        format!("user_queue::{{{}::{}}}", user_id, device_id)
+    fn get_message_queue_key(&self, address: &ProtocolAddress) -> String {
+        format!(
+            "user_messages::{{{}::{}}}",
+            address.name(),
+            address.device_id()
+        )
     }
 
-    fn get_persist_in_progress_key(&self, user_id: String, device_id: u32) -> String {
-        format!("user_queue_persisting::{{{}::{}}}", user_id, device_id)
+    fn get_persist_in_progress_key(&self, address: &ProtocolAddress) -> String {
+        format!(
+            "user_queue_persisting::{{{}::{}}}",
+            address.name(),
+            address.device_id()
+        )
     }
 
-    fn get_message_queue_metadata_key(user_id: String, device_id: u32) -> String {
-        format!("user_queue_metadata::{{{}::{}}}", user_id, device_id)
+    fn get_message_queue_metadata_key(&self, address: &ProtocolAddress) -> String {
+        format!(
+            "user_messages_count::{{{}::{}}}",
+            address.name(),
+            address.device_id()
+        )
     }
 
     fn get_queue_index_key(&self) -> String {
@@ -375,25 +374,22 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 
     pub fn get_account_and_device_id_from_queue_key(&self, queue_key: &str) -> (String, String) {
         let mut parts = queue_key.split("::").collect::<Vec<&str>>();
-
         let account_id = parts[1].trim_matches('{').to_string();
         let device_id = parts[2].trim_end_matches('}').to_string();
-
         (account_id, device_id)
     }
 
-    async fn add_message_availability_listener(
+    pub async fn add_message_availability_listener(
         &mut self,
-        uuid: &str,
-        device_id: DeviceId,
+        address: &ProtocolAddress,
         listener: Arc<Mutex<T>>,
     ) {
-        let queue_name: String = format!("{}::{}", uuid, device_id);
-        self.hashmap.insert(queue_name.clone(), listener);
+        let queue_name = format!("{}::{}", address.name(), address.device_id());
+        self.hashmap.insert(queue_name, listener);
     }
 
-    async fn remove_message_availability_listener(&mut self, uuid: String, device_id: String) {
-        let queue_name: String = format!("{}::{}", uuid, device_id);
+    pub async fn remove_message_availability_listener(&mut self, address: &ProtocolAddress) {
+        let queue_name: String = format!("{}::{}", address.name(), address.device_id());
         self.hashmap.remove(&queue_name);
     }
 }
@@ -409,11 +405,11 @@ pub mod message_cache_tests {
         guid.to_string()
     }
 
-    fn generate_random_envelope(message: String, uuid: String) -> Envelope {
-        let mut data = bincode::serialize(&message).unwrap();
+    fn generate_random_envelope(message: &str, uuid: &str) -> Envelope {
+        let mut data = bincode::serialize(message).unwrap();
         Envelope {
             content: Some(data),
-            server_guid: Some(uuid),
+            server_guid: Some(uuid.to_string()),
             ..Default::default()
         }
     }
@@ -454,21 +450,22 @@ pub mod message_cache_tests {
     async fn test_message_availability_listener_new_messages() {
         let mut message_cache: MessageCache<MockWebSocketConnection> =
             MessageCache::connect().await.unwrap();
-        let mut connection = message_cache.pool.get().await.unwrap();
+
         let uuid = generate_uuid();
-        let mut envelope =
-            generate_random_envelope("Hello this is a test of insert()".to_string(), uuid.clone());
-        let account_id = Uuid::new_v4().to_string();
+        let mut envelope = generate_random_envelope("Hello this is a test of insert()", &uuid);
+
+        let user_id = generate_uuid();
         let device_id = 1;
+        let address = ProtocolAddress::new(user_id, device_id.into());
 
         let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
 
         message_cache
-            .add_message_availability_listener(&account_id, 1.into(), websocket.clone())
+            .add_message_availability_listener(&address, websocket.clone())
             .await;
 
         let message_id = message_cache
-            .insert(account_id, device_id.into(), envelope.clone(), uuid)
+            .insert(&address, &mut envelope, &uuid)
             .await
             .unwrap();
 
@@ -480,38 +477,36 @@ pub mod message_cache_tests {
     async fn test_insert() {
         let message_cache: MessageCache<MockWebSocketConnection> =
             MessageCache::connect().await.unwrap();
+
         let mut connection = message_cache.pool.get().await.unwrap();
-        let uuid = generate_uuid();
+
+        let user_id = generate_uuid();
+        let device_id = 1;
+        let address = ProtocolAddress::new(user_id, device_id.into());
+
+        let message_guid = generate_uuid();
         let mut envelope =
-            generate_random_envelope("Hello this is a test of insert()".to_string(), uuid.clone());
+            generate_random_envelope("Hello this is a test of insert()", &message_guid);
+
         let message_id = message_cache
-            .insert(
-                "b0231ab5-4c7e-40ea-a544-f925c5051".to_string(),
-                1.into(),
-                envelope.clone(),
-                uuid,
-            )
+            .insert(&address, &mut envelope, &message_guid)
             .await
             .unwrap();
 
         let result = cmd("ZRANGEBYSCORE")
-            .arg(
-                MessageCache::<MockWebSocketConnection>::get_message_queue_key(
-                    "b0231ab5-4c7e-40ea-a544-f925c5051".to_string(),
-                    1,
-                ),
-            )
+            .arg(message_cache.get_message_queue_key(&address))
             .arg(message_id)
             .arg(message_id)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
             .await
             .unwrap();
 
+        teardown(connection).await;
+
         assert_eq!(
             envelope,
             bincode::deserialize::<Envelope>(&result[0]).unwrap()
         );
-        teardown(connection).await;
     }
 
     #[tokio::test]
@@ -519,54 +514,44 @@ pub mod message_cache_tests {
     async fn test_insert_same_id() {
         let message_cache: MessageCache<MockWebSocketConnection> =
             MessageCache::connect().await.unwrap();
+
         let mut connection = message_cache.pool.get().await.unwrap();
-        let msg_guid = generate_uuid();
-        let mut envelope1 =
-            generate_random_envelope("This is a message".to_string(), msg_guid.clone());
-        let envelope2 =
-            generate_random_envelope("This is another message".to_string(), msg_guid.clone());
+
+        let user_id = generate_uuid();
+        let device_id = 1;
+        let address = ProtocolAddress::new(user_id, device_id.into());
+
+        let message_guid = generate_uuid();
+        let mut envelope1 = generate_random_envelope("This is a message", &message_guid);
+        let mut envelope2 = generate_random_envelope("This is another message", &message_guid);
 
         let message_id = message_cache
-            .insert(
-                "b0231ab5-4c7e-40ea-a544-f925c5052".to_string(),
-                1.into(),
-                envelope1.clone(),
-                msg_guid.clone(),
-            )
+            .insert(&address, &mut envelope1, &message_guid)
             .await
             .unwrap();
 
         // should return the same message id
         let message_id_2 = message_cache
-            .insert(
-                "b0231ab5-4c7e-40ea-a544-f925c5052".to_string(),
-                1.into(),
-                envelope2.clone(),
-                msg_guid.clone(),
-            )
+            .insert(&address, &mut envelope2, &message_guid)
             .await
             .unwrap();
 
-        assert_eq!(message_id, message_id_2);
-
         let result = cmd("ZRANGEBYSCORE")
-            .arg(
-                MessageCache::<MockWebSocketConnection>::get_message_queue_key(
-                    "b0231ab5-4c7e-40ea-a544-f925c5052".to_string(),
-                    1,
-                ),
-            )
+            .arg(message_cache.get_message_queue_key(&address))
             .arg(message_id_2)
             .arg(message_id_2)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
             .await
             .unwrap();
 
+        teardown(connection).await;
+
         assert_eq!(
             envelope1,
             bincode::deserialize::<Envelope>(&result[0]).unwrap()
         );
-        teardown(connection).await;
+
+        assert_eq!(message_id, message_id_2);
     }
 
     #[tokio::test]
@@ -574,43 +559,32 @@ pub mod message_cache_tests {
     async fn test_insert_different_ids() {
         let message_cache: MessageCache<MockWebSocketConnection> =
             MessageCache::connect().await.unwrap();
+
         let mut connection = message_cache.pool.get().await.unwrap();
-        let uuid1 = generate_uuid();
-        let uuid2 = generate_uuid();
-        let mut envelope1 = generate_random_envelope("First Message".to_string(), uuid1.clone());
-        let mut envelope2 = generate_random_envelope("Second Message".to_string(), uuid2.clone());
+
+        let user_id = generate_uuid();
+        let device_id = 1;
+        let address = ProtocolAddress::new(user_id, device_id.into());
+
+        let message_guid1 = generate_uuid();
+        let message_guid2 = generate_uuid();
+        let mut envelope1 = generate_random_envelope("First Message", &message_guid1);
+        let mut envelope2 = generate_random_envelope("Second Message", &message_guid2);
 
         // inserting messages
         let message_id = message_cache
-            .insert(
-                "b0231ab5-4c7e-40ea-a544-f925c5053".to_string(),
-                1.into(),
-                envelope1.clone(),
-                generate_uuid(),
-            )
-            .await
-            .unwrap();
-        let message_id_2 = message_cache
-            .insert(
-                "b0231ab5-4c7e-40ea-a544-f925c5053".to_string(),
-                1.into(),
-                envelope2.clone(),
-                generate_uuid(),
-            )
+            .insert(&address, &mut envelope1, &message_guid1)
             .await
             .unwrap();
 
-        // they are inserted as two different messages
-        assert_ne!(message_id, message_id_2);
+        let message_id_2 = message_cache
+            .insert(&address, &mut envelope2, &message_guid2)
+            .await
+            .unwrap();
 
         // querying the envelopes
         let result_1 = cmd("ZRANGEBYSCORE")
-            .arg(
-                MessageCache::<MockWebSocketConnection>::get_message_queue_key(
-                    "b0231ab5-4c7e-40ea-a544-f925c5053".to_string(),
-                    1,
-                ),
-            )
+            .arg(message_cache.get_message_queue_key(&address))
             .arg(message_id)
             .arg(message_id)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
@@ -618,24 +592,22 @@ pub mod message_cache_tests {
             .unwrap();
 
         let result_2 = cmd("ZRANGEBYSCORE")
-            .arg(
-                MessageCache::<MockWebSocketConnection>::get_message_queue_key(
-                    "b0231ab5-4c7e-40ea-a544-f925c5053".to_string(),
-                    1,
-                ),
-            )
+            .arg(message_cache.get_message_queue_key(&address))
             .arg(message_id_2)
             .arg(message_id_2)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
             .await
             .unwrap();
 
+        teardown(connection).await;
+
+        // they are inserted as two different messages
+        assert_ne!(message_id, message_id_2);
+
         assert_ne!(
             bincode::deserialize::<Envelope>(&result_1[0]).unwrap(),
             bincode::deserialize::<Envelope>(&result_2[0]).unwrap()
         );
-
-        teardown(connection).await;
     }
 
     #[tokio::test]
@@ -643,30 +615,30 @@ pub mod message_cache_tests {
     async fn test_remove() {
         let message_cache: MessageCache<MockWebSocketConnection> =
             MessageCache::connect().await.unwrap();
-        let mut conn = message_cache.pool.get().await.unwrap();
-        let user_id = "b0231ab5-4c7e-40ea-a544-f925c5".to_string();
-        let msg_guid = generate_uuid();
-        let mut envelope =
-            generate_random_envelope("This is a test of remove()".to_string(), msg_guid.clone());
+
+        let mut connection = message_cache.pool.get().await.unwrap();
+
+        let user_id = generate_uuid();
+        let device_id = 1;
+        let address = ProtocolAddress::new(user_id, device_id.into());
+
+        let message_guid = generate_uuid();
+        let mut envelope = generate_random_envelope("This is a test of remove()", &message_guid);
 
         let message_id = message_cache
-            .insert(
-                user_id.clone(),
-                1.into(),
-                envelope.clone(),
-                msg_guid.clone(),
-            )
+            .insert(&address, &mut envelope, &message_guid)
             .await
             .unwrap();
 
         let removed_messages = message_cache
-            .remove(user_id, 1.into(), Vec::from([msg_guid.clone()]))
+            .remove(&address, vec![message_guid])
             .await
             .unwrap();
 
+        teardown(connection).await;
+
         assert_eq!(removed_messages.len(), 1);
         assert_eq!(removed_messages[0], envelope);
-        teardown(conn).await;
     }
 
     #[tokio::test]
@@ -674,32 +646,38 @@ pub mod message_cache_tests {
     async fn test_get_all_messages() {
         let message_cache: MessageCache<MockWebSocketConnection> =
             MessageCache::connect().await.unwrap();
-        let mut conn = message_cache.pool.get().await.unwrap();
-        let user_id = "b0231ab5-4c7e-40ea-a544-f925c".to_string();
+
+        let mut connection = message_cache.pool.get().await.unwrap();
+
+        let user_id = generate_uuid();
+        let device_id = 1;
+        let address = ProtocolAddress::new(user_id, device_id.into());
+
         let mut envelopes = Vec::new();
+
         for i in 0..10 {
-            let uuid = generate_uuid();
-            let envelope =
-                generate_random_envelope(format!("This is message nr. {}", i + 1), uuid.clone());
-            let msg_id = message_cache
-                .insert(user_id.clone(), 1.into(), envelope.clone(), uuid.clone())
+            let message_guid = generate_uuid();
+            let mut envelope =
+                generate_random_envelope(&format!("This is message nr. {}", i + 1), &message_guid);
+
+            message_cache
+                .insert(&address, &mut envelope, &message_guid)
                 .await
                 .unwrap();
+
             envelopes.push(envelope);
         }
 
         //getting those messages
-        let mut messages = message_cache
-            .get_all_messages(user_id.clone(), 1)
-            .await
-            .unwrap();
+        let mut messages = message_cache.get_all_messages(&address).await.unwrap();
+
+        teardown(connection).await;
 
         assert_eq!(messages.len(), 10);
+
         for (message, envelope) in messages.into_iter().zip(envelopes.into_iter()) {
             assert_eq!(message, envelope);
         }
-
-        teardown(conn).await;
     }
 
     #[tokio::test]
@@ -707,39 +685,30 @@ pub mod message_cache_tests {
     async fn test_has_messages() {
         let message_cache: MessageCache<MockWebSocketConnection> =
             MessageCache::connect().await.unwrap();
-        let mut conn = message_cache.pool.get().await.unwrap();
-        let user_id = "b0231ab5-4c7e-40ea-a544-f925c5051";
+
+        let mut connection = message_cache.pool.get().await.unwrap();
+
+        let user_id = generate_uuid();
         let device_id = 1;
-        let msg_guid = generate_uuid();
-        let envelope = generate_random_envelope(
-            "Hello this is a test of has_messages()".to_string(),
-            msg_guid.clone(),
-        );
+        let address = ProtocolAddress::new(user_id, device_id.into());
 
-        let does_not_has_messages = message_cache
-            .has_messages(user_id.to_string(), device_id)
-            .await
-            .unwrap();
+        let message_guid = generate_uuid();
+        let mut envelope =
+            generate_random_envelope("Hello this is a test of has_messages()", &message_guid);
 
-        assert!(!does_not_has_messages);
+        let does_not_has_messages = message_cache.has_messages(&address).await.unwrap();
 
         let message_id = message_cache
-            .insert(
-                user_id.to_string(),
-                device_id.into(),
-                envelope.clone(),
-                msg_guid.clone(),
-            )
+            .insert(&address, &mut envelope, &message_guid)
             .await
             .unwrap();
 
-        let has_messages = message_cache
-            .has_messages(user_id.to_string(), device_id)
-            .await
-            .unwrap();
+        let has_messages = message_cache.has_messages(&address).await.unwrap();
 
+        teardown(connection).await;
+
+        assert!(!does_not_has_messages);
         assert!(has_messages);
-        teardown(conn).await;
     }
 
     #[tokio::test]
@@ -747,25 +716,28 @@ pub mod message_cache_tests {
     async fn test_get_messages_to_persist() {
         let message_cache: MessageCache<MockWebSocketConnection> =
             MessageCache::connect().await.unwrap();
+
         let mut connection = message_cache.pool.get().await.unwrap();
-        let user_id = "b0231ab5-4c7e-40ea-a544-f925c5051";
+
+        let user_id = generate_uuid();
         let device_id = 1;
+        let address = ProtocolAddress::new(user_id, device_id.into());
+
         let message_guid = generate_uuid();
+        let mut envelope = generate_random_envelope("Hello this is a test", &message_guid);
 
-        let mut message =
-            generate_random_envelope("Hello this is a test".to_string(), message_guid.clone());
-
-        let message_id = message_cache
-            .insert(user_id.to_string(), device_id.into(), message, message_guid)
+        message_cache
+            .insert(&address, &mut envelope, &message_guid)
             .await
             .unwrap();
 
         let envelopes = message_cache
-            .get_messages_to_persist(user_id.to_string(), device_id.into(), -1)
+            .get_messages_to_persist(&address, -1)
             .await
             .unwrap();
 
-        assert_eq!(envelopes.len(), 1);
         teardown(connection).await;
+
+        assert_eq!(envelopes.len(), 1);
     }
 }

@@ -1,10 +1,11 @@
 use crate::account::{Account, Device};
 use crate::database::SignalDatabase;
 use crate::managers::account_manager::AccountManager;
+use crate::managers::messages_manager::MessagesManager;
 use crate::message_cache::{MessageAvailabilityListener, MessageCache};
 use anyhow::Result;
 use common::signal_protobuf::Envelope;
-use libsignal_core::ServiceId;
+use libsignal_core::{ProtocolAddress, ServiceId};
 use std::fmt::Debug;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::task::JoinHandle;
@@ -14,24 +15,29 @@ const MESSAGE_BATCH_LIMIT: u8 = 100;
 const PERSIST_DELAY: u64 = 600;
 
 #[derive(Debug)]
-pub struct MessagePersister<T: MessageAvailabilityListener, U: SignalDatabase> {
+pub struct MessagePersister<T: SignalDatabase, U: MessageAvailabilityListener> {
     running: bool,
-    message_cache: MessageCache<T>,
+    message_cache: MessageCache<U>,
+    messages_manager: MessagesManager<T, U>,
     account_manager: AccountManager,
-    db: U,
+    db: T,
 }
 
-impl<
-        T: MessageAvailabilityListener + Send + 'static,
-        U: SignalDatabase + Send + Sync + 'static,
-    > MessagePersister<T, U>
+impl<T, U> MessagePersister<T, U>
+where
+    T: SignalDatabase + Send + 'static + Sync,
+    U: MessageAvailabilityListener + Send + 'static + Sync,
 {
-    pub async fn new(db: U) -> Self {
+    pub async fn new(db: T) -> Self {
+        let message_cache = MessageCache::connect()
+            .await
+            .expect("Could not connect to redis cache.");
         Self {
             running: false,
             message_cache: MessageCache::connect()
                 .await
                 .expect("Could not connect to the Redis cache."),
+            messages_manager: MessagesManager::new(db.clone(), message_cache),
             account_manager: AccountManager::new(),
             db,
         }
@@ -92,30 +98,33 @@ impl<
     }
 
     async fn persist_queue(&mut self, account: &Account, device: &Device) -> Result<()> {
-        self.message_cache
-            .lock_queue_for_persistence(account.aci().service_id_string(), device.device_id());
-
         let message_count: u32 = 0;
         let mut messages: Vec<Envelope> = Vec::new();
+        let protocol_address =
+            ProtocolAddress::new(account.aci().service_id_string(), device.device_id());
+
+        self.message_cache
+            .lock_queue_for_persistence(&protocol_address);
 
         while {
             messages = self
                 .message_cache
-                .get_messages_to_persist(
-                    account.aci().service_id_string(),
-                    device.device_id(),
-                    MESSAGE_BATCH_LIMIT as i32,
-                )
+                .get_messages_to_persist(&protocol_address, MESSAGE_BATCH_LIMIT as i32)
                 .await?;
 
             !messages.is_empty()
         } {
-
-            // let messages_removed_from_cache = self.message_manager.persist_messages().await?;
+            let messages_removed_from_cache = self
+                .messages_manager
+                .persist_messages(&protocol_address, messages)
+                .await?;
         }
 
         self.message_cache
-            .unlock_queue_for_persistence(account.aci().service_id_string(), device.device_id());
+            .unlock_queue_for_persistence(&protocol_address);
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod message_persister_tests {}
