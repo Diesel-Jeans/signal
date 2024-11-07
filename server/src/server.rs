@@ -1,7 +1,6 @@
 use crate::account::{Account, AuthenticatedDevice, Device};
 use crate::database::SignalDatabase;
 use crate::error::ApiError;
-use crate::in_memory_db::InMemorySignalDatabase;
 use crate::managers::state::SignalServerState;
 use crate::managers::websocket::connection::{UserIdentity, WebSocketConnection};
 use crate::postgres::PostgresDatabase;
@@ -17,8 +16,8 @@ use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
 use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{
-    AuthorizationHeader, CreateAccountOptions, DevicePreKeyBundle, RegistrationRequest,
-    SetKeyRequest, SignalMessages, UploadKeys,
+    DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SetKeyRequest, SignalMessages,
+    UploadKeys,
 };
 use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
@@ -53,15 +52,14 @@ async fn handle_get_messages<T: SignalDatabase>(
     println!("Get messages")
 }
 
-async fn handle_put_registration<T: SignalDatabase>(
+async fn handle_post_registration<T: SignalDatabase>(
     state: SignalServerState<T>,
     auth_header: BasicAuthorizationHeader,
     registration: RegistrationRequest,
-) -> Result<(), ApiError> {
+) -> Result<RegistrationResponse, ApiError> {
     println!("Register client");
     let phone_number = auth_header.username();
-
-    state
+    let account = state
         .create_account(
             phone_number.to_owned(),
             registration.account_attributes().to_owned(),
@@ -87,9 +85,18 @@ async fn handle_put_registration<T: SignalDatabase>(
         .map_err(|err| ApiError {
             message: format!("Could not create account:{}", err),
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        });
+        })?;
 
-    Ok(())
+    let aci = account.aci().into();
+    let pni = account.pni().into();
+
+    Ok(RegistrationResponse {
+        uuid: aci,
+        pni,
+        number: phone_number.to_owned(),
+        username_hash: None,
+        storage_capable: true,
+    })
 }
 
 // redirect from http to https. this is temporary
@@ -168,13 +175,13 @@ async fn get_messages_endpoint(State(state): State<SignalServerState<PostgresDat
     // TODO: Call `handle_get_messages`
 }
 
-/// Handler for the PUT v1/registration endpoint.
+/// Handler for the POST v1/registration endpoint.
 #[debug_handler]
-async fn put_registration_endpoint(
+async fn post_registration_endpoint(
     State(state): State<SignalServerState<PostgresDatabase>>,
     headers: HeaderMap,
     Json(registration): Json<RegistrationRequest>,
-) -> Result<(), ApiError> {
+) -> Result<Json<RegistrationResponse>, ApiError> {
     let auth_header = headers
         .get("Authorization")
         .ok_or_else(|| ApiError {
@@ -195,7 +202,9 @@ async fn put_registration_endpoint(
             status_code: StatusCode::UNAUTHORIZED,
         })?;
 
-    handle_put_registration(state, auth_header, registration).await
+    handle_post_registration(state, auth_header, registration)
+        .await
+        .map(Json)
 }
 
 /// Handler for the GET v2/keys endpoint.
@@ -294,7 +303,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/", get(|| async { "Hello from Signal Server" }))
         .route("/v1/messages", get(get_messages_endpoint))
         .route("/v1/messages/:destination", put(put_messages_endpoint))
-        .route("/v1/registration/", post(put_registration_endpoint))
+        .route("/v1/registration", post(post_registration_endpoint))
         .route("/v2/keys", get(get_keys_endpoint))
         .route("/v2/keys/check", post(post_keycheck_endpoint))
         .route("/v2/keys", put(put_keys_endpoint))

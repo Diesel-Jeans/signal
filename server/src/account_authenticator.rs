@@ -100,11 +100,7 @@ async fn authenticate_device<T: SignalDatabase>(
     }
 }
 
-async fn verify_password(
-    auth_token: &Vec<u8>,
-    salt: &str,
-    password: &str,
-) -> Result<bool, ApiError> {
+async fn verify_password(auth_token: &[u8], salt: &str, password: &str) -> Result<bool, ApiError> {
     let password_hash = HKDF_DeriveSecrets(
         32,
         password.as_bytes(),

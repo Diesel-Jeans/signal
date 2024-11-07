@@ -42,7 +42,7 @@ pub trait SignalDatabase: Clone {
     /// Send a message to a given [ProtocolAddress].
     async fn push_message_queue(
         &self,
-        address: ProtocolAddress,
+        address: &ProtocolAddress,
         messages: Vec<Envelope>,
     ) -> Result<()>;
 
@@ -100,4 +100,13 @@ pub trait SignalDatabase: Clone {
     async fn get_one_time_ec_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadPreKey>;
 
     async fn get_one_time_pq_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadSignedPreKey>;
+
+    /// Get number of messages for associated [ProtocolAddress]
+    async fn count_messages(&self, address: &ProtocolAddress) -> Result<u32>;
+
+    /// Get all messages for associated [ProtocolAddress]
+    async fn get_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>>;
+
+    /// Delete and get all messages for associated [ProtocolAddress]
+    async fn delete_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>>;
 }

@@ -82,6 +82,12 @@ impl<T: WSStream + Debug> Clone for WebSocketManager<T> {
     }
 }
 
+impl<T: WSStream + Debug + Send + 'static> Default for WebSocketManager<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
     pub fn new() -> Self {
         Self {
@@ -154,9 +160,8 @@ impl<T: WSStream + Debug + Send + 'static> WebSocketManager<T> {
                     _ => {}
                 }
             }
-            match mgr.remove(&address).await {
-                None => println!("WebSocketManager: Client was already removed from Manager!"),
-                _ => {}
+            if mgr.remove(&address).await.is_none() {
+                println!("WebSocketManager: Client was already removed from Manager!")
             };
         });
     }

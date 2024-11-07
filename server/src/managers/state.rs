@@ -2,10 +2,9 @@ use crate::{
     account::{self, Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
     error::ApiError,
-    in_memory_db::InMemorySignalDatabase,
     postgres::PostgresDatabase,
 };
-use anyhow::Result;
+use anyhow::{Ok, Result};
 use common::web_api::{
     AccountAttributes, DevicePreKeyBundle, PreKeyResponse, SetKeyRequest, UploadPreKey,
     UploadSignedPreKey,
@@ -57,21 +56,10 @@ impl SignalServerState<MockDB> {
     }
 }
 
-impl SignalServerState<InMemorySignalDatabase> {
-    fn new() -> Self {
-        Self {
-            db: InMemorySignalDatabase::new(),
-            websocket_manager: WebSocketManager::new(),
-            account_manager: AccountManager::new(),
-            key_manager: KeyManager::new(),
-        }
-    }
-}
-
 impl SignalServerState<PostgresDatabase> {
     pub async fn new() -> Self {
         Self {
-            db: PostgresDatabase::connect()
+            db: PostgresDatabase::connect("DATABASE_URL".to_string())
                 .await
                 .expect("Failed to connect to the database."),
             websocket_manager: WebSocketManager::new(),
@@ -90,7 +78,7 @@ impl<T: SignalDatabase> SignalServerState<T> {
         pni_identity_key: IdentityKey,
         primary_device: Device,
         key_bundle: DevicePreKeyBundle,
-    ) -> Result<()> {
+    ) -> Result<Account> {
         let device_id = primary_device.device_id();
         let account = self
             .account_manager
@@ -108,7 +96,9 @@ impl<T: SignalDatabase> SignalServerState<T> {
             &key_bundle,
             &ProtocolAddress::new(account.pni().service_id_string(), device_id),
         )
-        .await
+        .await?;
+
+        Ok(account)
     }
 
     pub async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
