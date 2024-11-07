@@ -50,8 +50,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
             MessageCache::<T>::get_message_queue_key(user_id.clone(), device_id.into());
         let queue_metadata_key: String =
             MessageCache::<T>::get_message_queue_metadata_key(user_id.clone(), device_id.into());
-        let queue_total_index_key: String =
-            MessageCache::<T>::get_queue_index_key(user_id.clone(), device_id.into());
+        let queue_total_index_key: String = self.get_queue_index_key();
         envelope.server_guid = Some(message_guid.clone());
         let data = bincode::serialize(&envelope)?;
 
@@ -139,8 +138,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
             MessageCache::<T>::get_message_queue_key(user_id.clone(), device_id.into());
         let queue_metadata_key: String =
             MessageCache::<T>::get_message_queue_metadata_key(user_id.clone(), device_id.into());
-        let queue_total_index_key: String =
-            MessageCache::<T>::get_queue_index_key(user_id.clone(), device_id.into());
+        let queue_total_index_key: String = self.get_queue_index_key();
         let mut removed_messages: Vec<Envelope> = Vec::new();
 
         for guid in message_guids {
@@ -246,10 +244,8 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         let mut connection = self.pool.get().await?;
         let queue_key =
             MessageCache::<T>::get_message_queue_key(destination_user_id.clone(), dest_device_id);
-        let queue_lock_key = MessageCache::<T>::get_persist_in_progress_key(
-            destination_user_id.clone(),
-            dest_device_id,
-        );
+        let queue_lock_key =
+            self.get_persist_in_progress_key(destination_user_id.clone(), dest_device_id);
 
         let locked = cmd("GET")
             .arg(&queue_lock_key)
@@ -302,20 +298,88 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         Ok(valid_envelopes)
     }
 
-    fn get_message_queue_key(user_id: String, device_id: u32) -> String {
-        format!("user_messages::{{{}::{}}}", user_id, device_id)
+    pub async fn get_message_queues_to_persist(
+        &self,
+        max_time: u64,
+        limit: u8,
+    ) -> Result<Vec<String>> {
+        let mut connection = self.pool.get().await?;
+        let queue_index_key = self.get_queue_index_key();
+        let results = cmd("ZRANGE")
+            .arg(&queue_index_key)
+            .arg(0)
+            .arg(&max_time)
+            .arg("BYSCORE")
+            .arg("LIMIT")
+            .arg(0)
+            .arg(&limit)
+            .query_async::<Vec<String>>(&mut connection)
+            .await?;
+
+        if !results.is_empty() {
+            cmd("ZREM")
+                .arg(&queue_index_key)
+                .arg(&results)
+                .query_async::<()>(&mut connection)
+                .await?;
+        }
+        Ok(results)
     }
 
-    fn get_persist_in_progress_key(user_id: String, device_id: u32) -> String {
+    pub async fn lock_queue_for_persistence(
+        &self,
+        account_id: String,
+        device_id: DeviceId,
+    ) -> Result<()> {
+        let mut connection = self.pool.get().await?;
+
+        cmd("SETEX")
+            .arg(self.get_persist_in_progress_key(account_id, device_id.into()))
+            .arg("1")
+            .query_async::<()>(&mut connection)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn unlock_queue_for_persistence(
+        &self,
+        account_id: String,
+        device_id: DeviceId,
+    ) -> Result<()> {
+        let mut connection = self.pool.get().await?;
+
+        cmd("DEL")
+            .arg(self.get_persist_in_progress_key(account_id, device_id.into()))
+            .query_async::<()>(&mut connection)
+            .await?;
+
+        Ok(())
+    }
+
+    fn get_message_queue_key(user_id: String, device_id: u32) -> String {
+        format!("user_queue::{{{}::{}}}", user_id, device_id)
+    }
+
+    fn get_persist_in_progress_key(&self, user_id: String, device_id: u32) -> String {
         format!("user_queue_persisting::{{{}::{}}}", user_id, device_id)
     }
 
     fn get_message_queue_metadata_key(user_id: String, device_id: u32) -> String {
-        format!("user_messages_count::{{{}::{}}}", user_id, device_id)
+        format!("user_queue_metadata::{{{}::{}}}", user_id, device_id)
     }
 
-    fn get_queue_index_key(user_id: String, device_id: u32) -> String {
-        format!("{}::{}", user_id, device_id)
+    fn get_queue_index_key(&self) -> String {
+        "user_queue_index_key".to_string() // Should be changed if we use Redis Cluster
+    }
+
+    pub fn get_account_and_device_id_from_queue_key(&self, queue_key: &str) -> (String, String) {
+        let mut parts = queue_key.split("::").collect::<Vec<&str>>();
+
+        let account_id = parts[1].trim_matches('{').to_string();
+        let device_id = parts[2].trim_end_matches('}').to_string();
+
+        (account_id, device_id)
     }
 
     async fn add_message_availability_listener(
