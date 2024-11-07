@@ -832,6 +832,101 @@ impl SignalDatabase for PostgresDatabase {
         })
         .map_err(|err| err.into())
     }
+
+    async fn count_messages(&self, address: &ProtocolAddress) -> Result<u32> {
+        let result = sqlx::query!(
+            r#"
+            SELECT
+                COUNT(*)
+            FROM
+                msq_queue
+                INNER JOIN devices on devices.id = msq_queue.receiver
+            WHERE
+                devices.owner = (
+                    SELECT
+                        id
+                    FROM
+                        accounts
+                    WHERE
+                        aci = $1 OR
+                        pni = $1
+                )
+                AND devices.device_id = $2
+            "#,
+            address.name(),
+            address.device_id().to_string()
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(result.count.unwrap_or_default() as u32)
+    }
+
+    async fn get_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
+        sqlx::query!(
+            r#"
+            SELECT
+                msq_queue.msg
+            FROM
+                msq_queue
+                INNER JOIN devices on devices.id = msq_queue.receiver
+            WHERE
+                devices.owner = (
+                    SELECT
+                        id
+                    FROM
+                        accounts
+                    WHERE
+                        aci = $1 OR
+                        pni = $1
+                )
+                AND devices.device_id = $2
+            "#,
+            address.name(),
+            address.device_id().to_string()
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .try_fold(vec![], |mut acc, msg| -> Result<Vec<Envelope>> {
+            acc.push(bincode::deserialize(&msg.msg)?);
+            Ok(acc)
+        })
+    }
+
+    async fn delete_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
+        sqlx::query!(
+            r#"
+            DELETE FROM
+                msq_queue
+            USING 
+                devices
+            WHERE 
+                devices.id = msq_queue.receiver
+            AND
+                devices.owner = (
+                    SELECT
+                        id
+                    FROM
+                        accounts
+                    WHERE
+                        aci = $1 OR
+                        pni = $1
+                )
+                AND devices.device_id = $2
+                RETURNING msq_queue.msg
+            "#,
+            address.name(),
+            address.device_id().to_string()
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .try_fold(vec![], |mut acc, msg| -> Result<Vec<Envelope>> {
+            acc.push(bincode::deserialize(&msg.msg)?);
+            Ok(acc)
+        })
+    }
 }
 
 async fn store_aci_signed_pre_key(
