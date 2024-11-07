@@ -2,6 +2,7 @@ use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use core::str;
 use libsignal_core::{Aci, Pni};
+use std::default;
 use std::error::Error;
 use std::fmt::{self, format, Debug, Display};
 use surf::StatusCode;
@@ -11,13 +12,14 @@ use common::web_api::{
     UploadSignedPreKey,
 };
 use libsignal_protocol::{
-    IdentityKey, IdentityKeyPair, InMemSignalProtocolStore, KeyPair, KyberPreKeyRecord,
+    IdentityKey, IdentityKeyPair, InMemSignalProtocolStore, KeyPair, KyberPreKeyRecord, PublicKey,
     SignedPreKeyRecord,
 };
 use rand::rngs::OsRng;
 use rand::Rng;
 
 use crate::contact_manager::ContactManager;
+use crate::errors::{LoginError, RegistrationError};
 use crate::key_management::key_manager::{InMemoryKeyManager, KeyManager};
 use crate::server::{Server, ServerAPI};
 use crate::storage::{self, DeviceStorage, Storage};
@@ -40,33 +42,6 @@ impl VerifiedSession {
         &self.session_id
     }
 }
-
-pub enum RegistrationError {
-    PhoneNumberTaken,
-    NoResponse,
-    BadResponse,
-}
-
-impl fmt::Debug for RegistrationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self::Display::fmt(&self, f)
-    }
-}
-
-impl fmt::Display for RegistrationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            Self::PhoneNumberTaken => "Phone number was already taken.",
-            Self::NoResponse => "The server did not respond to the registration request.",
-            Self::BadResponse => {
-                "The server responded to the request, but the response could not be parsed."
-            }
-        };
-        write!(f, "Could not register account - {}", message)
-    }
-}
-
-impl Error for RegistrationError {}
 
 const PROFILE_KEY_LENGTH: usize = 32;
 const MASTER_KEY_LENGTH: usize = 32;
@@ -95,7 +70,7 @@ impl Client {
     /// `phone_number` must be unique.
     pub async fn register(phone_number: String) -> Result<Self, RegistrationError> {
         let mut csprng = OsRng;
-        let aci_registration_id: i32 = OsRng.gen_range(1..16383);
+        let aci_registration_id = OsRng.gen_range(1..16383);
         let pni_registration_id = OsRng.gen_range(1..16383);
         let aci_key_pair = KeyPair::generate(&mut csprng);
         let pni_key_pair = KeyPair::generate(&mut csprng);
@@ -165,11 +140,16 @@ impl Client {
                 let pni: Pni = body.pni.into();
 
                 let contact_manager = ContactManager::new();
-                let mut storage = DeviceStorage::new();
-                storage.set_aci(&aci);
-                storage.set_pni(&pni);
-                storage.set_password(&password);
-
+                let storage = DeviceStorage::builder()
+                    .set_aci(aci)
+                    .set_pni(pni)
+                    .set_password(password)
+                    .set_public_key(aci_key_pair.public_key)
+                    .set_private_key(aci_key_pair.private_key)
+                    .set_aci_registration_id(aci_registration_id as u32)
+                    .set_pni_registration_id(pni_registration_id as u32)
+                    .try_into()
+                    .expect("Missing field in builder");
                 let client =
                     Client::new(aci, pni, contact_manager, server_api, key_manager, storage);
                 Ok(client)
@@ -178,8 +158,25 @@ impl Client {
         }
     }
 
-    pub async fn login() -> Self {
-        todo!()
+    pub async fn login() -> Result<Self, LoginError> {
+        let storage = DeviceStorage::load()?;
+
+        let key_pair = KeyPair::new(
+            storage.get_public_key().to_owned(),
+            storage.get_private_key().to_owned(),
+        );
+
+        let proto_store =
+            InMemSignalProtocolStore::new(key_pair.into(), storage.get_aci_registration_id())
+                .expect("Can construct Protocol Store from valid parts.");
+        Ok(Client::new(
+            storage.get_aci().to_owned(),
+            storage.get_pni().to_owned(),
+            ContactManager::new(),
+            ServerAPI::new(),
+            InMemoryKeyManager::new(proto_store),
+            storage,
+        ))
     }
 
     pub async fn send_message(&self, message: &str) -> Result<(), Box<dyn std::error::Error>> {
