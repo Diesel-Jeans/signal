@@ -31,6 +31,7 @@ use tokio::net::TcpStream;
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use tokio::task::{AbortHandle, JoinHandle, Unconstrained};
+use tokio::time::sleep;
 use tokio::*;
 use tokio_native_tls::TlsConnector;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -141,7 +142,7 @@ impl WebsocketHandler {
 
         let promise = spawn(async move {
             if self_clone.keepalive_bool {
-                tokio::time::timeout(Duration::from_secs(KEEPALIVE_TIMEOUT_MS.into()), async {
+                set_timeout(KEEPALIVE_TIMEOUT_MS.into(), || async move {
                     self_clone.outgoing_map.lock().await.remove(&id);
                     self_clone
                         .socket
@@ -154,11 +155,10 @@ impl WebsocketHandler {
                         })))
                         .await;
                     //TODO: Kill the listener process
-                    anyhow::bail!("Timed out");
-                    Ok(()) //Needed for the type inference, will never be reached
-                });
+                    //anyhow::bail!("Timed out");
+                    //Needed for the type inference, will never be reached
+                }).await;
             }
-            ()
         });
         //Add future to hashmap
         self.outgoing_map
@@ -209,18 +209,30 @@ impl KeepAlive {
 pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocketStream<tokio_native_tls::TlsStream<TcpStream>>> {
     let address = env::var("SERVER_ADDRESS")?;
     let https_port = env::var("HTTPS_PORT")?;
-    let username = env::var("USERNAME")?;
-    let password = env::var("PASSWORD")?;
+    let username = env::var("TEST_USERNAME")?;
+    let password = env::var("TEST_PASSWORD")?;
 
     //TODO: Fix authentication
-    let auth_value = format!("{}:{}", username, password);
+    let auth_kv_pair = format!("{}:{}", username, password);
+    let auth_value = engine::general_purpose::STANDARD.encode(&auth_kv_pair);
 
-    let ws_url = format!("wss://{}:{}/v1/websocket", address, https_port);
+    let ws_url = format!(
+        "wss://{}@{}:{}/v1/websocket",
+        auth_kv_pair, address, https_port
+    );
     let mut ws_req = ws_url.clone().into_client_request()?;
-    ws_req.headers_mut().insert(
+    let mhead = ws_req.headers_mut();
+    mhead.insert(
         http::header::AUTHORIZATION,
         format!("Basic {}", auth_value).parse()?,
     );
+    mhead.insert(
+        http::header::SEC_WEBSOCKET_EXTENSIONS,
+        "permessage-deflate; client_max_window_bits"
+            .to_string()
+            .parse()?,
+    );
+    mhead.insert(http::header::USER_AGENT, "Din mor".to_string().parse()?);
 
     let mut tls_connector = NativeTlsConnector::builder();
     for cert in get_certs()? {
@@ -265,6 +277,7 @@ pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocket
 
     let (ws_stream, _) = client_async_with_config(ws_req, tls_stream, Some(conf)).await?;
 
+    println!("Reached ok");
     Ok(ws_stream)
 }
 
@@ -277,35 +290,17 @@ fn get_certs() -> Result<Vec<Certificate>> {
     )?])
 }
 
-// fn get_handle_for_ws_listener(
-//     mut sock: Arc<Mutex<StreamHandler>>,
-// ) -> (std::thread::JoinHandle<()>, mpsc::Receiver<Message>) {
-//     let (mut tx, mut rx) = mpsc::channel::<Message>();
-//     let handle = Handle::current();
-//     let mtx = tx.clone();
-//
-//     let hand = std::thread::spawn(move || {
-//         handle.block_on(async move {
-//             // println!("Entered async handler");
-//             // Lock the socket handler asynchronously
-//             while let Ok(msg) = sock.lock().await.stream.next().await.unwrap() {
-//                 match msg {
-//                     Message::Close(m) => {
-//                         break;
-//                     }
-//                     _ => {
-//                         if let Err(e) = tx.send(msg) {
-//                             break;
-//                         }
-//                         std::thread::yield_now();
-//                     }
-//                 }
-//             }
-//             std::thread::yield_now();
-//         })
-//     });
-//     (hand, rx)
-// }
+async fn set_timeout<F, Fut>(delay_ms: u64, callback: F)
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output=()> + 'static,
+{
+    // Wait for the specified duration
+    sleep(Duration::from_millis(delay_ms)).await;
+
+    // Execute the callback function
+    callback().await;
+}
 
 #[cfg(test)]
 mod wstests {

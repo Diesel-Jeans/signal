@@ -1,5 +1,7 @@
 #![allow(unused)]
 use tracing_subscriber;
+use tracing_appender;
+use chrono::prelude::*;
 
 mod account;
 mod account_authenticator;
@@ -14,9 +16,14 @@ mod server;
 
 #[tokio::main]
 pub async fn main() {
+    let file_appender = tracing_appender::rolling::hourly("logs", format!("{}.log", Local::now().to_string()));
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
-        .with_env_filter("my_app=debug,tower_http=debug")
+        .log_internal_errors(true)
+        .with_max_level(tracing::Level::DEBUG)
+        .with_line_number(true)
+        .with_writer(non_blocking)
         .init();
     server::start_server().await.unwrap();
 }

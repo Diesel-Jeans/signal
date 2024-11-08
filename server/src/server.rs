@@ -11,8 +11,8 @@ use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, OR
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
-use axum::{http, BoxError};
 use axum::{debug_handler, Json, Router};
+use axum::{http, BoxError};
 use common::signal_protobuf::Envelope;
 use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{
@@ -28,28 +28,29 @@ use uuid::Uuid;
 
 use crate::message_cache::MessageCache;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
-use axum_extra::{headers, TypedHeader};
-use axum_server::tls_rustls::RustlsConfig;
-use std::net::SocketAddr;
-use std::str::FromStr;
-use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
-use tracing::Level;
-use std::io::BufRead;
 use axum::{
     body::{self, Bytes, *},
     extract::{Extension, FromRequestParts},
-    http::{Request},
+    http::Request,
     middleware::Next,
     response::Response,
 };
+use axum_extra::{headers, TypedHeader};
+use axum_server::tls_rustls::RustlsConfig;
+use std::io::BufRead;
+use std::net::SocketAddr;
+use std::str::FromStr;
 use tonic::service::AxumBody;
+use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::trace;
+use tracing::Level;
 
-use std::sync::Arc;
-use tower::{Service, Layer, ServiceBuilder};
-use std::task::{Context, Poll};
 use async_trait::async_trait;
 use futures::future::{self, Ready};
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use tower::{Layer, Service, ServiceBuilder};
+use tower_http::trace;
 
 async fn handle_put_messages<T: SignalDatabase>(
     state: SignalServerState<T>,
@@ -301,7 +302,11 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
-    let config = RustlsConfig::from_pem_file("/home/arthur/p9/signal/server/cert/server.crt", "/home/arthur/p9/signal/server/cert/server.key").await?;
+    let config = RustlsConfig::from_pem_file(
+        "cert/server.crt",
+        "cert/server.key",
+    )
+        .await?;
 
     let cors = CorsLayer::new()
         .allow_methods([
@@ -329,8 +334,19 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/devices/:device_id", delete(delete_device_endpoint))
         .route("/v1/websocket", any(create_websocket_endpoint))
         .with_state(state)
-        .layer(cors)
-        .layer(ServiceBuilder::new().layer(axum::middleware::from_fn(log_request_body)).layer(TraceLayer::new_for_http()).layer(TraceLayer::new_for_grpc()));
+        .layer(
+            ServiceBuilder::new()
+                .layer(axum::middleware::from_fn(log_request_body))
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(trace::DefaultMakeSpan::new().level(Level::TRACE))
+                        .on_request(trace::DefaultOnRequest::new().level(Level::TRACE))
+                        .on_response(trace::DefaultOnResponse::new().level(Level::TRACE))
+                        .on_body_chunk(trace::DefaultOnBodyChunk::new()),
+                )
+                .layer(TraceLayer::new_for_grpc()),
+        )
+        .layer(cors);
     // .layer(TraceLayer::new_for_http()
     //        // .on_request(DefaultOnRequest::new().level(Level::TRACE)) // log requests at TRACE level
     //        // .on_response(DefaultOnResponse::new().level(Level::TRACE)),
@@ -367,8 +383,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 //     next.run(req).await
 // }
 
-async fn log_request_body(req: Request<AxumBody>, next: Next) -> Response
-{
+async fn log_request_body(req: Request<AxumBody>, next: Next) -> Response {
     // Split the request into its parts and body
     let (parts, body) = req.into_parts();
     trace!("Request parts: {:?}", parts);
@@ -393,7 +408,6 @@ async fn log_request_body(req: Request<AxumBody>, next: Next) -> Response
     // Pass the modified request down the stack
     next.run(req).await
 }
-
 
 #[cfg(test)]
 mod server_tests {
