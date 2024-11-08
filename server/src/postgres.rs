@@ -598,6 +598,36 @@ impl SignalDatabase for PostgresDatabase {
         otpks: Vec<UploadPreKey>,
         owner: &ProtocolAddress,
     ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query!(
+            r#"
+            DELETE FROM 
+                one_time_ec_pre_key_store
+            WHERE 
+                owner = (
+                    SELECT
+                        id
+                    FROM
+                        devices
+                    WHERE
+                        owner = (
+                            SELECT
+                                id
+                            FROM
+                                accounts
+                            WHERE
+                                aci = $1 OR
+                                pni = $1
+                        )
+                        AND devices.device_id = $2
+                )
+            "#,
+            owner.name(),
+            owner.device_id().to_string(),
+        )
+        .execute(&mut *tx)
+        .await?;
+
         for otpk in otpks {
             match sqlx::query!(
                 r#"
@@ -624,13 +654,15 @@ impl SignalDatabase for PostgresDatabase {
                 otpk.key_id.to_string(),
                 &*otpk.public_key,
             )
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             {
                 Ok(_) => (),
                 Err(err) => bail!("{}", err),
             }
         }
+
+        tx.commit().await?;
 
         Ok(())
     }
@@ -640,6 +672,36 @@ impl SignalDatabase for PostgresDatabase {
         otpks: Vec<UploadSignedPreKey>,
         owner: &ProtocolAddress,
     ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query!(
+            r#"
+            DELETE FROM 
+                one_time_pq_pre_key_store
+            WHERE 
+                owner = (
+                    SELECT
+                        id
+                    FROM
+                        devices
+                    WHERE
+                        owner = (
+                            SELECT
+                                id
+                            FROM
+                                accounts
+                            WHERE
+                                aci = $1 OR
+                                pni = $1
+                        )
+                        AND devices.device_id = $2
+                )
+            "#,
+            owner.name(),
+            owner.device_id().to_string(),
+        )
+        .execute(&mut *tx)
+        .await?;
+
         for otpk in otpks {
             match sqlx::query!(
                 r#"
@@ -667,13 +729,15 @@ impl SignalDatabase for PostgresDatabase {
                 &*otpk.public_key,
                 &*otpk.signature,
             )
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             {
                 Ok(_) => (),
                 Err(err) => bail!("{}", err),
             }
         }
+
+        tx.commit().await?;
 
         Ok(())
     }
@@ -767,6 +831,101 @@ impl SignalDatabase for PostgresDatabase {
             signature: row.signature.unwrap().into(),
         })
         .map_err(|err| err.into())
+    }
+
+    async fn count_messages(&self, address: &ProtocolAddress) -> Result<u32> {
+        let result = sqlx::query!(
+            r#"
+            SELECT
+                COUNT(*)
+            FROM
+                msq_queue
+                INNER JOIN devices on devices.id = msq_queue.receiver
+            WHERE
+                devices.owner = (
+                    SELECT
+                        id
+                    FROM
+                        accounts
+                    WHERE
+                        aci = $1 OR
+                        pni = $1
+                )
+                AND devices.device_id = $2
+            "#,
+            address.name(),
+            address.device_id().to_string()
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(result.count.unwrap_or_default() as u32)
+    }
+
+    async fn get_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
+        sqlx::query!(
+            r#"
+            SELECT
+                msq_queue.msg
+            FROM
+                msq_queue
+                INNER JOIN devices on devices.id = msq_queue.receiver
+            WHERE
+                devices.owner = (
+                    SELECT
+                        id
+                    FROM
+                        accounts
+                    WHERE
+                        aci = $1 OR
+                        pni = $1
+                )
+                AND devices.device_id = $2
+            "#,
+            address.name(),
+            address.device_id().to_string()
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .try_fold(vec![], |mut acc, msg| -> Result<Vec<Envelope>> {
+            acc.push(bincode::deserialize(&msg.msg)?);
+            Ok(acc)
+        })
+    }
+
+    async fn delete_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
+        sqlx::query!(
+            r#"
+            DELETE FROM
+                msq_queue
+            USING 
+                devices
+            WHERE 
+                devices.id = msq_queue.receiver
+            AND
+                devices.owner = (
+                    SELECT
+                        id
+                    FROM
+                        accounts
+                    WHERE
+                        aci = $1 OR
+                        pni = $1
+                )
+                AND devices.device_id = $2
+                RETURNING msq_queue.msg
+            "#,
+            address.name(),
+            address.device_id().to_string()
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .try_fold(vec![], |mut acc, msg| -> Result<Vec<Envelope>> {
+            acc.push(bincode::deserialize(&msg.msg)?);
+            Ok(acc)
+        })
     }
 }
 
