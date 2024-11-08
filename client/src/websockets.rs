@@ -1,19 +1,24 @@
-use std::collections::HashMap;
 use crate::encryption::{decrypt, encrypt};
 use anyhow::Result;
+use base64::{
+    alphabet,
+    engine::{self, general_purpose},
+    Engine as _,
+};
 use common::signal_protobuf::{
     WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
 };
 use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt, TryStream, TryStreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt, TryStream, TryStreamExt};
 use libsignal_protocol::InMemSignalProtocolStore;
 use native_tls::{Certificate, TlsConnector as NativeTlsConnector, TlsStream};
 use prost::encoding::hash_map::encode;
 use prost::Message as ProstMessage;
 use socket2::{Domain, Socket, TcpKeepalive, Type};
+use std::collections::HashMap;
 use std::env;
 use std::fmt::{Display, Formatter};
-use std::future::Future;
+use std::future::{Future, IntoFuture};
 use std::net::ToSocketAddrs;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -25,12 +30,12 @@ use surf::http::headers::ToHeaderValues;
 use tokio::net::TcpStream;
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
-use tokio::task::{JoinHandle, Unconstrained};
+use tokio::task::{AbortHandle, JoinHandle, Unconstrained};
 use tokio::*;
 use tokio_native_tls::TlsConnector;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::{frame, WebSocketConfig};
-use tokio_tungstenite::tungstenite::WebSocket;
+use tokio_tungstenite::tungstenite::{http, WebSocket};
 use tokio_tungstenite::*;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use url::Url;
@@ -73,24 +78,24 @@ pub(crate) struct WebsocketHandler {
     handle: Arc<thread::JoinHandle<()>>,
     rec_channel: Arc<mpsc::Receiver<Message>>,
     outgoing_id: u32,
-    outgoing_map: Arc<Mutex<HashMap<u32, JoinHandle<()>>>>,
+    outgoing_map: Arc<Mutex<HashMap<u32, AbortHandle>>>,
     incoming_response: Arc<Mutex<HashMap<u32, WebSocketResponseMessage>>>,
     keepalive_bool: bool,
 }
 impl WebsocketHandler {
     pub async fn try_new() -> Result<WebsocketHandler> {
         let socket = Arc::new(Mutex::new(StreamHandler::try_new().await?));
-        let (handle, rec_channel) = get_handle_for_ws_listener(socket.clone());
-        rec_channel.
-            Ok(WebsocketHandler {
-                socket,
-                handle: Arc::new(handle),
-                rec_channel: Arc::new(rec_channel),
-                outgoing_id: 0,
-                outgoing_map: Arc::new(Mutex::new(HashMap::new())),
-                keepalive_bool: true,
-                incoming_response: Arc::new(Mutex::new(HashMap::new())),
-            })
+        let (handle, rec_channel) = WebsocketHandler::get_handle_for_ws_listener(socket.clone());
+
+        Ok(WebsocketHandler {
+            socket,
+            handle: Arc::new(handle),
+            rec_channel: Arc::new(rec_channel),
+            outgoing_id: 0,
+            outgoing_map: Arc::new(Mutex::new(HashMap::new())),
+            keepalive_bool: true,
+            incoming_response: Arc::new(Mutex::new(HashMap::new())),
+        })
     }
 
     fn get_handle_for_ws_listener(
@@ -102,7 +107,7 @@ impl WebsocketHandler {
 
         let hand = std::thread::spawn(move || {
             handle.block_on(async move {
-                while let Ok(msg) = sock.lock().await.stream.next().await.unwrap() {
+                while let Some(Ok(msg)) = sock.lock().await.stream.next().await {
                     if let Err(e) = tx.send(msg) {
                         break;
                     }
@@ -115,7 +120,6 @@ impl WebsocketHandler {
     }
 
     fn on_message(message: Message) {}
-
 
     //TODO: rename to send_request and ensure it only sends requests.
     async fn send_request(&mut self, msg: Message) -> Result<(WebSocketResponseMessage)> {
@@ -139,18 +143,30 @@ impl WebsocketHandler {
             if self_clone.keepalive_bool {
                 tokio::time::timeout(Duration::from_secs(KEEPALIVE_TIMEOUT_MS.into()), async {
                     self_clone.outgoing_map.lock().await.remove(&id);
-                    self_clone.socket.lock().await.stream.send(Message::Close(Some(frame::CloseFrame { code: 3001.into(), reason: "Timed out".into() }))).await;
+                    self_clone
+                        .socket
+                        .lock()
+                        .await
+                        .stream
+                        .send(Message::Close(Some(frame::CloseFrame {
+                            code: 3001.into(),
+                            reason: "Timed out".into(),
+                        })))
+                        .await;
                     //TODO: Kill the listener process
                     anyhow::bail!("Timed out");
+                    Ok(()) //Needed for the type inference, will never be reached
                 });
             }
             ()
         });
-
         //Add future to hashmap
-        self.outgoing_map.lock().await.insert(id, promise);
+        self.outgoing_map
+            .lock()
+            .await
+            .insert(id, promise.abort_handle());
 
-        promise.await?;
+        promise.await;
 
         if let Some(incoming) = self.incoming_response.lock().await.get(&id) {
             Ok(incoming.clone())
@@ -193,9 +209,18 @@ impl KeepAlive {
 pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocketStream<tokio_native_tls::TlsStream<TcpStream>>> {
     let address = env::var("SERVER_ADDRESS")?;
     let https_port = env::var("HTTPS_PORT")?;
-    let ws_url =
-        ("wss://".to_string() + address.as_str() + ":" + https_port.as_str() + "/v1/websocket")
-            .into_client_request()?;
+    let username = env::var("USERNAME")?;
+    let password = env::var("PASSWORD")?;
+
+    //TODO: Fix authentication
+    let auth_value = format!("{}:{}", username, password);
+
+    let ws_url = format!("wss://{}:{}/v1/websocket", address, https_port);
+    let mut ws_req = ws_url.clone().into_client_request()?;
+    ws_req.headers_mut().insert(
+        http::header::AUTHORIZATION,
+        format!("Basic {}", auth_value).parse()?,
+    );
 
     let mut tls_connector = NativeTlsConnector::builder();
     for cert in get_certs()? {
@@ -236,7 +261,9 @@ pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocket
         ..WebSocketConfig::default()
     };
 
-    let (ws_stream, _) = client_async_with_config(ws_url, tls_stream, Some(conf)).await?;
+    println!("{}", ws_req.uri().to_string());
+
+    let (ws_stream, _) = client_async_with_config(ws_req, tls_stream, Some(conf)).await?;
 
     Ok(ws_stream)
 }
@@ -250,35 +277,35 @@ fn get_certs() -> Result<Vec<Certificate>> {
     )?])
 }
 
-fn get_handle_for_ws_listener(
-    mut sock: Arc<Mutex<StreamHandler>>,
-) -> (std::thread::JoinHandle<()>, mpsc::Receiver<Message>) {
-    let (mut tx, mut rx) = mpsc::channel::<Message>();
-    let handle = Handle::current();
-    let mtx = tx.clone();
-
-    let hand = std::thread::spawn(move || {
-        handle.block_on(async move {
-            // println!("Entered async handler");
-            // Lock the socket handler asynchronously
-            while let Ok(msg) = sock.lock().await.stream.next().await.unwrap() {
-                match msg {
-                    Message::Close(m) => {
-                        break;
-                    }
-                    _ => {
-                        if let Err(e) = tx.send(msg) {
-                            break;
-                        }
-                        std::thread::yield_now();
-                    }
-                }
-            }
-            std::thread::yield_now();
-        })
-    });
-    (hand, rx)
-}
+// fn get_handle_for_ws_listener(
+//     mut sock: Arc<Mutex<StreamHandler>>,
+// ) -> (std::thread::JoinHandle<()>, mpsc::Receiver<Message>) {
+//     let (mut tx, mut rx) = mpsc::channel::<Message>();
+//     let handle = Handle::current();
+//     let mtx = tx.clone();
+//
+//     let hand = std::thread::spawn(move || {
+//         handle.block_on(async move {
+//             // println!("Entered async handler");
+//             // Lock the socket handler asynchronously
+//             while let Ok(msg) = sock.lock().await.stream.next().await.unwrap() {
+//                 match msg {
+//                     Message::Close(m) => {
+//                         break;
+//                     }
+//                     _ => {
+//                         if let Err(e) = tx.send(msg) {
+//                             break;
+//                         }
+//                         std::thread::yield_now();
+//                     }
+//                 }
+//             }
+//             std::thread::yield_now();
+//         })
+//     });
+//     (hand, rx)
+// }
 
 #[cfg(test)]
 mod wstests {
