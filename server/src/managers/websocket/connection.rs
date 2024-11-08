@@ -48,20 +48,22 @@ pub enum UserIdentity {
 }
 
 #[derive(Debug)]
-pub struct WebSocketConnection<T: WSStream + Debug> {
+pub struct WebSocketConnection<T: WSStream + Debug, U: SignalDatabase> {
     identity: UserIdentity,
     socket_address: SocketAddr,
     ws: ConnectionState<T>,
     pending_requests: HashSet<u64>,
+    state: SignalServerState<U>
 }
 
-impl<T: WSStream + Debug + Send> WebSocketConnection<T> {
-    pub fn new(identity: UserIdentity, socket_addr: SocketAddr, ws: T) -> Self {
+impl<T: WSStream + Debug + Send, U: SignalDatabase + Send> WebSocketConnection<T, U> {
+    pub fn new(identity: UserIdentity, socket_addr: SocketAddr, ws: T, state: SignalServerState<U>) -> Self {
         Self {
             identity,
             socket_address: socket_addr,
             ws: ConnectionState::Active(ws),
             pending_requests: HashSet::new(),
+            state: state
         }
     }
 
@@ -89,9 +91,9 @@ impl<T: WSStream + Debug + Send> WebSocketConnection<T> {
 
     pub async fn send_messages(&mut self, cached_only: bool) -> bool{
         // TODO: use state.msg_manager when messagemanager is implemented
-        let msg_manager = MessagesManager{};
+        //let msg_mgr = self.state.
         
-        let addr = self.protocol_address();
+        /*let addr = self.protocol_address();
         let res = msg_manager.get_messages_for_device(addr.name(), addr.device_id(), cached_only).await;
         let envelopes = match res {
             Ok(x) => x,
@@ -104,7 +106,8 @@ impl<T: WSStream + Debug + Send> WebSocketConnection<T> {
         for envelope in envelopes{
             self.send_message(envelope).await.map_err(|e| println!("{}", e));
         }
-        return true
+        return true*/
+        todo!();
     }
 
     fn create_message(
@@ -166,9 +169,8 @@ impl<T: WSStream + Debug + Send> WebSocketConnection<T> {
         }
     }
 
-    pub async fn on_receive<U: SignalDatabase>(
+    pub async fn on_receive(
         &mut self,
-        state: SignalServerState<U>,
         proto_message: WebSocketMessage,
     ) {
         todo!()
@@ -176,23 +178,9 @@ impl<T: WSStream + Debug + Send> WebSocketConnection<T> {
 }
 
 
-// Dummy message manager
-use anyhow::Result;
-struct MessagesManager{}
-impl MessagesManager{
-    pub async fn get_messages_for_device(
-        &self,
-        user_id: &str,
-        device_id: DeviceId,
-        cached_msg_only: bool,
-    ) -> Result<Vec<Envelope>> {
-        todo!()
-    }
-}
-
-
 #[async_trait::async_trait]
-impl <T: WSStream + Debug + Send + 'static> MessageAvailabilityListener for WebSocketConnection<T> {
+impl<T, U> MessageAvailabilityListener for WebSocketConnection<T, U>
+where T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static {
     async fn handle_new_messages_available(&mut self) -> bool {
         if !self.is_active(){
             return false
@@ -221,14 +209,16 @@ impl<T: WSStream + Debug> ConnectionState<T> {
     }
 }
 
-pub type ClientConnection<T> = Arc<Mutex<WebSocketConnection<T>>>;
-pub type ConnectionMap<T> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnection<T>>>>;
+pub type ClientConnection<T, U> = Arc<Mutex<WebSocketConnection<T, U>>>;
+pub type ConnectionMap<T, U> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnection<T, U>>>>;
 
 #[cfg(test)]
 pub(crate) mod test {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
+    use crate::managers::mock_db::MockDB;
+    use crate::managers::state::SignalServerState;
     use crate::managers::websocket::net_helper::{self, unpack_messages};
     use common::signal_protobuf::{envelope, Envelope, WebSocketMessage, WebSocketRequestMessage};
     use common::web_api::SignalMessages;
@@ -309,7 +299,7 @@ pub(crate) mod test {
         device_id: u32,
         socket_addr: &str,
     ) -> (
-        WebSocketConnection<MockSocket>,
+        WebSocketConnection<MockSocket, MockDB>,
         Sender<Result<Message, Error>>,
         Receiver<Message>,
     ) {
@@ -317,7 +307,7 @@ pub(crate) mod test {
         let who = SocketAddr::from_str(socket_addr).unwrap();
         let paddr = ProtocolAddress::new(name.to_string(), device_id.into());
 
-        let ws = WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, mock);
+        let ws = WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, mock, SignalServerState::<MockDB>::new());
 
         (ws, sender, receiver)
     }

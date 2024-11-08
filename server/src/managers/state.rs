@@ -24,7 +24,7 @@ use super::mock_db::MockDB;
 #[derive(Clone, Debug)]
 pub struct SignalServerState<T: SignalDatabase> {
     db: T,
-    websocket_manager: WebSocketManager<WebSocket>,
+    websocket_manager: WebSocketManager<WebSocket, T>,
     account_manager: AccountManager,
     key_manager: KeyManager,
 }
@@ -33,7 +33,7 @@ impl<T: SignalDatabase> SignalServerState<T> {
     pub(self) fn database(&self) -> T {
         self.db.clone()
     }
-    pub fn websocket_manager(&self) -> &WebSocketManager<WebSocket> {
+    pub fn websocket_manager(&self) -> &WebSocketManager<WebSocket, T> {
         &self.websocket_manager
     }
     pub fn account_manager(&self) -> &AccountManager {

@@ -266,8 +266,8 @@ async fn create_websocket_endpoint(
                     UserIdentity::AuthenticatedDevice(authenticated_device),
                     addr,
                     socket,
+                    state
                 ),
-                state,
             )
             .await
         }
