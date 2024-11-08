@@ -59,6 +59,8 @@ const STALE_THRESHOLD_MS: u32 = 5 * MINUTE;
 // close the socket.
 const KEEPALIVE_TIMEOUT_MS: u32 = 30 * SECOND;
 
+const MAX_MESSAGE_SIZE: u32 = 512 * 1024;
+
 struct StreamHandler {
     pub stream: WebSocketStream<tokio_native_tls::TlsStream<TcpStream>>,
 }
@@ -78,29 +80,35 @@ pub(crate) struct WebsocketHandler {
     pub(crate) socket: Arc<Mutex<StreamHandler>>,
     handle: Arc<thread::JoinHandle<()>>,
     rec_channel: Arc<mpsc::Receiver<Message>>,
-    outgoing_id: u32,
-    outgoing_map: Arc<Mutex<HashMap<u32, AbortHandle>>>,
-    incoming_response: Arc<Mutex<HashMap<u32, WebSocketResponseMessage>>>,
+    outgoing_id: u64,
+    outgoing_map: Arc<Mutex<HashMap<u64, AbortHandle>>>,
+    incoming_response: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>>,
     keepalive_bool: bool,
 }
 impl WebsocketHandler {
     pub async fn try_new() -> Result<WebsocketHandler> {
         let socket = Arc::new(Mutex::new(StreamHandler::try_new().await?));
-        let (handle, rec_channel) = WebsocketHandler::get_handle_for_ws_listener(socket.clone());
+        let res: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let out: Arc<Mutex<HashMap<u64, AbortHandle>>> = Arc::new(Mutex::new(HashMap::new()));
+        let (handle, rec_channel) =
+            WebsocketHandler::get_handle_for_ws_listener(socket.clone(), res.clone(), out.clone());
 
         Ok(WebsocketHandler {
             socket,
             handle: Arc::new(handle),
             rec_channel: Arc::new(rec_channel),
             outgoing_id: 0,
-            outgoing_map: Arc::new(Mutex::new(HashMap::new())),
+            outgoing_map: out,
             keepalive_bool: true,
-            incoming_response: Arc::new(Mutex::new(HashMap::new())),
+            incoming_response: res,
         })
     }
 
     fn get_handle_for_ws_listener(
         mut sock: Arc<Mutex<StreamHandler>>,
+        mut incoming: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>>,
+        mut outgoing: Arc<Mutex<HashMap<u64, AbortHandle>>>,
     ) -> (std::thread::JoinHandle<()>, mpsc::Receiver<Message>) {
         let (mut tx, mut rx) = mpsc::channel::<Message>();
         let handle = Handle::current();
@@ -109,9 +117,38 @@ impl WebsocketHandler {
         let hand = std::thread::spawn(move || {
             handle.block_on(async move {
                 while let Some(Ok(msg)) = sock.lock().await.stream.next().await {
-                    if let Err(e) = tx.send(msg) {
-                        break;
+                    println!("Got message");
+                    match msg {
+                        Message::Text(msg) => {
+                            println!("Is Text type");
+                            if let Err(e) = mtx.send(Message::Text(msg)) {
+                                break;
+                            }
+                        }
+
+                        Message::Binary(data) => {
+                            if let Ok(wsrm) = WebSocketResponseMessage::decode(data.as_slice()) {
+                                let id = match wsrm.id {
+                                    Some(id) => id,
+                                    _ => break,
+                                };
+                                if let Some(hand) = outgoing.lock().await.get(&id) {
+                                    hand.abort();
+                                    outgoing.lock().await.remove(&id);
+                                }
+
+                                incoming.lock().await.insert(id, wsrm);
+                            } else {
+                                break;
+                            }
+                        }
+
+                        _ => continue,
                     }
+
+                    // if let Err(e) = tx.send(msg) {
+                    //     break;
+                    // }
 
                     std::thread::yield_now();
                 }
@@ -120,7 +157,15 @@ impl WebsocketHandler {
         (hand, rx)
     }
 
-    fn on_message(message: Message) {}
+    async fn send_text_no_response_expected(&mut self, text: String) -> Result<()> {
+        Ok(self
+            .socket
+            .lock()
+            .await
+            .stream
+            .send(Message::Text(text))
+            .await?)
+    }
 
     //TODO: rename to send_request and ensure it only sends requests.
     async fn send_request(&mut self, msg: Message) -> Result<(WebSocketResponseMessage)> {
@@ -143,21 +188,27 @@ impl WebsocketHandler {
         let promise = spawn(async move {
             if self_clone.keepalive_bool {
                 set_timeout(KEEPALIVE_TIMEOUT_MS.into(), || async move {
-                    self_clone.outgoing_map.lock().await.remove(&id);
+                    self_clone
+                        .outgoing_map
+                        .lock()
+                        .await
+                        .remove(&id)
+                        .unwrap()
+                        .abort();
                     self_clone
                         .socket
                         .lock()
                         .await
                         .stream
                         .send(Message::Close(Some(frame::CloseFrame {
-                            code: 3001.into(),
+                            code: 3008.into(),
                             reason: "Timed out".into(),
                         })))
                         .await;
                     //TODO: Kill the listener process
-                    //anyhow::bail!("Timed out");
-                    //Needed for the type inference, will never be reached
-                }).await;
+                })
+                    .await;
+                println!("Timed out");
             }
         });
         //Add future to hashmap
@@ -173,6 +224,11 @@ impl WebsocketHandler {
         } else {
             anyhow::bail!("Incoming response missing")
         }
+    }
+
+    //TODO: Send TLS close_notify when closing connection
+    pub async fn close(&mut self, code: u16, reason: String) -> Result<()> {
+        Ok(self.socket.lock().await.stream.close(Some(frame::CloseFrame { code: code.into(), reason: reason.into() })).await?)
     }
 }
 
@@ -232,7 +288,7 @@ pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocket
             .to_string()
             .parse()?,
     );
-    mhead.insert(http::header::USER_AGENT, "Din mor".to_string().parse()?);
+    mhead.insert(http::header::USER_AGENT, "Rust kan sutte min pik".to_string().parse()?);
 
     let mut tls_connector = NativeTlsConnector::builder();
     for cert in get_certs()? {
@@ -326,23 +382,18 @@ mod wstests {
         let hand = handler.socket.clone();
 
         handler
-            .send_request(Message::Text(format!(
+            .send_text_no_response_expected(format!(
                 "Hello World! {}",
                 SystemTime::now()
                     .duration_since(std::time::SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs()
-            )))
+            ))
             .await
             .unwrap();
 
         handler
-            .send_request(Message::Text("Hello, world!".to_string()))
-            .await
-            .unwrap();
-
-        handler
-            .send_request(Message::Ping(vec![1, 2, 3].into()))
+            .send_text_no_response_expected("Hello, world!".to_string())
             .await
             .unwrap();
 
@@ -366,6 +417,9 @@ mod wstests {
                 _ => println!("Non-text message"),
             }
         }
+
+        handler.close(1000, "Normal closure".into());
+
         assert!(true)
     }
 }
