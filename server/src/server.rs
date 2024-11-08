@@ -5,13 +5,13 @@ use crate::managers::state::SignalServerState;
 use crate::managers::websocket::connection::{UserIdentity, WebSocketConnection};
 use crate::postgres::PostgresDatabase;
 use anyhow::Result;
-use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
+use axum::extract::{connect_info::ConnectInfo, FromRequest, Host, Path, State};
 use axum::handler::HandlerWithoutStateExt;
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
-use axum::BoxError;
+use axum::{http, BoxError};
 use axum::{debug_handler, Json, Router};
 use common::signal_protobuf::Envelope;
 use common::web_api::authorization::BasicAuthorizationHeader;
@@ -32,6 +32,24 @@ use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::Level;
+use std::io::BufRead;
+use axum::{
+    body::{self, Bytes, *},
+    extract::{Extension, FromRequestParts},
+    http::{Request},
+    middleware::Next,
+    response::Response,
+};
+use tonic::service::AxumBody;
+use tracing::trace;
+
+use std::sync::Arc;
+use tower::{Service, Layer, ServiceBuilder};
+use std::task::{Context, Poll};
+use async_trait::async_trait;
+use futures::future::{self, Ready};
 
 async fn handle_put_messages<T: SignalDatabase>(
     state: SignalServerState<T>,
@@ -269,7 +287,7 @@ async fn create_websocket_endpoint(
                 ),
                 state,
             )
-            .await
+                .await
         }
     })
 }
@@ -283,7 +301,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
-    let config = RustlsConfig::from_pem_file("cert/server.crt", "cert/server.key").await?;
+    let config = RustlsConfig::from_pem_file("/home/arthur/p9/signal/server/cert/server.crt", "/home/arthur/p9/signal/server/cert/server.key").await?;
 
     let cors = CorsLayer::new()
         .allow_methods([
@@ -298,7 +316,6 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
 
     let state = SignalServerState::<PostgresDatabase>::new().await;
-
     let app = Router::new()
         .route("/", get(|| async { "Hello from Signal Server" }))
         .route("/v1/messages", get(get_messages_endpoint))
@@ -312,7 +329,14 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/devices/:device_id", delete(delete_device_endpoint))
         .route("/v1/websocket", any(create_websocket_endpoint))
         .with_state(state)
-        .layer(cors);
+        .layer(cors)
+        .layer(ServiceBuilder::new().layer(axum::middleware::from_fn(log_request_body)).layer(TraceLayer::new_for_http()).layer(TraceLayer::new_for_grpc()));
+    // .layer(TraceLayer::new_for_http()
+    //        // .on_request(DefaultOnRequest::new().level(Level::TRACE)) // log requests at TRACE level
+    //        // .on_response(DefaultOnResponse::new().level(Level::TRACE)),
+    // )
+    // .layer(axum::middleware::from_fn(log_request_body));
+    // axum::middleware::
 
     let address = env::var("SERVER_ADDRESS")?;
     let https_port = env::var("HTTPS_PORT")?;
@@ -334,6 +358,42 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+// async fn log_headers(req: Request<AxumBody>, next: Next) -> Response {
+//     // Log headers here
+//     trace!("Request Headers: {:#?}", req.headers());
+//
+//     // Proceed with the request
+//     next.run(req).await
+// }
+
+async fn log_request_body(req: Request<AxumBody>, next: Next) -> Response
+{
+    // Split the request into its parts and body
+    let (parts, body) = req.into_parts();
+    trace!("Request parts: {:?}", parts);
+    // Convert the body `B` into bytes
+    let body_bytes = match to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!("Failed to read request body: {:?}", e);
+            Bytes::new()
+        }
+    };
+
+    // Log the body content
+    trace!(request_body = ?String::from_utf8_lossy(&body_bytes));
+
+    // Re-create the body from the extracted bytes
+    let new_body = Body::from(body_bytes.clone());
+
+    // Reassemble the request with the new body
+    let req = Request::from_parts(parts, new_body);
+
+    // Pass the modified request down the stack
+    next.run(req).await
+}
+
 
 #[cfg(test)]
 mod server_tests {
