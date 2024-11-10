@@ -176,6 +176,7 @@ mod message_manager_tests {
         let auth_token = vec![0];
         let salt = String::from("salt");
         let registration_id = 0;
+        let pni_registration_id = 0;
         return Device::new(
             device_id.into(),
             name.to_string(),
@@ -184,6 +185,7 @@ mod message_manager_tests {
             auth_token,
             salt,
             registration_id,
+            pni_registration_id,
         );
     }
 

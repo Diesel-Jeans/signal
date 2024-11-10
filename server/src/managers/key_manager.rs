@@ -294,6 +294,7 @@ mod key_manager_tests {
     async fn create_authenticated_device(
         device_id: DeviceId,
         registration_id: u32,
+        pni_registration_id: u32,
         phone_nr: String,
         identity_key: IdentityKey,
     ) -> AuthenticatedDevice {
@@ -305,6 +306,7 @@ mod key_manager_tests {
             Vec::<u8>::new(),
             "salt".to_owned(),
             registration_id,
+            pni_registration_id,
         );
         let device_capabilities = DeviceCapabilities {
             storage: false,
@@ -359,6 +361,7 @@ mod key_manager_tests {
             0,
             "no token".into(),
             "no salt".into(),
+            1,
             1,
         );
 
@@ -521,9 +524,14 @@ mod key_manager_tests {
             .await
             .unwrap();
 
-        let auth_device1 =
-            create_authenticated_device(0.into(), 0, "key_manager_test1".to_string(), identity_key)
-                .await;
+        let auth_device1 = create_authenticated_device(
+            0.into(),
+            0,
+            0,
+            "key_manager_test1".to_string(),
+            identity_key,
+        )
+        .await;
 
         let keys = km
             .handle_get_keys(
@@ -570,6 +578,7 @@ mod key_manager_tests {
         let identity_key = KeyPair::generate(&mut csprng);
         let auth_device = create_authenticated_device(
             target_device_id,
+            0,
             0,
             "key_manager_test2".to_string(),
             IdentityKey::from(identity_key.public_key),
@@ -654,6 +663,7 @@ mod key_manager_tests {
             .unwrap();
         let auth_device = create_authenticated_device(
             device_id,
+            0,
             0,
             "key_manager_test3".to_string(),
             IdentityKey::new(KeyPair::generate(&mut OsRng).public_key),
