@@ -20,26 +20,7 @@ use crate::message_cache::MessageAvailabilityListener;
 use prost::{bytes::Bytes, Message as PMessage};
 
 use super::net_helper::{create_request, current_millis, generate_req_id};
-
-#[async_trait::async_trait]
-pub trait WSStream {
-    async fn recv(&mut self) -> Option<Result<Message, Error>>;
-    async fn send(&mut self, msg: Message) -> Result<(), Error>;
-    async fn close(self) -> Result<(), Error>;
-}
-
-#[async_trait::async_trait]
-impl WSStream for WebSocket {
-    async fn recv(&mut self) -> Option<Result<Message, Error>> {
-        self.recv().await
-    }
-    async fn send(&mut self, msg: Message) -> Result<(), Error> {
-        self.send(msg).await
-    }
-    async fn close(self) -> Result<(), Error> {
-        self.close().await
-    }
-}
+use super::wsstream::WSStream;
 
 #[derive(Debug)]
 pub enum UserIdentity {
@@ -217,7 +198,7 @@ pub(crate) mod test {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
-    use crate::managers::mock_db::MockDB;
+    use crate::managers::mock_helper::{MockDB, MockSocket};
     use crate::managers::state::SignalServerState;
     use crate::managers::websocket::net_helper::{self, unpack_messages};
     use common::signal_protobuf::{envelope, Envelope, WebSocketMessage, WebSocketRequestMessage};
@@ -235,45 +216,6 @@ pub(crate) mod test {
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
-    #[derive(Debug)]
-    pub struct MockSocket {
-        client_sender: Receiver<Result<Message, Error>>,
-        client_receiver: Sender<Message>,
-    }
-
-    impl MockSocket {
-        fn new() -> (Self, Sender<Result<Message, Error>>, Receiver<Message>) {
-            let (send_to_socket, client_sender) = channel(10); // Queue for test -> socket
-            let (client_receiver, receive_from_socket) = channel(10); // Queue for socket -> test
-
-            (
-                Self {
-                    client_sender,
-                    client_receiver,
-                },
-                send_to_socket,
-                receive_from_socket,
-            )
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl WSStream for MockSocket {
-        async fn recv(&mut self) -> Option<Result<Message, Error>> {
-            self.client_sender.recv().await
-        }
-
-        async fn send(&mut self, msg: Message) -> Result<(), Error> {
-            self.client_receiver
-                .send(msg)
-                .await
-                .map_err(|_| Error::new("Send failed".to_string()))
-        }
-
-        async fn close(self) -> Result<(), Error> {
-            Ok(())
-        }
-    }
 
     pub fn mock_envelope() -> Envelope {
         Envelope {
@@ -310,26 +252,6 @@ pub(crate) mod test {
         let ws = WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, mock, SignalServerState::<MockDB>::new());
 
         (ws, sender, receiver)
-    }
-
-    #[tokio::test]
-    async fn test_mock() {
-        let (mut mock, mut sender, mut receiver) = MockSocket::new();
-
-        tokio::spawn(async move {
-            if let Some(Ok(Message::Text(x))) = mock.recv().await {
-                mock.send(Message::Text(x)).await
-            } else {
-                panic!("Expected Text Message");
-            }
-        });
-
-        sender.send(Ok(Message::Text("hello".to_string()))).await;
-
-        match receiver.recv().await.unwrap() {
-            Message::Text(x) => assert!(x == "hello", "Expected 'hello' in test_mock"),
-            _ => panic!("Did not receive text message"),
-        }
     }
 
     #[tokio::test]

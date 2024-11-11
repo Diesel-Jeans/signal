@@ -21,7 +21,7 @@ use super::{
 use axum::extract::ws::WebSocket;
 
 #[cfg(test)]
-use super::mock_db::MockDB;
+use super::mock_helper::MockDB;
 
 #[derive(Clone, Debug)]
 pub struct SignalServerState<T: SignalDatabase + Send + 'static> {

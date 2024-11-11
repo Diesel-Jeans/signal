@@ -32,8 +32,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
 use super::connection::{
-    ClientConnection, ConnectionMap, ConnectionState, WSStream, WebSocketConnection,
+    ClientConnection, ConnectionMap, ConnectionState, WebSocketConnection,
 };
+use super::wsstream::WSStream;
 use crate::account::Account;
 use crate::database::SignalDatabase;
 use crate::error::{ApiError, SocketManagerError};
@@ -189,11 +190,11 @@ pub(crate) mod test {
     use common::web_api::SignalMessages;
     use prost::Message as PMessage;
 
-    use crate::managers::mock_db::MockDB;
+    use crate::managers::mock_helper::{MockDB, MockSocket};
     use crate::managers::state;
     use crate::managers::state::SignalServerState;
     use crate::managers::websocket::connection::test::{
-        create_connection, mock_envelope, MockSocket,
+        create_connection, mock_envelope,
     };
     use crate::managers::websocket::connection::{ClientConnection, WebSocketConnection};
     use crate::managers::websocket::net_helper;
