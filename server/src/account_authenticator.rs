@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use axum::{
     async_trait,
     extract::{FromRequestParts, State},
@@ -15,11 +17,11 @@ use crate::{
     account::{Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
     error::ApiError,
-    managers::state::SignalServerState,
+    managers::{state::SignalServerState, websocket::wsstream::WSStream},
 };
 
 #[async_trait]
-impl<T: SignalDatabase> FromRequestParts<SignalServerState<T>> for AuthenticatedDevice
+impl<T: SignalDatabase, U: WSStream + Debug> FromRequestParts<SignalServerState<T, U>> for AuthenticatedDevice
 where
     T: Sync + Send,
 {
@@ -27,7 +29,7 @@ where
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &SignalServerState<T>,
+        state: &SignalServerState<T, U>,
     ) -> Result<Self, Self::Rejection> {
         let TypedHeader(Authorization(basic)) =
             TypedHeader::<Authorization<Basic>>::from_request_parts(parts, state)
@@ -69,8 +71,8 @@ where
     }
 }
 
-async fn authenticate_device<T: SignalDatabase + Send>(
-    state: &SignalServerState<T>,
+async fn authenticate_device<T: SignalDatabase, U: WSStream + Debug>(
+    state: &SignalServerState<T, U>,
     service_id: &ServiceId,
     device_id: u32,
     password: &str,

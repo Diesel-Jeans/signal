@@ -29,16 +29,16 @@ pub enum UserIdentity {
 }
 
 #[derive(Debug)]
-pub struct WebSocketConnection<T: WSStream + Debug, U: SignalDatabase> {
+pub struct WebSocketConnection<W: WSStream + Debug, DB: SignalDatabase> {
     identity: UserIdentity,
     socket_address: SocketAddr,
-    ws: ConnectionState<T>,
+    ws: ConnectionState<W>,
     pending_requests: HashSet<u64>,
-    state: SignalServerState<U>
+    state: SignalServerState<DB, W>
 }
 
-impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static> WebSocketConnection<T, U> {
-    pub fn new(identity: UserIdentity, socket_addr: SocketAddr, ws: T, state: SignalServerState<U>) -> Self {
+impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static> WebSocketConnection<W, DB> {
+    pub fn new(identity: UserIdentity, socket_addr: SocketAddr, ws: W, state: SignalServerState<DB, W>) -> Self {
         Self {
             identity,
             socket_address: socket_addr,
@@ -238,6 +238,7 @@ pub(crate) mod test {
         name: &str,
         device_id: u32,
         socket_addr: &str,
+        state: SignalServerState::<MockDB, MockSocket>
     ) -> (
         WebSocketConnection<MockSocket, MockDB>,
         Sender<Result<Message, Error>>,
@@ -247,14 +248,15 @@ pub(crate) mod test {
         let who = SocketAddr::from_str(socket_addr).unwrap();
         let paddr = ProtocolAddress::new(name.to_string(), device_id.into());
 
-        let ws = WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, mock, SignalServerState::<MockDB>::new());
+        let ws = WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, mock, state);
 
         (ws, sender, receiver)
     }
 
     #[tokio::test]
     async fn test_send_and_recv() {
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
+        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
 
         sender.send(Ok(Message::Text("hello".to_string()))).await;
 
@@ -277,7 +279,8 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_close() {
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
+        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
 
         assert!(client.is_active());
         client.close().await;
@@ -286,7 +289,8 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_close_reason() {
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
+        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
         assert!(client.is_active());
         client.close_reason(666, "test").await;
         assert!(!client.is_active());
@@ -303,7 +307,8 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_send_message() {
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
+        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
         let env = mock_envelope();
         client.send_message(env.clone()).await;
 

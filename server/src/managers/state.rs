@@ -1,4 +1,6 @@
-use super::websocket::connection::WebSocketConnection;
+use std::fmt::Debug;
+
+use super::{mock_helper::MockSocket, websocket::{connection::WebSocketConnection, wsstream::WSStream}};
 use crate::{
     account::{self, Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
@@ -23,21 +25,34 @@ use axum::extract::ws::WebSocket;
 #[cfg(test)]
 use super::mock_helper::MockDB;
 
-#[derive(Clone, Debug)]
-pub struct SignalServerState<T: SignalDatabase + Send + 'static> {
+#[derive(Debug)]
+pub struct SignalServerState<T: SignalDatabase, U: WSStream + Debug> {
     db: T,
-    websocket_manager: WebSocketManager<WebSocket, T>,
+    websocket_manager: WebSocketManager<U, T>,
     account_manager: AccountManager,
     key_manager: KeyManager,
-    message_manager: MessagesManager<T, WebSocketConnection<WebSocket, T>>,
-    message_cache: MessageCache<WebSocketConnection<WebSocket, T>>,
+    message_manager: MessagesManager<T, WebSocketConnection<U, T>>,
+    message_cache: MessageCache<WebSocketConnection<U, T>>,
 }
 
-impl<T: SignalDatabase + Send> SignalServerState<T> {
+impl<T: SignalDatabase + Clone, U: WSStream + Debug> Clone for SignalServerState<T, U> {
+    fn clone(&self) -> Self {
+        Self {
+            db: self.db.clone(),
+            websocket_manager: self.websocket_manager.clone(),
+            account_manager: self.account_manager.clone(),
+            key_manager: self.key_manager.clone(),
+            message_manager: self.message_manager.clone(),
+            message_cache: self.message_cache.clone(),
+        }
+    }
+}
+
+impl<T: SignalDatabase, U: WSStream + Debug> SignalServerState<T, U> {
     pub(self) fn database(&self) -> T {
         self.db.clone()
     }
-    pub fn websocket_manager(&self) -> &WebSocketManager<WebSocket, T> {
+    pub fn websocket_manager(&self) -> &WebSocketManager<U, T> {
         &self.websocket_manager
     }
     pub fn account_manager(&self) -> &AccountManager {
@@ -47,17 +62,17 @@ impl<T: SignalDatabase + Send> SignalServerState<T> {
         &self.key_manager
     }
 
-    pub fn message_manager(&self) -> &MessagesManager<T, WebSocketConnection<WebSocket, T>> {
+    pub fn message_manager(&self) -> &MessagesManager<T, WebSocketConnection<U, T>> {
         &self.message_manager
     }
 
-    pub fn message_cache(&self) -> &MessageCache<WebSocketConnection<WebSocket, T>> {
+    pub fn message_cache(&self) -> &MessageCache<WebSocketConnection<U, T>> {
         &self.message_cache
     }
 }
 
 #[cfg(test)]
-impl SignalServerState<MockDB> {
+impl SignalServerState<MockDB, MockSocket> {
     pub fn new() -> Self {
         let db = MockDB {};
         let cache = MessageCache::connect();
@@ -73,7 +88,7 @@ impl SignalServerState<MockDB> {
     }
 }
 
-impl SignalServerState<PostgresDatabase> {
+impl SignalServerState<PostgresDatabase, WebSocket> {
     pub async fn new() -> Self {
         let db = PostgresDatabase::connect("DATABASE_URL".to_string()).await;
         let cache = MessageCache::connect();
@@ -88,7 +103,7 @@ impl SignalServerState<PostgresDatabase> {
     }
 }
 
-impl<T: SignalDatabase> SignalServerState<T> {
+impl<T: SignalDatabase, U: WSStream + Debug> SignalServerState<T, U> {
     pub async fn create_account(
         &self,
         phone_number: String,

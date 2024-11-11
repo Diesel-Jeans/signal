@@ -3,6 +3,7 @@ use crate::database::SignalDatabase;
 use crate::error::ApiError;
 use crate::managers::state::SignalServerState;
 use crate::managers::websocket::connection::{UserIdentity, WebSocketConnection};
+use crate::managers::websocket::wsstream::WSStream;
 use crate::postgres::PostgresDatabase;
 use anyhow::Result;
 use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
@@ -32,9 +33,11 @@ use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::fmt::Debug;
 
-async fn handle_put_messages<T: SignalDatabase>(
-    state: SignalServerState<T>,
+
+async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
+    state: SignalServerState<T, U>,
     address: ProtocolAddress,
     payload: SignalMessages,
 ) -> Result<(), ApiError> {
@@ -45,15 +48,15 @@ async fn handle_put_messages<T: SignalDatabase>(
     todo!()
 }
 
-async fn handle_get_messages<T: SignalDatabase>(
-    state: SignalServerState<T>,
+async fn handle_get_messages<T: SignalDatabase, U: WSStream + Debug>(
+    state: SignalServerState<T, U>,
     address: ProtocolAddress,
 ) {
     println!("Get messages")
 }
 
-async fn handle_post_registration<T: SignalDatabase>(
-    state: SignalServerState<T>,
+async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
+    state: SignalServerState<T, U>,
     auth_header: BasicAuthorizationHeader,
     registration: RegistrationRequest,
 ) -> Result<RegistrationResponse, ApiError> {
@@ -161,7 +164,7 @@ fn parse_service_id(string: String) -> Result<ServiceId, ApiError> {
 /// Handler for the PUT v1/messages/{address} endpoint.
 #[debug_handler]
 async fn put_messages_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase>>,
+    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
     Path(address): Path<String>,
     Json(payload): Json<SignalMessages>, // TODO: Multiple messages could be sent at one time
 ) -> Result<(), ApiError> {
@@ -171,14 +174,14 @@ async fn put_messages_endpoint(
 
 /// Handler for the GET v1/messages endpoint.
 #[debug_handler]
-async fn get_messages_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
+async fn get_messages_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
     // TODO: Call `handle_get_messages`
 }
 
 /// Handler for the POST v1/registration endpoint.
 #[debug_handler]
 async fn post_registration_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase>>,
+    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
     headers: HeaderMap,
     Json(registration): Json<RegistrationRequest>,
 ) -> Result<Json<RegistrationResponse>, ApiError> {
@@ -209,44 +212,44 @@ async fn post_registration_endpoint(
 
 /// Handler for the GET v2/keys endpoint.
 #[debug_handler]
-async fn get_keys_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
+async fn get_keys_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
     // TODO: Call `handle_get_keys`
 }
 
 /// Handler for the POST v2/keys/check endpoint.
 #[debug_handler]
-async fn post_keycheck_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
+async fn post_keycheck_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
     // TODO: Call `handle_post_keycheck`
 }
 
 /// Handler for the PUT v2/keys endpoint.
 #[debug_handler]
-async fn put_keys_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
+async fn put_keys_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
     // TODO: Call `handle_put_keys`
 }
 
 /// Handler for the DELETE v1/accounts/me endpoint.
 #[debug_handler]
-async fn delete_account_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
+async fn delete_account_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
     // TODO: Call `handle_delete_account`
 }
 
 /// Handler for the DELETE v1/devices/{device_id} endpoint.
 #[debug_handler]
-async fn delete_device_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
+async fn delete_device_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
     // TODO: Call `handle_delete_device`
 }
 
 /// Handler for the POST v1/devices/link endpoint.
 #[debug_handler]
-async fn post_link_device_endpoint(State(state): State<SignalServerState<PostgresDatabase>>) {
+async fn post_link_device_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
     // TODO: Call `handle_post_link_device`
 }
 
 // Websocket upgrade handler '/v1/websocket'
 #[debug_handler]
 async fn create_websocket_endpoint(
-    State(mut state): State<SignalServerState<PostgresDatabase>>,
+    State(mut state): State<SignalServerState<PostgresDatabase, WebSocket>>,
     authenticated_device: AuthenticatedDevice,
     ws: WebSocketUpgrade,
     user_agent: Option<TypedHeader<headers::UserAgent>>,
@@ -297,7 +300,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
 
-    let state = SignalServerState::<PostgresDatabase>::new().await;
+    let state = SignalServerState::<PostgresDatabase, WebSocket>::new().await;
 
     let app = Router::new()
         .route("/", get(|| async { "Hello from Signal Server" }))
