@@ -27,12 +27,12 @@ use super::mock_helper::MockDB;
 
 #[derive(Debug)]
 pub struct SignalServerState<T: SignalDatabase, U: WSStream + Debug> {
-    db: T,
-    websocket_manager: WebSocketManager<U, T>,
-    account_manager: AccountManager,
-    key_manager: KeyManager,
-    message_manager: MessagesManager<T, WebSocketConnection<U, T>>,
-    message_cache: MessageCache<WebSocketConnection<U, T>>,
+    pub db: T,
+    pub websocket_manager: WebSocketManager<U, T>,
+    pub account_manager: AccountManager,
+    pub key_manager: KeyManager,
+    pub message_manager: MessagesManager<T, WebSocketConnection<U, T>>,
+    pub message_cache: MessageCache<WebSocketConnection<U, T>>,
 }
 
 impl<T: SignalDatabase + Clone, U: WSStream + Debug> Clone for SignalServerState<T, U> {
@@ -48,28 +48,6 @@ impl<T: SignalDatabase + Clone, U: WSStream + Debug> Clone for SignalServerState
     }
 }
 
-impl<T: SignalDatabase, U: WSStream + Debug> SignalServerState<T, U> {
-    pub(self) fn database(&self) -> T {
-        self.db.clone()
-    }
-    pub fn websocket_manager(&self) -> &WebSocketManager<U, T> {
-        &self.websocket_manager
-    }
-    pub fn account_manager(&self) -> &AccountManager {
-        &self.account_manager
-    }
-    pub fn key_manager(&self) -> &KeyManager {
-        &self.key_manager
-    }
-
-    pub fn message_manager(&self) -> &MessagesManager<T, WebSocketConnection<U, T>> {
-        &self.message_manager
-    }
-
-    pub fn message_cache(&self) -> &MessageCache<WebSocketConnection<U, T>> {
-        &self.message_cache
-    }
-}
 
 #[cfg(test)]
 impl SignalServerState<MockDB, MockSocket> {
@@ -201,7 +179,7 @@ impl<T: SignalDatabase, U: WSStream + Debug> SignalServerState<T, U> {
     ) -> Result<PreKeyResponse, ApiError> {
         self.key_manager
             .handle_get_keys(
-                &self.database(),
+                &self.db,
                 auth_device,
                 target_service_id,
                 target_device_id,

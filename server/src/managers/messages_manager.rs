@@ -118,18 +118,18 @@ where
         Ok(removed_from_cache.len())
     }
 
-    pub fn add_message_availability_listener(
+    pub async fn add_message_availability_listener(
         &mut self,
         address: &ProtocolAddress,
         listener: Arc<Mutex<U>>,
     ) {
         self.message_cache
-            .add_message_availability_listener(address, listener);
+            .add_message_availability_listener(address, listener).await;
     }
 
-    pub fn remove_message_availability_listener(&mut self, address: &ProtocolAddress) {
+    pub async fn remove_message_availability_listener(&mut self, address: &ProtocolAddress) {
         self.message_cache
-            .remove_message_availability_listener(address);
+            .remove_message_availability_listener(address).await;
     }
 }
 

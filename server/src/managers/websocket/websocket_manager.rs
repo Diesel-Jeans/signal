@@ -205,7 +205,7 @@ pub(crate) mod test {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043", state.clone());
         let address = ws.protocol_address();
-        let mut mgr = state.websocket_manager().clone();
+        let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws).await;
 
         assert!(mgr.is_connected(&address).await)
@@ -216,7 +216,7 @@ pub(crate) mod test {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043", state.clone());
         let address = ws.protocol_address();
-        let mut mgr = state.websocket_manager().clone();
+        let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws).await;
 
         let ws: ClientConnection<MockSocket, MockDB> = mgr.get(&address).await.unwrap();
@@ -235,7 +235,7 @@ pub(crate) mod test {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043", state.clone());
         let address = ws.protocol_address();
-        let mut mgr = state.websocket_manager().clone();
+        let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws).await;
 
         let ws: ClientConnection<MockSocket, MockDB> = mgr.get(&address).await.unwrap();
@@ -254,7 +254,7 @@ pub(crate) mod test {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043", state.clone());
         let address = ws.protocol_address();
-        let mut mgr = state.websocket_manager().clone();
+        let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws).await;
 
         let ws: ClientConnection<MockSocket, MockDB> = mgr.get(&address).await.unwrap();
@@ -273,7 +273,7 @@ pub(crate) mod test {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043", state.clone());
         let address = ws.protocol_address();
-        let mut mgr = state.websocket_manager().clone();
+        let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws).await;
 
         let ws: ClientConnection<MockSocket, MockDB> = mgr.get(&address).await.unwrap();
@@ -299,7 +299,7 @@ pub(crate) mod test {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043", state.clone());
         let address = ws.protocol_address();
-        let mut mgr = state.websocket_manager().clone();
+        let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws).await;
 
         let ws: ClientConnection<MockSocket, MockDB> = mgr.get(&address).await.unwrap();
@@ -347,7 +347,7 @@ pub(crate) mod test {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4043", state.clone());
         let address = ws.protocol_address();
-        let mut mgr = state.websocket_manager().clone();
+        let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws).await;
 
         let ws: ClientConnection<MockSocket, MockDB> = mgr.get(&address).await.unwrap();

@@ -262,7 +262,7 @@ async fn create_websocket_endpoint(
     };
     println!("`{user_agent}` at {addr} connected.");
     ws.on_upgrade(move |socket| {
-        let mut wmgr = state.websocket_manager().clone();
+        let mut wmgr = state.websocket_manager.clone();
         async move {
             wmgr.insert(
                 WebSocketConnection::new(
