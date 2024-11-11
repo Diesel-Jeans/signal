@@ -288,7 +288,7 @@ async fn create_websocket_endpoint(
                 ),
                 state,
             )
-                .await
+            .await
         }
     })
 }
@@ -302,11 +302,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
-    let config = RustlsConfig::from_pem_file(
-        "cert/server.crt",
-        "cert/server.key",
-    )
-        .await?;
+    let config = RustlsConfig::from_pem_file("cert/server.crt", "cert/server.key").await?;
 
     let cors = CorsLayer::new()
         .allow_methods([
@@ -339,10 +335,9 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                 .layer(axum::middleware::from_fn(log_request_body))
                 .layer(
                     TraceLayer::new_for_http()
-                        .make_span_with(trace::DefaultMakeSpan::new().level(Level::TRACE))
-                        .on_request(trace::DefaultOnRequest::new().level(Level::TRACE))
-                        .on_response(trace::DefaultOnResponse::new().level(Level::TRACE))
-                        .on_body_chunk(trace::DefaultOnBodyChunk::new()),
+                        .make_span_with(trace::DefaultMakeSpan::new().level(Level::DEBUG)), // .on_request(trace::DefaultOnRequest::new().level(Level::TRACE))
+                                                                                            // .on_response(trace::DefaultOnResponse::new().level(Level::TRACE))
+                                                                                            // .on_body_chunk(trace::DefaultOnBodyChunk::new()),
                 )
                 .layer(TraceLayer::new_for_grpc()),
         )

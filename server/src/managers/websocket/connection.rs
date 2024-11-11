@@ -150,7 +150,39 @@ impl<T: WSStream + Debug> WebSocketConnection<T> {
         state: SignalServerState<U>,
         proto_message: WebSocketMessage,
     ) {
-        todo!()
+        //TODO: Make this into a proper handler as my changes are only for testing the client
+        println!("WebSocketMessage received");
+        match proto_message.r#type {
+            Some(1) => {
+                println!("Type request");
+                let request = proto_message
+                    .request
+                    .expect("Got a request type message without an attached request");
+                let id = match request.id {
+                    Some(id) => id,
+                    _ => panic!("Message needs to contain an ID for this to work"),
+                };
+
+                let response = WebSocketResponseMessage {
+                    id: Some(id),
+                    status: Some(200),
+                    message: Some("OK".to_owned()),
+                    headers: request.headers,
+                    body: request.body,
+                };
+
+                let msg = WebSocketMessage {
+                    r#type: Some(2),
+                    request: None,
+                    response: Some(response),
+                };
+
+                self.send(Message::Binary(msg.encode_to_vec()))
+                    .await
+                    .unwrap();
+            }
+            _ => todo!(),
+        }
     }
 }
 

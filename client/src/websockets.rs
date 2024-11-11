@@ -98,7 +98,7 @@ impl WebsocketHandler {
             socket,
             handle: Arc::new(handle),
             rec_channel: Arc::new(rec_channel),
-            outgoing_id: 0,
+            outgoing_id: 1,
             outgoing_map: out,
             keepalive_bool: true,
             incoming_response: res,
@@ -117,29 +117,38 @@ impl WebsocketHandler {
         let hand = std::thread::spawn(move || {
             handle.block_on(async move {
                 while let Some(Ok(msg)) = sock.lock().await.stream.next().await {
-                    println!("Got message");
                     match msg {
                         Message::Text(msg) => {
-                            println!("Is Text type");
                             if let Err(e) = mtx.send(Message::Text(msg)) {
                                 break;
                             }
                         }
 
                         Message::Binary(data) => {
-                            if let Ok(wsrm) = WebSocketResponseMessage::decode(data.as_slice()) {
-                                let id = match wsrm.id {
-                                    Some(id) => id,
-                                    _ => break,
-                                };
-                                if let Some(hand) = outgoing.lock().await.get(&id) {
-                                    hand.abort();
-                                    outgoing.lock().await.remove(&id);
+                            if let Ok(wsm) = WebSocketMessage::decode(data.as_slice()) {
+                                //TODO: Extend this match case to include the other types of WebSocketMessage.
+                                //Types of WebSocketMessage: 0 = UNKNOWN, 1 = REQUEST, 2 = RESPONSE
+                                match wsm.r#type {
+                                    Some(2) => {
+                                        println!("Got ws response message");
+                                        //Expect is fine here, as it is system breaking to get a type mismatch
+                                        let wsrm = wsm.response.expect(
+                                            "Got a WebSocketMessageRespone type without a response",
+                                        );
+                                        let id = match wsrm.id {
+                                            Some(id) => id,
+                                            _ => break,
+                                        };
+                                        incoming.lock().await.insert(id, wsrm);
+                                        if let Some(hand) = outgoing.lock().await.get(&id) {
+                                            hand.abort();
+                                            outgoing.lock().await.remove(&id);
+                                        }
+                                    }
+                                    _ => todo!(),
                                 }
-
-                                incoming.lock().await.insert(id, wsrm);
                             } else {
-                                break;
+                                continue;
                             }
                         }
 
@@ -157,6 +166,7 @@ impl WebsocketHandler {
         (hand, rx)
     }
 
+    //ONLY FOR TESTING PURPOSES!!!
     async fn send_text_no_response_expected(&mut self, text: String) -> Result<()> {
         Ok(self
             .socket
@@ -167,8 +177,10 @@ impl WebsocketHandler {
             .await?)
     }
 
-    //TODO: rename to send_request and ensure it only sends requests.
-    async fn send_request(&mut self, msg: Message) -> Result<(WebSocketResponseMessage)> {
+    pub async fn send_request(
+        &mut self,
+        options: SendRequestOptions,
+    ) -> Result<(WebSocketResponseMessage)> {
         let id = self.outgoing_id;
         let id_string = id.to_string();
 
@@ -178,10 +190,30 @@ impl WebsocketHandler {
 
         self.outgoing_id = id + 1;
 
-        //Make the protobuf message
+        let mut header_vec: Vec<String> = Vec::new();
+
+        if let Some(headers) = options.headers {
+            headers
+                .iter()
+                .map(|(key, value)| header_vec.push(format!("{}:{}", key, value)));
+        }
+
+        //Make the protobuf message and convert it to bytes
+        let ws_msg = WebSocketMessage {
+            r#type: Some(1),
+            request: Some(WebSocketRequestMessage {
+                id: Some(id),
+                verb: Some(options.verb),
+                path: Some(options.path),
+                headers: header_vec,
+                body: options.body,
+            }),
+            response: None,
+        };
+        let msg = Message::Binary(ws_msg.encode_to_vec());
 
         //Send the message over ws
-        let mut guard = self.socket.lock().await.stream.send(msg).await?;
+        self.socket.lock().await.stream.send(msg).await?;
 
         let mut self_clone = self.clone();
 
@@ -211,6 +243,8 @@ impl WebsocketHandler {
                 println!("Timed out");
             }
         });
+
+
         //Add future to hashmap
         self.outgoing_map
             .lock()
@@ -220,7 +254,16 @@ impl WebsocketHandler {
         promise.await;
 
         if let Some(incoming) = self.incoming_response.lock().await.get(&id) {
-            Ok(incoming.clone())
+            let status = match incoming.status {
+                Some(status) => status,
+                _ => panic!(),
+            };
+
+            if (status >= 200 && status <= 300) {
+                Ok(incoming.clone())
+            } else {
+                anyhow::bail!("Got a bad response")
+            }
         } else {
             anyhow::bail!("Incoming response missing")
         }
@@ -228,8 +271,25 @@ impl WebsocketHandler {
 
     //TODO: Send TLS close_notify when closing connection
     pub async fn close(&mut self, code: u16, reason: String) -> Result<()> {
-        Ok(self.socket.lock().await.stream.close(Some(frame::CloseFrame { code: code.into(), reason: reason.into() })).await?)
+        Ok(self
+            .socket
+            .lock()
+            .await
+            .stream
+            .close(Some(frame::CloseFrame {
+                code: code.into(),
+                reason: reason.into(),
+            }))
+            .await?)
     }
+}
+
+pub struct SendRequestOptions {
+    verb: String,
+    path: String,
+    body: Option<Vec<u8>>,
+    timeout: Option<u32>,
+    headers: Option<Vec<(String, String)>>,
 }
 
 pub struct KeepAliveOptions {
@@ -255,7 +315,9 @@ impl KeepAlive {
     }
 
     //KeepAlive contains two send methods to replicate the functionality of Signal-Desktop to the best of my ability
-    pub async fn super_send(mut self) {}
+    pub async fn super_send(mut self) {
+        todo!()
+    }
 
     pub fn send() {
         todo!()
@@ -282,13 +344,13 @@ pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocket
         http::header::AUTHORIZATION,
         format!("Basic {}", auth_value).parse()?,
     );
+    //No idea what this does, but Harder's python script sets this header field automatically
     mhead.insert(
         http::header::SEC_WEBSOCKET_EXTENSIONS,
         "permessage-deflate; client_max_window_bits"
             .to_string()
             .parse()?,
     );
-    mhead.insert(http::header::USER_AGENT, "Rust kan sutte min pik".to_string().parse()?);
 
     let mut tls_connector = NativeTlsConnector::builder();
     for cert in get_certs()? {
@@ -329,11 +391,8 @@ pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocket
         ..WebSocketConfig::default()
     };
 
-    println!("{}", ws_req.uri().to_string());
-
     let (ws_stream, _) = client_async_with_config(ws_req, tls_stream, Some(conf)).await?;
 
-    println!("Reached ok");
     Ok(ws_stream)
 }
 
@@ -397,8 +456,22 @@ mod wstests {
             .await
             .unwrap();
 
+        let res = handler
+            .send_request(SendRequestOptions {
+                verb: "GET".to_owned(),
+                path: "/".to_owned(),
+                headers: None,
+                body: None,
+                timeout: None,
+            })
+            .await
+            .unwrap();
+
+        println!("Response status: {:?}", res.status.unwrap());
+
         sleep(Duration::from_millis(100));
 
+        println!("Reached printing stage of test");
         while let Ok(msg) = handler.rec_channel.try_recv() {
             match msg {
                 Message::Text(msg) => println!("{}", msg),
@@ -418,7 +491,8 @@ mod wstests {
             }
         }
 
-        handler.close(1000, "Normal closure".into());
+        println!("Reached close stage of test");
+        //handler.close(1000, "Normal closure".into()).await.unwrap();
 
         assert!(true)
     }
