@@ -348,6 +348,7 @@ impl PreKeyResponseItem {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct SignalMessages {
     pub messages: Vec<SignalMessage>,
     pub online: bool,
@@ -358,7 +359,7 @@ pub struct SignalMessages {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SignalMessage {
-    pub r#type: u32,
+    pub r#type: i32,
     pub destination_device_id: u32,
     pub destination_registration_id: u32,
     pub content: String,

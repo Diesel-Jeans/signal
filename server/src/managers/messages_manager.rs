@@ -188,7 +188,8 @@ mod message_manager_tests {
         let created = 0;
         let auth_token = vec![0];
         let salt = String::from("salt");
-        let registration_id = 0;
+        let registration_id = 1;
+        let pni_registration_id = 1;
         return Device::new(
             device_id.into(),
             name.to_string(),
@@ -197,6 +198,7 @@ mod message_manager_tests {
             auth_token,
             salt,
             registration_id,
+            pni_registration_id,
         );
     }
 
@@ -209,8 +211,8 @@ mod message_manager_tests {
     fn create_account_attributes() -> AccountAttributes {
         return AccountAttributes {
             fetches_messages: true,
-            registration_id: 0,
-            pni_registration_id: 0,
+            registration_id: 1,
+            pni_registration_id: 1,
             capabilities: DeviceCapabilities {
                 storage: true,
                 transfer: true,

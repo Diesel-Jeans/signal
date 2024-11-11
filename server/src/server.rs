@@ -1,9 +1,11 @@
 use crate::account::{Account, AuthenticatedDevice, Device};
 use crate::database::SignalDatabase;
+use crate::envelope::ToEnvelope;
 use crate::error::ApiError;
 use crate::managers::state::SignalServerState;
 use crate::managers::websocket::connection::{UserIdentity, WebSocketConnection};
 use crate::postgres::PostgresDatabase;
+use crate::response::SendMessageResponse;
 use anyhow::Result;
 use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
 use axum::handler::HandlerWithoutStateExt;
@@ -13,19 +15,21 @@ use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
-use common::signal_protobuf::Envelope;
+use common::signal_protobuf::{envelope, Envelope};
 use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{
     DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SetKeyRequest, SignalMessages,
     UploadKeys,
 };
-use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId};
+use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKind};
 use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
+use serde::Serialize;
 use std::env;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
+use crate::destination_device_validator::DestinationDeviceValidator;
 use crate::message_cache::MessageCache;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum_extra::{headers, TypedHeader};
@@ -35,14 +39,76 @@ use std::str::FromStr;
 
 async fn handle_put_messages<T: SignalDatabase>(
     state: SignalServerState<T>,
-    address: ProtocolAddress,
+    authenticated_device: AuthenticatedDevice,
+    destination_identifier: ServiceId,
     payload: SignalMessages,
-) -> Result<(), ApiError> {
-    println!("Received message");
-    /* TODO: handle_put_message
-       this depends on ToEnvelope trait being implemented for SignalMessage which depends on Account
-    */
-    todo!()
+) -> Result<SendMessageResponse, ApiError> {
+    if destination_identifier == authenticated_device.account().pni() {
+        return Err(ApiError {
+            status_code: StatusCode::FORBIDDEN,
+            message: "".to_owned(),
+        });
+    }
+
+    let is_sync_message = destination_identifier == authenticated_device.account().aci();
+    let destination: Account = if is_sync_message {
+        authenticated_device.account().clone()
+    } else {
+        state
+            .get_account(&destination_identifier)
+            .await
+            .map_err(|_| ApiError {
+                status_code: StatusCode::NOT_FOUND,
+                message: "Destination account not found".to_owned(),
+            })?
+    };
+    let exclude_device_ids: Vec<u32> = if is_sync_message {
+        vec![authenticated_device.device().device_id().into()]
+    } else {
+        Vec::new()
+    };
+
+    let message_device_ids: Vec<u32> = payload
+        .messages
+        .iter()
+        .map(|message| message.destination_device_id)
+        .collect();
+    DestinationDeviceValidator::validate_complete_device_list(
+        &destination,
+        &message_device_ids,
+        &exclude_device_ids,
+    )
+    .map_err(|_| ApiError {
+        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        message: "".to_owned(),
+    })?;
+    DestinationDeviceValidator::validate_registration_id_from_messages(
+        &destination,
+        &payload.messages,
+        destination_identifier.kind() == ServiceIdKind::Pni,
+    )
+    .map_err(|_| ApiError {
+        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        message: "".to_owned(),
+    })?;
+
+    payload.messages.into_iter().map(|message| {
+        let mut envelope = message.to_envelope(
+            &destination_identifier,
+            authenticated_device.account(),
+            u32::from(authenticated_device.device().device_id()) as u8,
+            payload.timestamp,
+            false,
+        );
+        let address = ProtocolAddress::new(
+            destination.aci().service_id_string(),
+            message.destination_device_id.into(),
+        );
+        state.message_manager().insert(&address, &mut envelope);
+    });
+
+    let needs_sync = !is_sync_message && authenticated_device.account().devices().len() > 1;
+    Ok(SendMessageResponse { needs_sync })
 }
 
 async fn handle_get_messages<T: SignalDatabase>(
@@ -72,6 +138,7 @@ async fn handle_post_registration<T: SignalDatabase>(
                 0,
                 "no token".as_bytes().to_vec(),
                 "salt".to_owned(),
+                1u32,
                 1u32,
             ),
             DevicePreKeyBundle {
@@ -162,11 +229,12 @@ fn parse_service_id(string: String) -> Result<ServiceId, ApiError> {
 #[debug_handler]
 async fn put_messages_endpoint(
     State(state): State<SignalServerState<PostgresDatabase>>,
-    Path(address): Path<String>,
+    authenticated_device: AuthenticatedDevice,
+    Path(destination_identifier): Path<String>,
     Json(payload): Json<SignalMessages>, // TODO: Multiple messages could be sent at one time
-) -> Result<(), ApiError> {
-    let address = parse_protocol_address(address)?;
-    handle_put_messages(state, address, payload).await
+) -> Result<SendMessageResponse, ApiError> {
+    let destination_identifier = parse_service_id(destination_identifier)?;
+    handle_put_messages(state, authenticated_device, destination_identifier, payload).await
 }
 
 /// Handler for the GET v1/messages endpoint.
