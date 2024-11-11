@@ -61,9 +61,8 @@ impl DestinationDeviceValidator {
 
         if !stale_devices.is_empty() {
             bail!("Stale devices.")
-        } else {
-            Ok(())
         }
+        Ok(())
     }
 
     pub fn validate_complete_device_list(
@@ -90,8 +89,7 @@ impl DestinationDeviceValidator {
 
         if !missing_device_ids.is_empty() || !extra_device_ids.is_empty() {
             bail!("Mismatched devices.")
-        } else {
-            Ok(())
         }
+        Ok(())
     }
 }

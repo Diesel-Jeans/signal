@@ -526,8 +526,8 @@ mod key_manager_tests {
 
         let auth_device1 = create_authenticated_device(
             0.into(),
-            0,
-            0,
+            1,
+            1,
             "key_manager_test1".to_string(),
             identity_key,
         )
@@ -578,8 +578,8 @@ mod key_manager_tests {
         let identity_key = KeyPair::generate(&mut csprng);
         let auth_device = create_authenticated_device(
             target_device_id,
-            0,
-            0,
+            1,
+            1,
             "key_manager_test2".to_string(),
             IdentityKey::from(identity_key.public_key),
         )
@@ -663,8 +663,8 @@ mod key_manager_tests {
             .unwrap();
         let auth_device = create_authenticated_device(
             device_id,
-            0,
-            0,
+            1,
+            1,
             "key_manager_test3".to_string(),
             IdentityKey::new(KeyPair::generate(&mut OsRng).public_key),
         )

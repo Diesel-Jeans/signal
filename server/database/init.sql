@@ -99,12 +99,12 @@ VALUES
 INSERT INTO 
     devices (owner, device_id, name, auth_token, salt, registration_id, pni_registration_id)
 VALUES
-    (1, '1', '\x1234'::BYTEA , '\x2998fa253a711f6585de13634b50e4b5c67646307cb903b8c3e6febba813937d'::BYTEA, 'salt', '0', '0'); -- password = password 
+    (1, '1', '\x1234'::BYTEA , '\x2998fa253a711f6585de13634b50e4b5c67646307cb903b8c3e6febba813937d'::BYTEA, 'salt', '1', '1'); -- password = password 
 
 INSERT INTO 
     devices (owner, device_id, name, auth_token, salt, registration_id, pni_registration_id)
 VALUES
-    (1, '2', '\x5678'::BYTEA , '\x2998fa253a711f6585de13634b50e4b5c67646307cb903b8c3e6febba813937d'::BYTEA, 'salt', '1', '1'); -- password = password 
+    (1, '2', '\x5678'::BYTEA , '\x2998fa253a711f6585de13634b50e4b5c67646307cb903b8c3e6febba813937d'::BYTEA, 'salt', '2', '2'); -- password = password 
 
 INSERT INTO
     accounts (aci, pni, aci_identity_key, pni_identity_key, phone_number, account_attr)
@@ -114,4 +114,4 @@ VALUES
 INSERT INTO 
     devices (owner, device_id, name, auth_token, salt, registration_id, pni_registration_id)
 VALUES
-    (2, '1', '\x1234'::BYTEA , '\x2998fa253a711f6585de13634b50e4b5c67646307cb903b8c3e6febba813937d'::BYTEA, 'salt', '2', '2'); -- password = password 
+    (2, '1', '\x1234'::BYTEA , '\x2998fa253a711f6585de13634b50e4b5c67646307cb903b8c3e6febba813937d'::BYTEA, 'salt', '3', '3'); -- password = password 
