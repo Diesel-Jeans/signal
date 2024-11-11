@@ -94,9 +94,9 @@ impl Account {
 pub struct Device {
     device_id: DeviceId,
     name: String,
-    last_seen: u32,
-    created: u32,
-    auth_token: Vec<u8>,
+    last_seen: u64,
+    created: u64,
+    auth_token: String,
     salt: String,
     registration_id: u32,
     pni_registration_id: u32,
@@ -106,9 +106,9 @@ impl Device {
     pub fn new(
         device_id: DeviceId,
         name: String,
-        last_seen: u32,
-        created: u32,
-        auth_token: Vec<u8>,
+        last_seen: u64,
+        created: u64,
+        auth_token: String,
         salt: String,
         registration_id: u32,
         pni_registration_id: u32,
@@ -130,14 +130,14 @@ impl Device {
     pub fn name(&self) -> &String {
         &self.name
     }
-    pub fn last_seen(&self) -> u32 {
+    pub fn last_seen(&self) -> u64 {
         self.last_seen
     }
-    pub fn created(&self) -> u32 {
+    pub fn created(&self) -> u64 {
         self.created
     }
 
-    pub fn auth_token(&self) -> &[u8] {
+    pub fn auth_token(&self) -> &String {
         &self.auth_token
     }
 

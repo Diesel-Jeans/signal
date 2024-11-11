@@ -3265,6 +3265,7 @@ dependencies = [
  "dotenv",
  "futures-util",
  "headers",
+ "hex",
  "hkdf 0.12.4",
  "libsignal-core",
  "libsignal-protocol",

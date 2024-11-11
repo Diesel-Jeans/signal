@@ -52,6 +52,13 @@ impl<T: SignalDatabase + Clone, U: WSStream + Debug> Clone for SignalServerState
 }
 
 #[cfg(test)]
+impl Default for SignalServerState<MockDB, MockSocket> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
 impl SignalServerState<MockDB, MockSocket> {
     pub fn new() -> Self {
         let db = MockDB {};

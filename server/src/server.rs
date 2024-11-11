@@ -1,4 +1,5 @@
 use crate::account::{Account, AuthenticatedDevice, Device};
+use crate::account_authenticator::SaltedTokenHash;
 use crate::database::SignalDatabase;
 use crate::envelope::ToEnvelope;
 use crate::error::ApiError;
@@ -26,7 +27,7 @@ use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKind};
 use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
 use serde::Serialize;
 use std::env;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
@@ -126,7 +127,9 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
     registration: RegistrationRequest,
 ) -> Result<RegistrationResponse, ApiError> {
     println!("Register client");
+    let time_now = time_now()?;
     let phone_number = auth_header.username();
+    let hash = SaltedTokenHash::generate_for(auth_header.password())?;
     let account = state
         .create_account(
             phone_number.to_owned(),
@@ -134,14 +137,14 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
             registration.aci_identity_key().to_owned(),
             registration.pni_identity_key().to_owned(),
             Device::new(
-                1.into(),
-                "my_device".to_owned(),
-                0,
-                0,
-                "no token".as_bytes().to_vec(),
-                "salt".to_owned(),
-                1u32,
-                1u32,
+                1.into(),                                              // Device id
+                registration.account_attributes().name.clone(),        // Name
+                time_now,                                              // Last seen
+                time_now,                                              // Created
+                hash.hash(),                                           // Token
+                hash.salt(),                                           // Salt
+                registration.account_attributes().registration_id,     // Registration id
+                registration.account_attributes().pni_registration_id, // Pni registration id
             ),
             DevicePreKeyBundle {
                 aci_signed_pre_key: registration.aci_signed_pre_key().to_owned(),
@@ -342,7 +345,7 @@ async fn create_websocket_endpoint(
         let mut wmgr = state.websocket_manager.clone();
         async move {
             wmgr.insert(WebSocketConnection::new(
-                UserIdentity::AuthenticatedDevice(authenticated_device),
+                UserIdentity::AuthenticatedDevice(authenticated_device.into()),
                 addr,
                 socket,
                 state,
@@ -411,6 +414,16 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     Ok(())
+}
+
+fn time_now() -> Result<u64, ApiError> {
+    Ok(SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_err(|_| ApiError {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "".into(),
+        })?
+        .as_secs())
 }
 
 #[cfg(test)]

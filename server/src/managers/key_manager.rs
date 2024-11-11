@@ -300,11 +300,11 @@ mod key_manager_tests {
     ) -> AuthenticatedDevice {
         let device = Device::new(
             device_id,
-            "test".to_owned(),
+            "test".into(),
             0,
             0,
-            Vec::<u8>::new(),
-            "salt".to_owned(),
+            "token".into(),
+            "salt".into(),
             registration_id,
             pni_registration_id,
         );
@@ -317,6 +317,7 @@ mod key_manager_tests {
         };
         let account_attr = AccountAttributes {
             fetches_messages: false,
+            name: "name".to_owned(),
             registration_id: registration_id.try_into().unwrap(),
             pni_registration_id: registration_id.try_into().unwrap(),
             capabilities: device_capabilities,
@@ -338,7 +339,7 @@ mod key_manager_tests {
         target_device_id: &DeviceId,
         target_service_id: &Pni,
         target_identity_key: &IdentityKey,
-    ) -> () {
+    ) {
         let device_capabilities = DeviceCapabilities {
             storage: false,
             transfer: false,
@@ -347,6 +348,7 @@ mod key_manager_tests {
             versioned_expiration_timer: false,
         };
         let account_attr = AccountAttributes {
+            name: "name".to_owned(),
             fetches_messages: false,
             registration_id: 1,
             pni_registration_id: 1,
@@ -355,7 +357,7 @@ mod key_manager_tests {
         };
 
         let device = Device::new(
-            target_device_id.clone(),
+            *target_device_id,
             "name".into(),
             0,
             0,
@@ -367,11 +369,11 @@ mod key_manager_tests {
 
         database
             .add_account(&Account::new(
-                target_service_id.clone(),
+                *target_service_id,
                 device,
-                target_identity_key.clone(),
-                target_identity_key.clone(),
-                Uuid::new_v4().to_string().into(),
+                *target_identity_key,
+                *target_identity_key,
+                Uuid::new_v4().to_string(),
                 account_attr,
             ))
             .await
