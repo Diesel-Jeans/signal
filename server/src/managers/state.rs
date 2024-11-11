@@ -1,7 +1,9 @@
+use super::websocket::connection::WebSocketConnection;
 use crate::{
     account::{self, Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
     error::ApiError,
+    message_cache::MessageCache,
     postgres::PostgresDatabase,
 };
 use anyhow::{Ok, Result};
@@ -13,7 +15,7 @@ use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKi
 use libsignal_protocol::IdentityKey;
 
 use super::{
-    account_manager::AccountManager, key_manager::KeyManager,
+    account_manager::AccountManager, key_manager::KeyManager, messages_manager::MessagesManager,
     websocket::websocket_manager::WebSocketManager,
 };
 use axum::extract::ws::WebSocket;
@@ -27,6 +29,8 @@ pub struct SignalServerState<T: SignalDatabase> {
     websocket_manager: WebSocketManager<WebSocket>,
     account_manager: AccountManager,
     key_manager: KeyManager,
+    message_manager: MessagesManager<T, WebSocketConnection<WebSocket>>,
+    message_cache: MessageCache<WebSocketConnection<WebSocket>>,
 }
 
 impl<T: SignalDatabase> SignalServerState<T> {
@@ -42,29 +46,44 @@ impl<T: SignalDatabase> SignalServerState<T> {
     pub fn key_manager(&self) -> &KeyManager {
         &self.key_manager
     }
+
+    pub fn message_manager(&self) -> &MessagesManager<T, WebSocketConnection<WebSocket>> {
+        &self.message_manager
+    }
+
+    pub fn message_cache(&self) -> &MessageCache<WebSocketConnection<WebSocket>> {
+        &self.message_cache
+    }
 }
 
 #[cfg(test)]
 impl SignalServerState<MockDB> {
     pub fn new() -> Self {
+        let db = MockDB {};
+        let cache = MessageCache::connect();
+
         Self {
-            db: MockDB {},
+            db: db.clone(),
             websocket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),
+            message_manager: MessagesManager::new(db, cache.clone()),
+            message_cache: cache,
         }
     }
 }
 
 impl SignalServerState<PostgresDatabase> {
     pub async fn new() -> Self {
+        let db = PostgresDatabase::connect("DATABASE_URL".to_string()).await;
+        let cache = MessageCache::connect();
         Self {
-            db: PostgresDatabase::connect("DATABASE_URL".to_string())
-                .await
-                .expect("Failed to connect to the database."),
+            db: db.clone(),
             websocket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(),
             key_manager: KeyManager::new(),
+            message_manager: MessagesManager::new(db, cache.clone()),
+            message_cache: cache,
         }
     }
 }
