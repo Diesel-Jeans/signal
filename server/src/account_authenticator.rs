@@ -69,7 +69,7 @@ where
     }
 }
 
-async fn authenticate_device<T: SignalDatabase>(
+async fn authenticate_device<T: SignalDatabase + Send>(
     state: &SignalServerState<T>,
     service_id: &ServiceId,
     device_id: u32,

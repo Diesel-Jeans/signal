@@ -15,10 +15,10 @@ use tokio::sync::Mutex;
 use crate::account::AuthenticatedDevice;
 use crate::database::SignalDatabase;
 use crate::managers::state::SignalServerState;
+use crate::message_cache::MessageAvailabilityListener;
 
 use prost::{bytes::Bytes, Message as PMessage};
 
-use crate::message_cache::MessageAvailabilityListener;
 use super::net_helper::{create_request, current_millis, generate_req_id};
 
 #[async_trait::async_trait]
