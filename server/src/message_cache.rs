@@ -111,7 +111,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
             .await?;
 
         let time = SystemTime::now();
-        let time_in_millis: u64 = time.duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let time_in_millis: u64 = time.duration_since(UNIX_EPOCH)?.as_secs();
 
         cmd("ZADD")
             .arg(&queue_total_index_key)
@@ -344,7 +344,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         Ok(())
     }
 
-    fn get_message_queue_key(&self, address: &ProtocolAddress) -> String {
+    pub fn get_message_queue_key(&self, address: &ProtocolAddress) -> String {
         format!(
             "user_messages::{{{}::{}}}",
             address.name(),
@@ -368,7 +368,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         )
     }
 
-    fn get_queue_index_key(&self) -> String {
+    pub fn get_queue_index_key(&self) -> String {
         "user_queue_index_key".to_string() // Should be changed if we use Redis Cluster
     }
 
@@ -405,7 +405,7 @@ pub mod message_cache_tests {
         guid.to_string()
     }
 
-    fn generate_random_envelope(message: &str, uuid: &str) -> Envelope {
+    pub fn generate_random_envelope(message: &str, uuid: &str) -> Envelope {
         let mut data = bincode::serialize(message).unwrap();
         Envelope {
             content: Some(data),

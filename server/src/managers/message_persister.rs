@@ -2,11 +2,15 @@ use crate::account::{Account, Device};
 use crate::database::SignalDatabase;
 use crate::managers::account_manager::AccountManager;
 use crate::managers::messages_manager::MessagesManager;
+use crate::managers::state::SignalServerState;
 use crate::message_cache::{MessageAvailabilityListener, MessageCache};
+use crate::postgres::PostgresDatabase;
 use anyhow::Result;
+use async_std::prelude::FutureExt;
 use common::signal_protobuf::Envelope;
 use libsignal_core::{ProtocolAddress, ServiceId};
 use std::fmt::Debug;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::task::JoinHandle;
 
@@ -28,27 +32,41 @@ where
     T: SignalDatabase + Send + 'static + Sync,
     U: MessageAvailabilityListener + Send + 'static + Sync,
 {
-    pub async fn new(db: T) -> Self {
+    pub async fn new(state: SignalServerState<PostgresDatabase>) -> Self {
         let message_cache = MessageCache::connect()
             .await
             .expect("Could not connect to redis cache.");
         Self {
             running: false,
-            message_cache: MessageCache::connect()
-                .await
-                .expect("Could not connect to the Redis cache."),
+            message_cache: state.m,
             messages_manager: MessagesManager::new(db.clone(), message_cache),
             account_manager: AccountManager::new(),
             db,
         }
     }
 
-    pub fn start(mut message_persister: MessagePersister<T, U>) -> JoinHandle<Result<()>> {
-        tokio::spawn(async move { message_persister.persist_next_queues().await })
+    pub fn start(
+        mut message_persister: MessagePersister<T, U>,
+    ) -> (Arc<Mutex<bool>>, JoinHandle<MessagePersister<T, U>>) {
+        let lock = Arc::new(Mutex::new(true));
+
+        (
+            lock,
+            tokio::spawn(async move {
+                while !lock.lock().await {
+                    message_persister.persist_next_queues().await;
+                }
+                message_persister
+            }),
+        )
     }
 
-    pub fn stop(handle: JoinHandle<()>) {
-        handle.abort();
+    pub async fn stop(
+        mut handle: JoinHandle<MessagePersister<T, U>>,
+        lock: Arc<Mutex<bool>>,
+    ) -> Result<MessagePersister<T, U>> {
+        lock.lock().await = false;
+        Ok(handle.await?)
     }
     async fn persist_next_queues(&mut self) -> Result<()> {
         let mut queues_to_persist: Vec<String> = Vec::new();
@@ -127,4 +145,107 @@ where
 }
 
 #[cfg(test)]
-mod message_persister_tests {}
+mod message_persister_tests {
+    use super::*;
+    use crate::message_cache::message_cache_tests::{
+        generate_random_envelope, generate_uuid, MockWebSocketConnection,
+    };
+    use crate::postgres::PostgresDatabase;
+    use redis::cmd;
+    use serial_test::serial;
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    async fn insert_with_custom_timestamp(
+        message_cache: &MessageCache<MockWebSocketConnection>,
+        timestamp: u64,
+        protocol_address: &ProtocolAddress,
+        envelope: &mut Envelope,
+        message_guid: &str,
+    ) {
+        let mut connection = message_cache.get_connection().await.unwrap();
+        let queue_total_index_key = message_cache.get_queue_index_key();
+        let queue_key = message_cache.get_message_queue_key(protocol_address);
+
+        cmd("ZADD")
+            .arg(&queue_total_index_key)
+            .arg("NX")
+            .arg(timestamp)
+            .arg(&queue_key)
+            .query_async::<()>(&mut connection)
+            .await
+            .unwrap();
+
+        message_cache
+            .insert(protocol_address, envelope, message_guid)
+            .await;
+    }
+
+    async fn check_queue_key_timestamp(
+        message_cache: &MessageCache<MockWebSocketConnection>,
+        max_time: u64,
+        limit: u8,
+    ) -> Vec<String> {
+        let queue_index_key = message_cache.get_queue_index_key();
+        let mut connection = message_cache.get_connection().await.unwrap();
+
+        cmd("ZRANGE")
+            .arg(&queue_index_key)
+            .arg(0)
+            .arg(&max_time)
+            .arg("BYSCORE")
+            .arg("LIMIT")
+            .arg(0)
+            .arg(&limit)
+            .query_async::<Vec<String>>(&mut connection)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_message_persister() {
+        let _ = dotenv::dotenv();
+        let db = PostgresDatabase::connect("DATABASE_URL".to_string())
+            .await
+            .unwrap();
+
+        let message_persister: MessagePersister<PostgresDatabase, MockWebSocketConnection> =
+            MessagePersister::new(db).await;
+
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 660;
+        let user_id = generate_uuid();
+        let device_id = 1;
+
+        let protocol_address = ProtocolAddress::new(user_id, device_id.into());
+        let envelope_uuid = generate_uuid();
+        let mut envelope =
+            generate_random_envelope("This is a test of MessagePersister", &envelope_uuid);
+
+        insert_with_custom_timestamp(
+            &message_persister.message_cache,
+            timestamp,
+            &protocol_address,
+            &mut envelope,
+            &envelope_uuid,
+        );
+
+        let mut queue_keys =
+            check_queue_key_timestamp(&message_persister.message_cache, timestamp + 60, 10).await;
+
+        assert_eq!(queue_keys.len(), 1);
+
+        let (lock, handle) = MessagePersister::start(message_persister);
+
+        sleep(Duration::from_millis(10000)).await;
+
+        let message_per = MessagePersister::stop(handle, lock).await.unwrap();
+
+        queue_keys =
+            check_queue_key_timestamp(&message_per.message_cache, timestamp + 60, 10).await;
+    }
+}
