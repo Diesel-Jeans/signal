@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use crate::account::AuthenticatedDevice;
 use crate::database::SignalDatabase;
 use crate::managers::state::SignalServerState;
+use crate::message_cache::MessageAvailabilityListener;
 
 use prost::{bytes::Bytes, Message as PMessage};
 
@@ -153,6 +154,22 @@ impl<T: WSStream + Debug> WebSocketConnection<T> {
         todo!()
     }
 }
+
+
+#[async_trait::async_trait]
+impl<T> MessageAvailabilityListener for WebSocketConnection<T>
+where T: WSStream + Debug + Send {
+    async fn handle_new_messages_available(&mut self) -> bool{
+        // Implement the logic for handling new messages available
+        todo!()
+    }
+
+    async fn handle_messages_persisted(&mut self) -> bool{
+        // Implement the logic for handling messages persisted
+        todo!()
+    }
+}
+
 
 #[derive(Debug)]
 pub enum ConnectionState<T: WSStream> {

@@ -8,13 +8,27 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub struct MessagesManager<T, U>
 where
     T: SignalDatabase,
     U: MessageAvailabilityListener,
 {
-    message_db: T,
+    db: T,
     message_cache: MessageCache<U>,
+}
+
+impl<T, U> Clone for MessagesManager<T, U>
+where
+    T: SignalDatabase + Clone,
+    U: MessageAvailabilityListener,
+{
+    fn clone(&self) -> Self {
+        Self {
+            db: self.db.clone(),
+            message_cache: self.message_cache.clone(),
+        }
+    }
 }
 
 impl<T, U> MessagesManager<T, U>
@@ -22,6 +36,12 @@ where
     T: SignalDatabase,
     U: MessageAvailabilityListener,
 {
+    pub fn new(db: T, message_cache: MessageCache<U>) -> Self {
+        Self {
+            db,
+            message_cache
+        }
+    }
     /// Add message to cache
     pub async fn insert(&self, address: &ProtocolAddress, envelope: &mut Envelope) -> Result<u64> {
         let message_guid = Uuid::new_v4().to_string();
@@ -62,7 +82,7 @@ where
         let cached_messages = self.message_cache.get_all_messages(address).await?;
 
         let db_messages = if !cached_msg_only {
-            self.message_db.get_messages(address).await?
+            self.db.get_messages(address).await?
         } else {
             vec![]
         };
@@ -78,7 +98,7 @@ where
     ) -> Result<Vec<Envelope>> {
         let cache_removed_messages = self.message_cache.remove(address, message_guids).await?;
 
-        let db_removed_messages = self.message_db.delete_messages(address).await?;
+        let db_removed_messages = self.db.delete_messages(address).await?;
 
         Ok([cache_removed_messages, db_removed_messages].concat())
     }
@@ -94,7 +114,7 @@ where
             .map(|m| m.server_guid().to_string())
             .collect();
 
-        self.message_db
+        self.db
             .push_message_queue(address, messages)
             .await?;
 
@@ -124,7 +144,7 @@ where
     U: MessageAvailabilityListener,
 {
     async fn has_messages(&self, address: &ProtocolAddress) -> Result<bool> {
-        let count = self.message_db.count_messages(address).await?;
+        let count = self.db.count_messages(address).await?;
         Ok(count > 0)
     }
 }
@@ -150,10 +170,9 @@ mod message_manager_tests {
     async fn init_manager() -> Result<MessagesManager<PostgresDatabase, MockWebSocketConnection>> {
         Ok(
             MessagesManager::<PostgresDatabase, MockWebSocketConnection> {
-                message_cache: MessageCache::connect().await.unwrap(),
-                message_db: PostgresDatabase::connect("DATABASE_URL_TEST".to_string())
-                    .await
-                    .unwrap(),
+                message_cache: MessageCache::connect(),
+                db: PostgresDatabase::connect("DATABASE_URL_TEST".to_string())
+                    .await,
             },
         )
     }
@@ -273,10 +292,10 @@ mod message_manager_tests {
         let envelope = generate_random_envelope(&account, "Hello Bob");
 
         // DB
-        msg_manager.message_db.add_account(&account).await.unwrap();
+        msg_manager.db.add_account(&account).await.unwrap();
 
         msg_manager
-            .message_db
+            .db
             .push_message_queue(&address, vec![envelope])
             .await
             .unwrap();
@@ -289,7 +308,7 @@ mod message_manager_tests {
 
         // Teardown DB
         msg_manager
-            .message_db
+            .db
             .delete_account(&ServiceId::Aci(account.aci()))
             .await
             .unwrap();
@@ -317,10 +336,10 @@ mod message_manager_tests {
         msg_manager.insert(&address, &mut envelope).await;
 
         // DB
-        msg_manager.message_db.add_account(&account).await.unwrap();
+        msg_manager.db.add_account(&account).await.unwrap();
 
         msg_manager
-            .message_db
+            .db
             .push_message_queue(&address, vec![envelope])
             .await
             .unwrap();
@@ -333,7 +352,7 @@ mod message_manager_tests {
 
         // Teardown DB and cache
         msg_manager
-            .message_db
+            .db
             .delete_account(&ServiceId::Aci(account.aci()))
             .await
             .unwrap();
@@ -360,24 +379,24 @@ mod message_manager_tests {
         let envelope = generate_random_envelope(&account, "Hello Bob");
 
         // DB
-        msg_manager.message_db.add_account(&account).await.unwrap();
+        msg_manager.db.add_account(&account).await.unwrap();
 
         msg_manager
-            .message_db
+            .db
             .push_message_queue(&address, vec![envelope])
             .await
             .unwrap();
 
         // Act
         let count = msg_manager
-            .message_db
+            .db
             .count_messages(&address)
             .await
             .unwrap();
 
         // Teardown DB
         msg_manager
-            .message_db
+            .db
             .delete_account(&ServiceId::Aci(account.aci()))
             .await
             .unwrap();
@@ -408,10 +427,10 @@ mod message_manager_tests {
         msg_manager.insert(&address, &mut envelope2).await;
 
         // DB
-        msg_manager.message_db.add_account(&account).await.unwrap();
+        msg_manager.db.add_account(&account).await.unwrap();
 
         msg_manager
-            .message_db
+            .db
             .push_message_queue(&address, vec![envelope1, envelope2])
             .await
             .unwrap();
@@ -423,7 +442,7 @@ mod message_manager_tests {
 
         // Teardown DB and cache
         msg_manager
-            .message_db
+            .db
             .delete_account(&ServiceId::Aci(account.aci()))
             .await
             .unwrap();
@@ -453,10 +472,10 @@ mod message_manager_tests {
         msg_manager.insert(&address, &mut envelope).await;
 
         // DB
-        msg_manager.message_db.add_account(&account).await.unwrap();
+        msg_manager.db.add_account(&account).await.unwrap();
 
         msg_manager
-            .message_db
+            .db
             .push_message_queue(&address, vec![envelope])
             .await
             .unwrap();
@@ -474,7 +493,7 @@ mod message_manager_tests {
 
         // Teardown DB and cache
         msg_manager
-            .message_db
+            .db
             .delete_account(&ServiceId::Aci(account.aci()))
             .await
             .unwrap();
@@ -506,10 +525,10 @@ mod message_manager_tests {
         msg_manager.insert(&address, &mut envelope1).await;
 
         // DB
-        msg_manager.message_db.add_account(&account).await.unwrap();
+        msg_manager.db.add_account(&account).await.unwrap();
 
         msg_manager
-            .message_db
+            .db
             .push_message_queue(&address, vec![envelope1.clone(), envelope2.clone()])
             .await
             .unwrap();
@@ -533,7 +552,7 @@ mod message_manager_tests {
 
         // Teardown DB and cache
         msg_manager
-            .message_db
+            .db
             .delete_account(&ServiceId::Aci(account.aci()))
             .await
             .unwrap();
@@ -567,7 +586,7 @@ mod message_manager_tests {
         msg_manager.insert(&address, &mut envelope2).await;
 
         // DB
-        msg_manager.message_db.add_account(&account).await.unwrap();
+        msg_manager.db.add_account(&account).await.unwrap();
 
         // Act
         let messages_in_cache = msg_manager
@@ -575,7 +594,7 @@ mod message_manager_tests {
             .await
             .unwrap();
 
-        let messages_in_db = msg_manager.message_db.get_messages(&address).await.unwrap();
+        let messages_in_db = msg_manager.db.get_messages(&address).await.unwrap();
 
         let count_persisted_in_db = msg_manager
             .persist_messages(&address, vec![envelope1, envelope2])
@@ -584,7 +603,7 @@ mod message_manager_tests {
 
         // Teardown DB and cache
         msg_manager
-            .message_db
+            .db
             .delete_account(&ServiceId::Aci(account.aci()))
             .await
             .unwrap();
