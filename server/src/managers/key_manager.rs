@@ -471,9 +471,7 @@ mod key_manager_tests {
     #[tokio::test]
     async fn get_keys_test() {
         let km = KeyManager::new();
-        let database = PostgresDatabase::connect("DATABASE_URL_TEST".into())
-            .await
-            .unwrap();
+        let database = PostgresDatabase::connect("DATABASE_URL_TEST".into()).await;
 
         let target_device_id = DeviceId::from(111);
         let target_service_id = Pni::from(Uuid::new_v4());
@@ -569,9 +567,7 @@ mod key_manager_tests {
     #[tokio::test]
     async fn put_keys_test() {
         let km = KeyManager::new();
-        let database = PostgresDatabase::connect("DATABASE_URL_TEST".into())
-            .await
-            .unwrap();
+        let database = PostgresDatabase::connect("DATABASE_URL_TEST".into()).await;
 
         let target_device_id = DeviceId::from(112);
         let mut csprng = OsRng;
@@ -658,9 +654,7 @@ mod key_manager_tests {
     #[tokio::test]
     async fn check_keys_test() {
         let device_id = DeviceId::from(113);
-        let database = PostgresDatabase::connect("DATABASE_URL_TEST".into())
-            .await
-            .unwrap();
+        let database = PostgresDatabase::connect("DATABASE_URL_TEST".into()).await;
         let auth_device = create_authenticated_device(
             device_id,
             1,
