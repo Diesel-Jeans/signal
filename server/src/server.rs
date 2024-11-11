@@ -93,19 +93,18 @@ async fn handle_put_messages<T: SignalDatabase>(
     })?;
 
     payload.messages.into_iter().map(|message| {
-        let envelope = message.to_envelope(
+        let mut envelope = message.to_envelope(
             &destination_identifier,
             authenticated_device.account(),
             u32::from(authenticated_device.device().device_id()) as u8,
             payload.timestamp,
             false,
         );
-        //TODO: Uncomment when messages_manager is added to state
-        /*state.messages_manager().insert(
-            destination.aci().into(),
-            u32::from(message.destination_device_id).into(),
-            envelope,
-        );*/
+        let address = ProtocolAddress::new(
+            destination.aci().service_id_string(),
+            message.destination_device_id.into(),
+        );
+        state.message_manager().insert(&address, &mut envelope);
     });
 
     let needs_sync = !is_sync_message && authenticated_device.account().devices().len() > 1;
