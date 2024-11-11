@@ -53,22 +53,25 @@ impl Default for DeviceCapabilities {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountAttributes {
+    pub name: String,
     pub fetches_messages: bool,
-    pub registration_id: i32,
-    pub pni_registration_id: i32,
+    pub registration_id: u32,
+    pub pni_registration_id: u32,
     pub capabilities: DeviceCapabilities,
     pub unidentified_access_key: Box<[u8]>,
 }
 
 impl AccountAttributes {
     pub fn new(
+        name: String,
         fetches_messages: bool,
-        registration_id: i32,
-        pni_registration_id: i32,
+        registration_id: u32,
+        pni_registration_id: u32,
         capabilities: DeviceCapabilities,
         unidentified_access_key: Box<[u8]>,
     ) -> Self {
         Self {
+            name,
             fetches_messages,
             registration_id,
             pni_registration_id,
@@ -103,10 +106,21 @@ mod id_key {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ApnToken {
+    apn_registration_id: String,
+    voip_registration_id: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GcmToken {
+    gcm_registration_id: String,
+}
+
 /// A request to register an account.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RegistrationRequest {
     session_id: String,
+    recovery_password: String,
     account_attributes: AccountAttributes,
     require_atomic: bool,
     skip_device_transfer: bool,
@@ -118,12 +132,15 @@ pub struct RegistrationRequest {
     pni_signed_pre_key: UploadSignedPreKey,
     aci_pq_last_resort_pre_key: UploadSignedPreKey,
     pni_pq_last_resort_pre_key: UploadSignedPreKey,
+    apn_token: Option<ApnToken>,
+    gcm_token: Option<GcmToken>,
 }
 
 impl RegistrationRequest {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         session_id: String,
+        recovery_password: String,
         account_attributes: AccountAttributes,
         require_atomic: bool,
         skip_device_transfer: bool,
@@ -133,9 +150,12 @@ impl RegistrationRequest {
         pni_signed_pre_key: UploadSignedPreKey,
         aci_pq_last_resort_pre_key: UploadSignedPreKey,
         pni_pq_last_resort_pre_key: UploadSignedPreKey,
+        apn_token: Option<ApnToken>,
+        gcm_token: Option<GcmToken>,
     ) -> Self {
         Self {
             session_id,
+            recovery_password,
             account_attributes,
             require_atomic,
             skip_device_transfer,
@@ -145,6 +165,8 @@ impl RegistrationRequest {
             pni_signed_pre_key,
             aci_pq_last_resort_pre_key,
             pni_pq_last_resort_pre_key,
+            apn_token,
+            gcm_token,
         }
     }
     pub fn session_id(&self) -> &String {

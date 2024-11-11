@@ -13,7 +13,7 @@ CREATE TABLE devices (
     owner           INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     device_id       TEXT NOT NULL,
     name            BYTEA NOT NULL,
-    auth_token      BYTEA NOT NULL,
+    auth_token      TEXT NOT NULL,
     salt            TEXT NOT NULL,
     registration_id TEXT NOT NULL,
     pni_registration_id TEXT NOT NULL,

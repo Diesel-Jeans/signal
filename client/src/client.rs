@@ -68,7 +68,7 @@ impl Client {
 
     /// Register a new account with the server.
     /// `phone_number` must be unique.
-    pub async fn register(phone_number: String) -> Result<Self, RegistrationError> {
+    pub async fn register(name: &str, phone_number: String) -> Result<Self, RegistrationError> {
         let mut csprng = OsRng;
         let aci_registration_id = OsRng.gen_range(1..16383);
         let pni_registration_id = OsRng.gen_range(1..16383);
@@ -77,7 +77,7 @@ impl Client {
         let id_key = IdentityKey::new(aci_key_pair.public_key);
         let id_key_pair = IdentityKeyPair::new(id_key, aci_key_pair.private_key);
 
-        let storage = InMemSignalProtocolStore::new(id_key_pair, aci_registration_id as u32)
+        let storage = InMemSignalProtocolStore::new(id_key_pair, aci_registration_id)
             .expect("Can always create a protocol store.");
         let mut key_manager = InMemoryKeyManager::new(storage);
 
@@ -105,6 +105,7 @@ impl Client {
         let capabilities = DeviceCapabilities::default();
 
         let account_attributes = AccountAttributes::new(
+            name.into(),
             true,
             aci_registration_id,
             pni_registration_id,
@@ -113,7 +114,8 @@ impl Client {
         );
         let server_api = ServerAPI::new();
         let req = RegistrationRequest::new(
-            "".to_owned(),
+            "".into(),
+            "".into(),
             account_attributes,
             true, // Require atomic is always true
             true, // Skip device transfer is always true
@@ -123,6 +125,8 @@ impl Client {
             pni_signed_pk.into(),
             aci_pq_last_resort.into(),
             pni_pq_last_resort.into(),
+            None,
+            None,
         );
 
         let mut response = server_api
@@ -146,8 +150,8 @@ impl Client {
                     .set_password(password)
                     .set_public_key(aci_key_pair.public_key)
                     .set_private_key(aci_key_pair.private_key)
-                    .set_aci_registration_id(aci_registration_id as u32)
-                    .set_pni_registration_id(pni_registration_id as u32)
+                    .set_aci_registration_id(aci_registration_id)
+                    .set_pni_registration_id(pni_registration_id)
                     .try_into()
                     .expect("Missing field in builder");
                 let client =
