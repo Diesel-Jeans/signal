@@ -45,7 +45,9 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         let _ = dotenv::dotenv();
         let redis_url = std::env::var("REDIS_URL").expect("Unable to read REDIS_URL .env var");
         let mut redis_config = Config::from_url(redis_url);
-        let redis_pool: deadpool_redis::Pool = redis_config.create_pool(Some(Runtime::Tokio1)).expect("Failed to create connection pool");
+        let redis_pool: deadpool_redis::Pool = redis_config
+            .create_pool(Some(Runtime::Tokio1))
+            .expect("Failed to create connection pool");
         Self {
             pool: redis_pool,
             listeners: Arc::new(Mutex::new(HashMap::new())),
@@ -405,8 +407,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_message_availability_listener_new_messages() {
-        let mut message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect();
+        let mut message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let uuid = generate_uuid();
         let mut envelope = generate_random_envelope("Hello this is a test of insert()", &uuid);
@@ -432,8 +433,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_insert() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -469,8 +469,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_insert_same_id() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -514,8 +513,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_insert_different_ids() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -570,8 +568,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_remove() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -601,8 +598,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_get_all_messages() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -640,8 +636,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_has_messages() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -671,8 +666,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_get_messages_to_persist() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 

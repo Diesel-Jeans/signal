@@ -37,10 +37,7 @@ where
     U: MessageAvailabilityListener,
 {
     pub fn new(db: T, message_cache: MessageCache<U>) -> Self {
-        Self {
-            db,
-            message_cache
-        }
+        Self { db, message_cache }
     }
     /// Add message to cache
     pub async fn insert(&self, address: &ProtocolAddress, envelope: &mut Envelope) -> Result<u64> {
@@ -114,9 +111,7 @@ where
             .map(|m| m.server_guid().to_string())
             .collect();
 
-        self.db
-            .push_message_queue(address, messages)
-            .await?;
+        self.db.push_message_queue(address, messages).await?;
 
         let removed_from_cache = self.message_cache.remove(address, message_guids).await?;
 
@@ -171,8 +166,7 @@ mod message_manager_tests {
         Ok(
             MessagesManager::<PostgresDatabase, MockWebSocketConnection> {
                 message_cache: MessageCache::connect(),
-                db: PostgresDatabase::connect("DATABASE_URL_TEST".to_string())
-                    .await,
+                db: PostgresDatabase::connect("DATABASE_URL_TEST".to_string()).await,
             },
         )
     }
@@ -388,11 +382,7 @@ mod message_manager_tests {
             .unwrap();
 
         // Act
-        let count = msg_manager
-            .db
-            .count_messages(&address)
-            .await
-            .unwrap();
+        let count = msg_manager.db.count_messages(&address).await.unwrap();
 
         // Teardown DB
         msg_manager

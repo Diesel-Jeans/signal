@@ -21,12 +21,13 @@ impl PostgresDatabase {
     pub async fn connect(database_url: String) -> Self {
         dotenv::dotenv();
         let db_url = std::env::var(database_url).expect("Unable to read database url env var");
-        Self { 
+        Self {
             pool: PgPoolOptions::new()
-            .max_connections(100)
-            .connect(&db_url)
-            .await.expect("Failed to connect to the database.")
-         }
+                .max_connections(100)
+                .connect(&db_url)
+                .await
+                .expect("Failed to connect to the database."),
+        }
     }
 
     pub fn pool(&self) -> &Pool<Postgres> {
@@ -1107,8 +1108,7 @@ mod db_tests {
     };
 
     async fn connect() -> PostgresDatabase {
-        PostgresDatabase::connect("DATABASE_URL_TEST".to_string())
-            .await
+        PostgresDatabase::connect("DATABASE_URL_TEST".to_string()).await
     }
 
     #[tokio::test]
