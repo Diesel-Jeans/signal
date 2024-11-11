@@ -10,7 +10,7 @@ use sqlx::Transaction;
 
 /// Represents a database connection that can store objects related to the signal protocol.
 #[async_trait]
-pub trait SignalDatabase: Clone + Send + 'static {
+pub trait SignalDatabase: Clone + Send + Sync + 'static {
     /// Save a new account to the database.
     async fn add_account(&self, account: &Account) -> Result<()>;
 

@@ -11,8 +11,8 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct MessagesManager<T, U>
 where
-    T: SignalDatabase,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Send,
+    U: MessageAvailabilityListener + Send,
 {
     db: T,
     message_cache: MessageCache<U>,
@@ -20,8 +20,8 @@ where
 
 impl<T, U> Clone for MessagesManager<T, U>
 where
-    T: SignalDatabase + Clone,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Clone + Send,
+    U: MessageAvailabilityListener + Send,
 {
     fn clone(&self) -> Self {
         Self {
@@ -33,8 +33,8 @@ where
 
 impl<T, U> MessagesManager<T, U>
 where
-    T: SignalDatabase,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Send,
+    U: MessageAvailabilityListener + Send,
 {
     pub fn new(db: T, message_cache: MessageCache<U>) -> Self {
         Self { db, message_cache }
@@ -135,8 +135,8 @@ where
 
 impl<T, U> MessagesManager<T, U>
 where
-    T: SignalDatabase,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Send,
+    U: MessageAvailabilityListener + Send,
 {
     async fn has_messages(&self, address: &ProtocolAddress) -> Result<bool> {
         let count = self.db.count_messages(address).await?;

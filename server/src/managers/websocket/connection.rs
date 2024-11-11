@@ -37,7 +37,7 @@ pub struct WebSocketConnection<T: WSStream + Debug, U: SignalDatabase> {
     state: SignalServerState<U>
 }
 
-impl<T: WSStream + Debug + Send, U: SignalDatabase + Send> WebSocketConnection<T, U> {
+impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static> WebSocketConnection<T, U> {
     pub fn new(identity: UserIdentity, socket_addr: SocketAddr, ws: T, state: SignalServerState<U>) -> Self {
         Self {
             identity,
@@ -71,11 +71,10 @@ impl<T: WSStream + Debug + Send, U: SignalDatabase + Send> WebSocketConnection<T
     }
 
     pub async fn send_messages(&mut self, cached_only: bool) -> bool{
-        // TODO: use state.msg_manager when messagemanager is implemented
-        //let msg_mgr = self.state.
+        let msg_mgr = self.state.message_manager();
         
-        /*let addr = self.protocol_address();
-        let res = msg_manager.get_messages_for_device(addr.name(), addr.device_id(), cached_only).await;
+        let addr = self.protocol_address();
+        let res = msg_mgr.get_messages_for_device(&addr, cached_only).await;
         let envelopes = match res {
             Ok(x) => x,
             Err(_) => {
@@ -87,8 +86,7 @@ impl<T: WSStream + Debug + Send, U: SignalDatabase + Send> WebSocketConnection<T
         for envelope in envelopes{
             self.send_message(envelope).await.map_err(|e| println!("{}", e));
         }
-        return true*/
-        todo!();
+        return true
     }
 
     fn create_message(
@@ -161,7 +159,7 @@ impl<T: WSStream + Debug + Send, U: SignalDatabase + Send> WebSocketConnection<T
 
 #[async_trait::async_trait]
 impl<T, U> MessageAvailabilityListener for WebSocketConnection<T, U>
-where T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static {
+where T: WSStream + Debug + 'static, U: SignalDatabase{
     async fn handle_new_messages_available(&mut self) -> bool {
         if !self.is_active(){
             return false
