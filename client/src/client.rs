@@ -6,6 +6,8 @@ use common::{
 };
 use core::str;
 use libsignal_core::{Aci, Pni};
+use std::collections::HashMap;
+
 use libsignal_protocol::{
     IdentityKey, IdentityKeyPair, InMemSignalProtocolStore, KeyPair, KyberPreKeyRecord,
     SignedPreKeyRecord,
@@ -13,13 +15,13 @@ use libsignal_protocol::{
 use rand::{rngs::OsRng, Rng};
 use surf::StatusCode;
 
-use crate::{
-    contact_manager::ContactManager,
-    errors::{LoginError, RegistrationError},
-    key_management::key_manager::{InMemoryKeyManager, KeyManager},
-    server::{Server, ServerAPI},
-    storage::{DeviceStorage, Storage},
-};
+use crate::contact_manager::{Contact, ContactManager};
+use crate::encryption::encrypt;
+use crate::errors::{LoginError, RegistrationError};
+use crate::key_management::key_manager::{InMemoryKeyManager, KeyManager};
+use crate::server::{Server, ServerAPI};
+use crate::storage::device::{DeviceStorage, Storage};
+use crate::storage::protocol_store::ProtocolStore;
 
 pub struct Client {
     aci: Aci,
@@ -142,15 +144,14 @@ impl Client {
 
                 let contact_manager = ContactManager::new();
                 let storage = DeviceStorage::builder()
-                    .set_aci(aci)
-                    .set_pni(pni)
-                    .set_password(password)
-                    .set_public_key(aci_key_pair.public_key)
-                    .set_private_key(aci_key_pair.private_key)
-                    .set_aci_registration_id(aci_registration_id)
-                    .set_pni_registration_id(pni_registration_id)
-                    .try_into()
-                    .expect("Missing field in builder");
+                    .aci(aci)
+                    .pni(pni)
+                    .password(password)
+                    .public_key(aci_key_pair.public_key)
+                    .private_key(aci_key_pair.private_key)
+                    .aci_registration_id(aci_registration_id as u32)
+                    .pni_registration_id(pni_registration_id as u32)
+                    .build();
                 let client =
                     Client::new(aci, pni, contact_manager, server_api, key_manager, storage);
                 Ok(client)
@@ -186,8 +187,17 @@ impl Client {
         user_id: &str,
         device_id: u32,
     ) -> Result<WebSocketResponseMessage> {
-        self.server_api
-            .send_msg(message.into(), user_id.into(), device_id)
-            .await
+        todo!()
     }
+}
+fn transform_hashmap_result<K, T, E>(map: HashMap<K, Result<T, E>>) -> Result<HashMap<K, T>, E>
+where
+    K: Eq + std::hash::Hash,
+{
+    map.into_iter()
+        .fold(Ok(HashMap::new()), |acc, (key, value)| {
+            let mut new_map = acc?;
+            new_map.insert(key, value?);
+            Ok(new_map)
+        })
 }

@@ -1,13 +1,14 @@
 use crate::contact_manager::{Contact, Device};
 use libsignal_protocol::{
-    message_decrypt, message_encrypt, CiphertextMessage, InMemSignalProtocolStore,
-    SignalProtocolError,
+    message_decrypt, message_encrypt, CiphertextMessage, IdentityKeyStore,
+    InMemSignalProtocolStore, SessionStore, SignalProtocolError,
 };
 use rand::{CryptoRng, Rng};
 use std::{collections::HashMap, time::SystemTime};
 
 pub async fn encrypt(
-    store: &mut InMemSignalProtocolStore,
+    session_store: &mut dyn SessionStore,
+    identity_store: &mut dyn IdentityKeyStore,
     target: &Contact,
     msg: &[u8],
 ) -> HashMap<u32, Result<CiphertextMessage, SignalProtocolError>> {
@@ -16,8 +17,8 @@ pub async fn encrypt(
         let res = message_encrypt(
             msg,
             &device.address,
-            &mut store.session_store,
-            &mut store.identity_store,
+            session_store,
+            identity_store,
             SystemTime::now(),
         )
         .await;
@@ -49,15 +50,14 @@ pub async fn decrypt<R: Rng + CryptoRng>(
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
-    use crate::{
-        contact_manager::ContactManager,
-        encryption::{decrypt, encrypt},
-    };
+    use crate::contact_manager::ContactManager;
+    use crate::encryption::{decrypt, encrypt};
     use libsignal_protocol::{
         kem, process_prekey_bundle, GenericSignedPreKey, KeyPair, KyberPreKeyRecord, PreKeyBundle,
         PreKeyRecord, ProtocolStore, SignedPreKeyRecord, Timestamp,
     };
     use rand::{rngs::OsRng, CryptoRng, Rng};
+
     use std::time::SystemTime;
     use uuid::Uuid;
 
@@ -112,7 +112,13 @@ pub(crate) mod test {
         )
         .await;
 
-        let msg_map = encrypt(&mut alice_store, bob, "Hello Bob".as_bytes()).await;
+        let msg_map = encrypt(
+            &mut alice_store.session_store,
+            &mut alice_store.identity_store,
+            bob,
+            "Hello Bob".as_bytes(),
+        )
+        .await;
 
         let to_bob_msg = msg_map.get(&1).unwrap().as_ref().unwrap();
 

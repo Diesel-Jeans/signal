@@ -87,10 +87,8 @@ impl ContactManager {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        contact_manager::ContactManager,
-        encryption::test::{create_pre_key_bundle, store},
-    };
+    use crate::contact_manager::ContactManager;
+    use crate::encryption::test::{create_pre_key_bundle, store};
     use rand::rngs::OsRng;
     use uuid::Uuid;
 

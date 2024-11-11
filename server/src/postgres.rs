@@ -948,7 +948,7 @@ async fn store_pq_pni_signed_pre_key(
 
 #[cfg(test)]
 mod db_tests {
-    use common::signal_protobuf::Envelope;
+    use common::signalservice::Envelope;
     use libsignal_core::{Aci, Pni, ProtocolAddress};
     use uuid::Uuid;
 
