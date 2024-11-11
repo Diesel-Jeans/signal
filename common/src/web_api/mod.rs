@@ -360,7 +360,7 @@ pub struct SignalMessages {
 #[serde(rename_all = "camelCase")]
 pub struct SignalMessage {
     pub r#type: i32,
-    pub destination_device_id: u8,
+    pub destination_device_id: u32,
     pub destination_registration_id: u32,
     pub content: String,
 }

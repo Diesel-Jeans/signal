@@ -62,13 +62,13 @@ async fn handle_put_messages<T: SignalDatabase>(
                 message: "Destination account not found".to_owned(),
             })?
     };
-    let exclude_device_ids: Vec<u8> = if is_sync_message {
-        vec![u32::from(authenticated_device.device().device_id()) as u8]
+    let exclude_device_ids: Vec<u32> = if is_sync_message {
+        vec![authenticated_device.device().device_id().into()]
     } else {
         Vec::new()
     };
 
-    let message_device_ids: Vec<u8> = payload
+    let message_device_ids: Vec<u32> = payload
         .messages
         .iter()
         .map(|message| message.destination_device_id)

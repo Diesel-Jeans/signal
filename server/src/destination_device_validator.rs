@@ -13,16 +13,15 @@ impl DestinationDeviceValidator {
         messages: &[SignalMessage],
         use_phone_number_identity: bool,
     ) -> Result<()> {
-        let destination_device_ids: Vec<u8> = messages
+        let device_id_and_registration_id: Vec<(u32, u32)> = messages
             .iter()
-            .map(|message| message.destination_device_id)
+            .map(|message| {
+                (
+                    message.destination_device_id,
+                    message.destination_registration_id,
+                )
+            })
             .collect();
-        let destination_registration_ids: Vec<u32> = messages
-            .iter()
-            .map(|message| message.destination_registration_id)
-            .collect();
-        let device_id_and_registration_id: Vec<(u8, u32)> =
-            zip(destination_device_ids, destination_registration_ids).collect();
         Self::validate_registration_id_from_id_tuple(
             account,
             &device_id_and_registration_id,
@@ -32,10 +31,10 @@ impl DestinationDeviceValidator {
 
     pub fn validate_registration_id_from_id_tuple(
         account: &Account,
-        device_ids_and_registration_ids: &[(u8, u32)],
+        device_ids_and_registration_ids: &[(u32, u32)],
         use_phone_number_identity: bool,
     ) -> Result<()> {
-        let stale_devices: Vec<u8> = device_ids_and_registration_ids
+        let stale_devices: Vec<u32> = device_ids_and_registration_ids
             .iter()
             .filter(|device_id_and_registration_id| device_id_and_registration_id.1 > 0)
             .filter(|device_id_and_registration_id| {
@@ -44,7 +43,7 @@ impl DestinationDeviceValidator {
                 let registration_id_matches: bool = if let Some(device) = account
                     .devices()
                     .iter()
-                    .find(|device| (u32::from(device.device_id()) as u8) == device_id)
+                    .find(|device| (u32::from(device.device_id()) == device_id))
                 {
                     registration_id
                         == if use_phone_number_identity {
@@ -69,21 +68,21 @@ impl DestinationDeviceValidator {
 
     pub fn validate_complete_device_list(
         account: &Account,
-        message_device_ids: &[u8],
-        excluded_device_ids: &[u8],
+        message_device_ids: &[u32],
+        excluded_device_ids: &[u32],
     ) -> Result<()> {
-        let account_device_ids: Vec<u8> = account
+        let account_device_ids: Vec<u32> = account
             .devices()
             .iter()
-            .map(|device| u32::from(device.device_id()) as u8)
+            .map(|device| device.device_id().into())
             .filter(|device_id| !excluded_device_ids.contains(device_id))
             .collect();
-        let missing_device_ids: Vec<u8> = account_device_ids
+        let missing_device_ids: Vec<u32> = account_device_ids
             .iter()
             .filter(|account_device_id| !message_device_ids.contains(account_device_id))
             .cloned()
             .collect();
-        let extra_device_ids: Vec<u8> = message_device_ids
+        let extra_device_ids: Vec<u32> = message_device_ids
             .iter()
             .filter(|message_device_id| !account_device_ids.contains(message_device_id))
             .cloned()
