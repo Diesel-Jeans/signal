@@ -2,8 +2,8 @@ use crate::database::SignalDatabase;
 use crate::message_cache::{MessageAvailabilityListener, MessageCache};
 use crate::postgres::PostgresDatabase;
 use anyhow::{Ok, Result};
-use common::signal_protobuf::{envelope, Envelope};
-use libsignal_core::{DeviceId, ProtocolAddress};
+use common::signal_protobuf::Envelope;
+use libsignal_core::ProtocolAddress;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -147,17 +147,15 @@ where
 }
 
 #[cfg(test)]
-mod message_manager_tests {
-    use std::{default, string};
-
-    use crate::account::{self, Account, AuthenticatedDevice, Device};
-    use crate::message_cache::message_cache_tests::MockWebSocketConnection;
+pub mod message_manager_tests {
+    use crate::account::{Account, Device};
+    use crate::message_cache::message_cache_tests::{generate_uuid, MockWebSocketConnection};
     use crate::message_cache::MessageCache;
     use crate::postgres::PostgresDatabase;
     use anyhow::Result;
     use common::web_api::{AccountAttributes, DeviceCapabilities};
     use deadpool_redis::redis::cmd;
-    use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
+    use libsignal_core::{Pni, ProtocolAddress, ServiceId};
     use libsignal_protocol::{IdentityKey, PublicKey};
     use serial_test::serial;
     use uuid::Uuid;
@@ -185,7 +183,7 @@ mod message_manager_tests {
         }
     }
 
-    fn create_device(device_id: u32, name: &str) -> Device {
+    pub fn create_device(device_id: u32, name: &str) -> Device {
         let last_seen = 0;
         let created = 0;
         let auth_token = "token".into();
@@ -227,11 +225,12 @@ mod message_manager_tests {
         }
     }
 
-    fn create_account(device: Device) -> Account {
+    pub fn create_account(device: Device) -> Account {
+        let mut rng = rand::thread_rng();
         let pni = Pni::from(Uuid::new_v4());
         let pni_identity_key = create_identity_key();
         let aci_identity_key = create_identity_key();
-        let phone_number = "420-1337-69";
+        let phone_number = generate_uuid();
         let account_attr = create_account_attributes();
         Account::new(
             pni,
@@ -269,7 +268,7 @@ mod message_manager_tests {
             .unwrap();
 
         // Teardown cache
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(may_have_messages, (true, "cached"));
     }
@@ -356,7 +355,7 @@ mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(may_have_messages, (true, "both"));
     }
@@ -442,7 +441,7 @@ mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(messages_for_device_cache_and_db.len(), 4);
     }
@@ -493,7 +492,7 @@ mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(messages_for_device_cache_only.len(), 1);
         assert_eq!(messages_for_device_db_and_cache.len(), 2);
@@ -552,7 +551,7 @@ mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(messages_for_device_db_and_cache.len(), 3);
         assert_eq!(deleted_messages.len(), 3);
@@ -603,7 +602,7 @@ mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(messages_in_cache.len(), 2);
         assert_eq!(messages_in_db.len(), 0);

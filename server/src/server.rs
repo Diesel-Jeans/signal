@@ -17,23 +17,20 @@ use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
-use common::signal_protobuf::{envelope, Envelope};
 use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{
-    DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SetKeyRequest, SignalMessages,
-    UploadKeys,
+    DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SignalMessages,
 };
 use futures_util::StreamExt;
-use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKind};
-use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
+use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
 use serde::Serialize;
 use std::env;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tower_http::cors::CorsLayer;
-use uuid::Uuid;
 
 use crate::destination_device_validator::DestinationDeviceValidator;
-use crate::message_cache::MessageCache;
+use crate::managers::message_persister::MessagePersister;
+use crate::message_cache::MessageAvailabilityListener;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
@@ -382,6 +379,13 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = SignalServerState::<PostgresDatabase, WebSocket>::new().await;
 
+    let message_persister = MessagePersister::start(
+        state.message_manager.clone(),
+        state.message_cache.clone(),
+        state.db.clone(),
+        state.account_manager.clone(),
+    );
+
     let app = Router::new()
         .route("/", get(|| async { "Hello from Signal Server" }))
         .route("/v1/messages", get(get_messages_endpoint))
@@ -414,6 +418,8 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     axum_server::bind_rustls(https_addr, config)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
+
+    message_persister.stop();
 
     Ok(())
 }

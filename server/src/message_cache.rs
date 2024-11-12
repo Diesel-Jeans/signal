@@ -4,7 +4,7 @@ use deadpool_redis::redis::cmd;
 use deadpool_redis::{Config, Connection, Runtime};
 use futures_util::task::SpawnExt;
 use futures_util::StreamExt;
-use libsignal_core::{DeviceId, ProtocolAddress};
+use libsignal_core::ProtocolAddress;
 use redis::PubSubCommands;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -66,9 +66,9 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
     ) -> Result<u64> {
         let mut connection = self.pool.get().await?;
 
-        let queue_key: String = MessageCache::<T>::get_message_queue_key(address);
-        let queue_metadata_key: String = MessageCache::<T>::get_message_queue_metadata_key(address);
-        let queue_total_index_key: String = MessageCache::<T>::get_queue_index_key(address);
+        let queue_key: String = self.get_message_queue_key(address);
+        let queue_metadata_key: String = self.get_message_queue_metadata_key(address);
+        let queue_total_index_key: String = self.get_queue_index_key();
 
         envelope.server_guid = Some(message_guid.to_string());
         let data = bincode::serialize(&envelope)?;
@@ -127,7 +127,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
             .await?;
 
         let time = SystemTime::now();
-        let time_in_millis: u64 = time.duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let time_in_millis: u64 = time.duration_since(UNIX_EPOCH)?.as_secs();
 
         cmd("ZADD")
             .arg(&queue_total_index_key)
@@ -153,9 +153,9 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
     ) -> Result<Vec<Envelope>> {
         let mut connection = self.pool.get().await?;
 
-        let queue_key: String = MessageCache::<T>::get_message_queue_key(address);
-        let queue_metadata_key: String = MessageCache::<T>::get_message_queue_metadata_key(address);
-        let queue_total_index_key: String = MessageCache::<T>::get_queue_index_key(address);
+        let queue_key: String = self.get_message_queue_key(address);
+        let queue_metadata_key: String = self.get_message_queue_metadata_key(address);
+        let queue_total_index_key: String = self.get_queue_index_key();
 
         let mut removed_messages: Vec<Envelope> = Vec::new();
 
@@ -230,9 +230,13 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         let mut connection = self.pool.get().await?;
 
         let msg_count = cmd("ZCARD")
-            .arg(MessageCache::<T>::get_message_queue_key(address))
+            .arg(self.get_message_queue_key(address))
             .query_async::<u32>(&mut connection)
             .await?;
+        let queue_name = format!("{}::{}", address.name(), address.device_id());
+        if let Some(listener) = self.listeners.lock().await.get(&queue_name) {
+            listener.lock().await.handle_new_messages_available().await;
+        }
 
         Ok(msg_count > 0)
     }
@@ -258,9 +262,8 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         after_message_id: i32,
     ) -> Result<Vec<Vec<u8>>> {
         let mut connection = self.pool.get().await?;
-
-        let queue_key = MessageCache::<T>::get_message_queue_key(address);
-        let queue_lock_key = MessageCache::<T>::get_persist_in_progress_key(address);
+        let queue_key = self.get_message_queue_key(address);
+        let queue_lock_key = self.get_persist_in_progress_key(address);
         let message_sort = format!("({}", after_message_id);
 
         let locked = cmd("GET")
@@ -296,7 +299,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         let mut connection = self.pool.get().await?;
 
         let messages = cmd("ZRANGE")
-            .arg(MessageCache::<T>::get_message_queue_key(address))
+            .arg(self.get_message_queue_key(address))
             .arg(0)
             .arg(limit)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
@@ -310,7 +313,64 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         Ok(valid_envelopes)
     }
 
-    fn get_message_queue_key(address: &ProtocolAddress) -> String {
+    pub async fn get_message_queues_to_persist(
+        &self,
+        max_time: u64,
+        limit: u8,
+    ) -> Result<Vec<String>> {
+        let mut connection = self.pool.get().await?;
+        let queue_index_key = self.get_queue_index_key();
+
+        let results = cmd("ZRANGE")
+            .arg(&queue_index_key)
+            .arg(0)
+            .arg(max_time)
+            .arg("BYSCORE")
+            .arg("LIMIT")
+            .arg(0)
+            .arg(limit)
+            .query_async::<Vec<String>>(&mut connection)
+            .await?;
+
+        if !results.is_empty() {
+            cmd("ZREM")
+                .arg(&queue_index_key)
+                .arg(&results)
+                .query_async::<()>(&mut connection)
+                .await?;
+        }
+        Ok(results)
+    }
+
+    pub async fn lock_queue_for_persistence(&self, address: &ProtocolAddress) -> Result<()> {
+        let mut connection = self.pool.get().await?;
+
+        cmd("SETEX")
+            .arg(self.get_persist_in_progress_key(address))
+            .arg("1")
+            .query_async::<()>(&mut connection)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn unlock_queue_for_persistence(&self, address: &ProtocolAddress) -> Result<()> {
+        let mut connection = self.pool.get().await?;
+
+        cmd("DEL")
+            .arg(self.get_persist_in_progress_key(address))
+            .query_async::<()>(&mut connection)
+            .await?;
+
+        let queue_name = format!("{}::{}", address.name(), address.device_id());
+        if let Some(listener) = self.listeners.lock().await.get(&queue_name) {
+            listener.lock().await.handle_messages_persisted().await;
+        }
+
+        Ok(())
+    }
+
+    pub fn get_message_queue_key(&self, address: &ProtocolAddress) -> String {
         format!(
             "user_messages::{{{}::{}}}",
             address.name(),
@@ -318,7 +378,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         )
     }
 
-    fn get_persist_in_progress_key(address: &ProtocolAddress) -> String {
+    pub fn get_persist_in_progress_key(&self, address: &ProtocolAddress) -> String {
         format!(
             "user_queue_persisting::{{{}::{}}}",
             address.name(),
@@ -326,7 +386,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         )
     }
 
-    fn get_message_queue_metadata_key(address: &ProtocolAddress) -> String {
+    fn get_message_queue_metadata_key(&self, address: &ProtocolAddress) -> String {
         format!(
             "user_messages_count::{{{}::{}}}",
             address.name(),
@@ -334,8 +394,15 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         )
     }
 
-    fn get_queue_index_key(address: &ProtocolAddress) -> String {
-        format!("{}::{}", address.name(), address.device_id())
+    pub fn get_queue_index_key(&self) -> String {
+        "user_queue_index_key".to_string() // Should be changed if we use Redis Cluster
+    }
+
+    pub fn get_account_and_device_id_from_queue_key(&self, queue_key: &str) -> (String, String) {
+        let mut parts = queue_key.split("::").collect::<Vec<&str>>();
+        let account_id = parts[1].trim_matches('{').to_string();
+        let device_id = parts[2].trim_end_matches('}').to_string();
+        (account_id, device_id)
     }
 
     pub async fn add_message_availability_listener(
@@ -364,7 +431,7 @@ pub mod message_cache_tests {
         guid.to_string()
     }
 
-    fn generate_random_envelope(message: &str, uuid: &str) -> Envelope {
+    pub fn generate_random_envelope(message: &str, uuid: &str) -> Envelope {
         let mut data = bincode::serialize(message).unwrap();
         Envelope {
             content: Some(data),
@@ -383,7 +450,7 @@ pub mod message_cache_tests {
     }
 
     impl MockWebSocketConnection {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             MockWebSocketConnection {
                 evoked_handle_new_messages: false,
                 evoked_handle_messages_persisted: false,
@@ -451,7 +518,7 @@ pub mod message_cache_tests {
             .unwrap();
 
         let result = cmd("ZRANGEBYSCORE")
-            .arg(MessageCache::<MockWebSocketConnection>::get_message_queue_key(&address))
+            .arg(message_cache.get_message_queue_key(&address))
             .arg(message_id)
             .arg(message_id)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
@@ -493,7 +560,7 @@ pub mod message_cache_tests {
             .unwrap();
 
         let result = cmd("ZRANGEBYSCORE")
-            .arg(MessageCache::<MockWebSocketConnection>::get_message_queue_key(&address))
+            .arg(message_cache.get_message_queue_key(&address))
             .arg(message_id_2)
             .arg(message_id_2)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
@@ -539,7 +606,7 @@ pub mod message_cache_tests {
 
         // querying the envelopes
         let result_1 = cmd("ZRANGEBYSCORE")
-            .arg(MessageCache::<MockWebSocketConnection>::get_message_queue_key(&address))
+            .arg(message_cache.get_message_queue_key(&address))
             .arg(message_id)
             .arg(message_id)
             .query_async::<Vec<Vec<u8>>>(&mut connection)
@@ -547,7 +614,7 @@ pub mod message_cache_tests {
             .unwrap();
 
         let result_2 = cmd("ZRANGEBYSCORE")
-            .arg(MessageCache::<MockWebSocketConnection>::get_message_queue_key(&address))
+            .arg(message_cache.get_message_queue_key(&address))
             .arg(message_id_2)
             .arg(message_id_2)
             .query_async::<Vec<Vec<u8>>>(&mut connection)

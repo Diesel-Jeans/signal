@@ -259,8 +259,9 @@ mod client_presence_manager_test {
             .await
             .evoke_handle_displacement;
 
+        teardown(connection).await;
+
         assert!(is_handle_displacement_invoked);
-        teardown(connection);
     }
 
     #[tokio::test]
@@ -307,9 +308,9 @@ mod client_presence_manager_test {
             .await
             .evoke_handle_displacement;
 
-        assert!(!is_handle_displacement_invoked);
+        teardown(connection).await;
 
-        teardown(connection);
+        assert!(!is_handle_displacement_invoked);
     }
 
     #[tokio::test]
@@ -332,8 +333,9 @@ mod client_presence_manager_test {
             .await
             .unwrap();
 
+        teardown(connection).await;
+
         assert_eq!(removed, 1);
-        teardown(connection);
     }
 
     #[tokio::test]
@@ -355,7 +357,8 @@ mod client_presence_manager_test {
             .await
             .unwrap();
 
+        teardown(connection).await;
+
         assert!(is_present);
-        teardown(connection);
     }
 }
