@@ -2,20 +2,18 @@ use crate::account::{Account, Device};
 use crate::database::SignalDatabase;
 use anyhow::{anyhow, Result};
 use axum::async_trait;
+use axum::extract::ws::Message;
+use axum::Error;
 use common::pre_key::PreKeyType;
 use common::signal_protobuf::Envelope;
 use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use axum::extract::ws::Message;
-use axum::Error;
+use tokio::sync::Mutex;
 
 use crate::managers::websocket::wsstream::WSStream;
-
-
 
 #[cfg(test)]
 #[derive(Clone)]
@@ -183,9 +181,9 @@ impl WSStream for MockSocket {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use axum::extract::ws::Message;
     use super::MockSocket;
     use super::WSStream;
+    use axum::extract::ws::Message;
     #[tokio::test]
     async fn test_mock() {
         let (mut mock, mut sender, mut receiver) = MockSocket::new();

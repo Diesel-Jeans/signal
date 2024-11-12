@@ -35,9 +35,9 @@ use crate::message_cache::MessageCache;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
+use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::fmt::Debug;
 
 async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
     state: SignalServerState<T, U>,
@@ -241,7 +241,9 @@ async fn put_messages_endpoint(
 
 /// Handler for the GET v1/messages endpoint.
 #[debug_handler]
-async fn get_messages_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
+async fn get_messages_endpoint(
+    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+) {
     // TODO: Call `handle_get_messages`
 }
 
@@ -285,7 +287,9 @@ async fn get_keys_endpoint(State(state): State<SignalServerState<PostgresDatabas
 
 /// Handler for the POST v2/keys/check endpoint.
 #[debug_handler]
-async fn post_keycheck_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
+async fn post_keycheck_endpoint(
+    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+) {
     // TODO: Call `handle_post_keycheck`
 }
 
@@ -297,19 +301,25 @@ async fn put_keys_endpoint(State(state): State<SignalServerState<PostgresDatabas
 
 /// Handler for the DELETE v1/accounts/me endpoint.
 #[debug_handler]
-async fn delete_account_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
+async fn delete_account_endpoint(
+    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+) {
     // TODO: Call `handle_delete_account`
 }
 
 /// Handler for the DELETE v1/devices/{device_id} endpoint.
 #[debug_handler]
-async fn delete_device_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
+async fn delete_device_endpoint(
+    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+) {
     // TODO: Call `handle_delete_device`
 }
 
 /// Handler for the POST v1/devices/link endpoint.
 #[debug_handler]
-async fn post_link_device_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
+async fn post_link_device_endpoint(
+    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+) {
     // TODO: Call `handle_post_link_device`
 }
 
@@ -331,14 +341,12 @@ async fn create_websocket_endpoint(
     ws.on_upgrade(move |socket| {
         let mut wmgr = state.websocket_manager.clone();
         async move {
-            wmgr.insert(
-                WebSocketConnection::new(
-                    UserIdentity::AuthenticatedDevice(authenticated_device),
-                    addr,
-                    socket,
-                    state
-                ),
-            )
+            wmgr.insert(WebSocketConnection::new(
+                UserIdentity::AuthenticatedDevice(authenticated_device),
+                addr,
+                socket,
+                state,
+            ))
             .await
         }
     })

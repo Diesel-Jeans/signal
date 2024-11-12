@@ -1,4 +1,4 @@
-use axum::extract::ws::{WebSocket, Message};
+use axum::extract::ws::{Message, WebSocket};
 use axum::Error;
 
 #[async_trait::async_trait]

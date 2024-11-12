@@ -141,7 +141,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         let queue_name = format!("{}::{}", address.name(), address.device_id());
         if let Some(listener) = self.listeners.lock().await.get(&queue_name) {
             listener.lock().await.handle_new_messages_available().await;
-        } 
+        }
 
         Ok(message_id)
     }

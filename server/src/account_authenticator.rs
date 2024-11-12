@@ -21,7 +21,8 @@ use crate::{
 };
 
 #[async_trait]
-impl<T: SignalDatabase, U: WSStream + Debug> FromRequestParts<SignalServerState<T, U>> for AuthenticatedDevice
+impl<T: SignalDatabase, U: WSStream + Debug> FromRequestParts<SignalServerState<T, U>>
+    for AuthenticatedDevice
 where
     T: Sync + Send,
 {

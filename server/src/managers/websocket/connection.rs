@@ -4,7 +4,7 @@ use common::signal_protobuf::{
     envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
-use libsignal_core::{ProtocolAddress, ServiceIdKind, DeviceId};
+use libsignal_core::{DeviceId, ProtocolAddress, ServiceIdKind};
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -34,17 +34,24 @@ pub struct WebSocketConnection<W: WSStream + Debug, DB: SignalDatabase> {
     socket_address: SocketAddr,
     ws: ConnectionState<W>,
     pending_requests: HashSet<u64>,
-    state: SignalServerState<DB, W>
+    state: SignalServerState<DB, W>,
 }
 
-impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static> WebSocketConnection<W, DB> {
-    pub fn new(identity: UserIdentity, socket_addr: SocketAddr, ws: W, state: SignalServerState<DB, W>) -> Self {
+impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
+    WebSocketConnection<W, DB>
+{
+    pub fn new(
+        identity: UserIdentity,
+        socket_addr: SocketAddr,
+        ws: W,
+        state: SignalServerState<DB, W>,
+    ) -> Self {
         Self {
             identity,
             socket_address: socket_addr,
             ws: ConnectionState::Active(ws),
             pending_requests: HashSet::new(),
-            state: state
+            state: state,
         }
     }
 
@@ -70,23 +77,25 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static> 
         }
     }
 
-    pub async fn send_messages(&mut self, cached_only: bool) -> bool{
+    pub async fn send_messages(&mut self, cached_only: bool) -> bool {
         let msg_mgr = &self.state.message_manager;
-        
+
         let addr = self.protocol_address();
         let res = msg_mgr.get_messages_for_device(&addr, cached_only).await;
         let envelopes = match res {
             Ok(x) => x,
             Err(_) => {
                 println!("Failed to fetch messages");
-                return false
+                return false;
             }
         };
 
-        for envelope in envelopes{
-            self.send_message(envelope).await.map_err(|e| println!("{}", e));
+        for envelope in envelopes {
+            self.send_message(envelope)
+                .await
+                .map_err(|e| println!("{}", e));
         }
-        return true
+        return true;
     }
 
     fn create_message(
@@ -148,55 +157,55 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static> 
         }
     }
 
-    async fn send_queue_empty(&mut self) -> bool{
+    async fn send_queue_empty(&mut self) -> bool {
         let id = generate_req_id();
-        let time = if let Ok(x) = current_millis(){
+        let time = if let Ok(x) = current_millis() {
             x
         } else {
-            return false
+            return false;
         };
 
         let msg = create_request(
-            id, 
-            "PUT", 
-            "/api/v1/queue/empty", 
-            vec![format!("X-Signal-Timestamp: {}", time)], 
-            None);
+            id,
+            "PUT",
+            "/api/v1/queue/empty",
+            vec![format!("X-Signal-Timestamp: {}", time)],
+            None,
+        );
         let res = self.send(Message::Binary(msg.encode_to_vec())).await;
-        return !res.is_err()
+        return !res.is_err();
     }
 
-    pub async fn on_receive(
-        &mut self,
-        proto_message: WebSocketMessage,
-    ) {
+    pub async fn on_receive(&mut self, proto_message: WebSocketMessage) {
         todo!()
     }
 }
 
-
 #[async_trait::async_trait]
 impl<T, U> MessageAvailabilityListener for WebSocketConnection<T, U>
-where T: WSStream + Debug + 'static, U: SignalDatabase{
+where
+    T: WSStream + Debug + 'static,
+    U: SignalDatabase,
+{
     async fn handle_new_messages_available(&mut self) -> bool {
-        if !self.is_active(){
-            return false
+        if !self.is_active() {
+            return false;
         }
-        
-        if !self.send_messages(true).await{
-            return false
+
+        if !self.send_messages(true).await {
+            return false;
         }
-        return self.send_queue_empty().await
+        return self.send_queue_empty().await;
     }
 
     async fn handle_messages_persisted(&mut self) -> bool {
-        if !self.is_active(){
-            return false
+        if !self.is_active() {
+            return false;
         }
-        if !self.send_messages(false).await{
-            return false
+        if !self.send_messages(false).await {
+            return false;
         }
-        return self.send_queue_empty().await
+        return self.send_queue_empty().await;
     }
 }
 
@@ -237,9 +246,8 @@ pub(crate) mod test {
 
     use prost::{bytes::Bytes, Message as PMessage};
     use std::sync::Arc;
-    use tokio::sync::Mutex;
     use std::time::Duration;
-
+    use tokio::sync::Mutex;
 
     pub fn mock_envelope() -> Envelope {
         Envelope {
@@ -264,7 +272,7 @@ pub(crate) mod test {
         name: &str,
         device_id: u32,
         socket_addr: &str,
-        state: SignalServerState::<MockDB, MockSocket>
+        state: SignalServerState<MockDB, MockSocket>,
     ) -> (
         WebSocketConnection<MockSocket, MockDB>,
         Sender<Result<Message, Error>>,
@@ -366,29 +374,48 @@ pub(crate) mod test {
 
     // this is more of a integration test and should maybe be somewhere else
     #[tokio::test]
-    async fn test_handle_new_messages_available(){
+    async fn test_handle_new_messages_available() {
         let mut state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver) = create_connection(&Uuid::new_v4().to_string(), 1, "127.0.0.1:4043", state.clone());
+        let (ws, sender, mut receiver) = create_connection(
+            &Uuid::new_v4().to_string(),
+            1,
+            "127.0.0.1:4043",
+            state.clone(),
+        );
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws).await;
         let listener = mgr.get(&address).await.unwrap();
         let mut env = mock_envelope();
-        
-        state.message_manager.add_message_availability_listener(&address, listener).await;
+
+        state
+            .message_manager
+            .add_message_availability_listener(&address, listener)
+            .await;
         state.message_manager.insert(&address, &mut env).await;
-        assert_eq!(state.message_manager.get_messages_for_device(&address, true).await.unwrap().len(), 1);
+        assert_eq!(
+            state
+                .message_manager
+                .get_messages_for_device(&address, true)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
-        let msg = match receiver.recv().await{
-            Some(Message::Binary(x)) => WebSocketMessage::decode(Bytes::from(x)).expect("Did not unwrap ws message"),
+        let msg = match receiver.recv().await {
+            Some(Message::Binary(x)) => {
+                WebSocketMessage::decode(Bytes::from(x)).expect("Did not unwrap ws message")
+            }
             _ => panic!("Did not receive anything"),
         };
 
-        let queue = match  receiver.recv().await {
-            Some(Message::Binary(x)) => WebSocketMessage::decode(Bytes::from(x)).expect("Did not unwrap ws message (queue)"),
+        let queue = match receiver.recv().await {
+            Some(Message::Binary(x)) => {
+                WebSocketMessage::decode(Bytes::from(x)).expect("Did not unwrap ws message (queue)")
+            }
             _ => panic!("Did not receive anything"),
         };
-        
 
         assert!(msg.request.is_some());
         assert!(queue.request.is_some());
@@ -405,4 +432,3 @@ pub(crate) mod test {
         assert!(req.body.unwrap() == env.encode_to_vec());
     }
 }
-

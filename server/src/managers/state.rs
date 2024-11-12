@@ -1,6 +1,9 @@
 use std::fmt::Debug;
 
-use super::{mock_helper::MockSocket, websocket::{connection::WebSocketConnection, wsstream::WSStream}};
+use super::{
+    mock_helper::MockSocket,
+    websocket::{connection::WebSocketConnection, wsstream::WSStream},
+};
 use crate::{
     account::{self, Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
@@ -47,7 +50,6 @@ impl<T: SignalDatabase + Clone, U: WSStream + Debug> Clone for SignalServerState
         }
     }
 }
-
 
 #[cfg(test)]
 impl SignalServerState<MockDB, MockSocket> {
@@ -178,12 +180,7 @@ impl<T: SignalDatabase, U: WSStream + Debug> SignalServerState<T, U> {
         target_device_id: Option<DeviceId>,
     ) -> Result<PreKeyResponse, ApiError> {
         self.key_manager
-            .handle_get_keys(
-                &self.db,
-                auth_device,
-                target_service_id,
-                target_device_id,
-            )
+            .handle_get_keys(&self.db, auth_device, target_service_id, target_device_id)
             .await
     }
 

@@ -124,12 +124,14 @@ where
         listener: Arc<Mutex<U>>,
     ) {
         self.message_cache
-            .add_message_availability_listener(address, listener).await;
+            .add_message_availability_listener(address, listener)
+            .await;
     }
 
     pub async fn remove_message_availability_listener(&mut self, address: &ProtocolAddress) {
         self.message_cache
-            .remove_message_availability_listener(address).await;
+            .remove_message_availability_listener(address)
+            .await;
     }
 }
 

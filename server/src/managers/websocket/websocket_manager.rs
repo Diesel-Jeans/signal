@@ -31,9 +31,7 @@ use rand::Rng;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
-use super::connection::{
-    ClientConnection, ConnectionMap, ConnectionState, WebSocketConnection,
-};
+use super::connection::{ClientConnection, ConnectionMap, ConnectionState, WebSocketConnection};
 use super::wsstream::WSStream;
 use crate::account::Account;
 use crate::database::SignalDatabase;
@@ -83,23 +81,24 @@ impl<T: WSStream + Debug, U: SignalDatabase> Clone for WebSocketManager<T, U> {
     }
 }
 
-impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static> Default for WebSocketManager<T, U> {
+impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static> Default
+    for WebSocketManager<T, U>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static> WebSocketManager<T, U> {
+impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static>
+    WebSocketManager<T, U>
+{
     pub fn new() -> Self {
         Self {
             sockets: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub async fn insert(
-        &mut self,
-        connection: WebSocketConnection<T, U>,
-    ) {
+    pub async fn insert(&mut self, connection: WebSocketConnection<T, U>) {
         let address = connection.protocol_address();
         let connection: ClientConnection<T, U> = Arc::new(Mutex::new(connection));
 
@@ -145,7 +144,7 @@ impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static> W
                                 break;
                             }
                         };
-                        ws_guard.on_receive( msg).await;
+                        ws_guard.on_receive(msg).await;
                     }
                     Message::Text(t) => {
                         println!("Message '{}' from '{}'", t, addr);
@@ -193,9 +192,7 @@ pub(crate) mod test {
     use crate::managers::mock_helper::{MockDB, MockSocket};
     use crate::managers::state;
     use crate::managers::state::SignalServerState;
-    use crate::managers::websocket::connection::test::{
-        create_connection, mock_envelope,
-    };
+    use crate::managers::websocket::connection::test::{create_connection, mock_envelope};
     use crate::managers::websocket::connection::{ClientConnection, WebSocketConnection};
     use crate::managers::websocket::net_helper;
     use crate::managers::websocket::websocket_manager::WebSocketManager;
