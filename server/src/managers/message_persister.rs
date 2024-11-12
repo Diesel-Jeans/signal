@@ -69,7 +69,7 @@ where
         let message_persister_clone = message_persister.clone();
 
         tokio::spawn(async move {
-            while !message_persister.run_flag.load(Ordering::Relaxed) {
+            while message_persister.run_flag.load(Ordering::Relaxed) {
                 message_persister.persist_next_queues().await;
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
@@ -78,7 +78,7 @@ where
     }
 
     pub async fn stop(&self) {
-        self.run_flag.store(true, Ordering::Relaxed);
+        self.run_flag.store(false, Ordering::Relaxed);
     }
 
     // Finds the message queues where the oldest message is >10 minutes old.
@@ -337,11 +337,11 @@ mod message_persister_tests {
         )
         .await;
 
-        let message_persister_stop_flag = Arc::new(AtomicBool::new(false));
+        let message_persister_run_flag = Arc::new(AtomicBool::new(true));
 
         let message_persister: MessagePersister<PostgresDatabase, MockWebSocketConnection> =
             MessagePersister::start(
-                message_persister_stop_flag,
+                message_persister_run_flag,
                 message_manager,
                 cache.clone(),
                 db.clone(),

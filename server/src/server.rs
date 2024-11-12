@@ -379,9 +379,9 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = SignalServerState::<PostgresDatabase, WebSocket>::new().await;
 
-    let message_persister_stop_flag = Arc::new(AtomicBool::new(false));
+    let message_persister_run_flag = Arc::new(AtomicBool::new(true));
     let message_persister = MessagePersister::start(
-        message_persister_stop_flag,
+        message_persister_run_flag,
         state.message_manager.clone(),
         state.message_cache.clone(),
         state.db.clone(),
