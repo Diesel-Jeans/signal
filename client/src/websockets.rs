@@ -9,11 +9,13 @@ use common::signal_protobuf::{
     WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
 };
 use futures_util::stream::{SplitSink, SplitStream};
+use futures_util::task::LocalSpawnExt;
 use futures_util::{FutureExt, SinkExt, StreamExt, TryStream, TryStreamExt};
 use libsignal_protocol::InMemSignalProtocolStore;
 use native_tls::{Certificate, TlsConnector as NativeTlsConnector, TlsStream};
 use prost::encoding::hash_map::encode;
 use prost::Message as ProstMessage;
+use serde::de::IntoDeserializer;
 use socket2::{Domain, Socket, TcpKeepalive, Type};
 use std::collections::HashMap;
 use std::env;
@@ -30,8 +32,8 @@ use surf::http::headers::ToHeaderValues;
 use tokio::net::TcpStream;
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
-use tokio::task::{AbortHandle, JoinHandle, Unconstrained};
-use tokio::time::sleep;
+use tokio::task::{yield_now, AbortHandle, JoinHandle, Unconstrained};
+use tokio::time::{sleep, timeout};
 use tokio::*;
 use tokio_native_tls::TlsConnector;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -49,7 +51,7 @@ const DAY: u32 = HOUR * 24;
 const WEEK: u32 = DAY * 7;
 const MONTH: u32 = DAY * 30;
 // 30 seconds + 5 seconds for closing the socket above.
-const KEEPALIVE_INTERVAL_MS: u32 = 30 * SECOND;
+const KEEPALIVE_INTERVAL_MS: u32 = 1 * SECOND;
 
 // If the machine was in suspended mode for more than 5 minutes - trigger
 // immediate disconnect.
@@ -72,36 +74,39 @@ impl StreamHandler {
     }
 }
 
-type BoxedFuture = Pin<Box<dyn Future<Output=()> + Send>>;
-
 //Rust can suck my fucking dick. Everything must be wrapped in an Arc because fuck you that's why.
 #[derive(Clone)]
 pub(crate) struct WebsocketHandler {
-    pub(crate) socket: Arc<Mutex<StreamHandler>>,
-    handle: Arc<thread::JoinHandle<()>>,
-    rec_channel: Arc<mpsc::Receiver<Message>>,
-    outgoing_id: u64,
+    socket: Arc<Mutex<StreamHandler>>,
+    receiver_handle: Arc<thread::JoinHandle<JoinHandle<()>>>,
+    rec_channel: Arc<Mutex<mpsc::Receiver<Message>>>,
+    outgoing_id: Arc<Mutex<u64>>,
     outgoing_map: Arc<Mutex<HashMap<u64, AbortHandle>>>,
     incoming_response: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>>,
     keepalive_bool: bool,
+    keepalive_options: Option<KeepAliveOptions>,
+    last_alive_at: Arc<Mutex<Instant>>,
+    timer_map: Arc<Mutex<HashMap<u32, JoinHandle<()>>>>,
 }
 impl WebsocketHandler {
-    pub async fn try_new() -> Result<WebsocketHandler> {
+    pub async fn try_new(keepalive_options: Option<KeepAliveOptions>) -> Result<WebsocketHandler> {
         let socket = Arc::new(Mutex::new(StreamHandler::try_new().await?));
         let res: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let out: Arc<Mutex<HashMap<u64, AbortHandle>>> = Arc::new(Mutex::new(HashMap::new()));
         let (handle, rec_channel) =
             WebsocketHandler::get_handle_for_ws_listener(socket.clone(), res.clone(), out.clone());
-
         Ok(WebsocketHandler {
             socket,
-            handle: Arc::new(handle),
-            rec_channel: Arc::new(rec_channel),
-            outgoing_id: 1,
+            receiver_handle: Arc::new(handle),
+            rec_channel: Arc::new(Mutex::new(rec_channel)),
+            outgoing_id: Arc::new(Mutex::new(1)),
             outgoing_map: out,
-            keepalive_bool: true,
+            keepalive_bool: keepalive_options.is_some(),
             incoming_response: res,
+            keepalive_options,
+            last_alive_at: Arc::new(Mutex::new(Instant::now())),
+            timer_map: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -109,13 +114,14 @@ impl WebsocketHandler {
         mut sock: Arc<Mutex<StreamHandler>>,
         mut incoming: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>>,
         mut outgoing: Arc<Mutex<HashMap<u64, AbortHandle>>>,
-    ) -> (std::thread::JoinHandle<()>, mpsc::Receiver<Message>) {
+    ) -> (thread::JoinHandle<JoinHandle<()>>, mpsc::Receiver<Message>) {
         let (mut tx, mut rx) = mpsc::channel::<Message>();
         let handle = Handle::current();
         let mtx = tx.clone();
 
-        let hand = std::thread::spawn(move || {
-            handle.block_on(async move {
+        //This is a fragile house of cards so don't change the spawn structure
+        let hand = thread::spawn(move || {
+            handle.spawn(async move {
                 while let Some(Ok(msg)) = sock.lock().await.stream.next().await {
                     match msg {
                         Message::Text(msg) => {
@@ -129,11 +135,11 @@ impl WebsocketHandler {
                                 //TODO: Extend this match case to include the other types of WebSocketMessage.
                                 //Types of WebSocketMessage: 0 = UNKNOWN, 1 = REQUEST, 2 = RESPONSE
                                 match wsm.r#type {
+                                    Some(1) => { todo!() } //We still need to handle requests in our client
                                     Some(2) => {
-                                        println!("Got ws response message");
                                         //Expect is fine here, as it is system breaking to get a type mismatch
                                         let wsrm = wsm.response.expect(
-                                            "Got a WebSocketMessageRespone type without a response",
+                                            "Got a WebSocketMessageResponse type without a response",
                                         );
                                         let id = match wsrm.id {
                                             Some(id) => id,
@@ -151,15 +157,9 @@ impl WebsocketHandler {
                                 continue;
                             }
                         }
-
                         _ => continue,
                     }
-
-                    // if let Err(e) = tx.send(msg) {
-                    //     break;
-                    // }
-
-                    std::thread::yield_now();
+                    thread::yield_now();
                 }
             })
         });
@@ -181,14 +181,18 @@ impl WebsocketHandler {
         &mut self,
         options: SendRequestOptions,
     ) -> Result<(WebSocketResponseMessage)> {
-        let id = self.outgoing_id;
-        let id_string = id.to_string();
+        let mut id = 0;
+
+        //In a smaller scope to free the lock as fast as possible
+        {
+            let mut lock = self.outgoing_id.lock().await;
+            id = lock.clone();
+            *lock += 1;
+        }
 
         if self.outgoing_map.lock().await.contains_key(&id) {
             anyhow::bail!("Duplicate outgoing request")
         }
-
-        self.outgoing_id = id + 1;
 
         let mut header_vec: Vec<String> = Vec::new();
 
@@ -244,7 +248,6 @@ impl WebsocketHandler {
             }
         });
 
-
         //Add future to hashmap
         self.outgoing_map
             .lock()
@@ -282,6 +285,130 @@ impl WebsocketHandler {
             }))
             .await?)
     }
+
+    pub async fn reset_keepalive(&mut self) {
+        if !self.keepalive_bool {
+            return;
+        }
+
+        *self.last_alive_at.clone().lock().await = Instant::now();
+        //let hand = Handle::current();
+        let mut self_clone = self.clone();
+
+        self.set_timeout(KEEPALIVE_INTERVAL_MS).await;
+
+        // match self.clone().keepalive_manager {
+        //     Some(manager) => {
+        //         manager.lock().await.clear_timeout().await;
+        //         manager.lock().await.set_timeout(Arc::new(Mutex::new(self_clone)), KEEPALIVE_INTERVAL_MS).await;
+        //     }
+        //     None => {
+        //         let mut manager = Arc::new(Mutex::new(KeepAliveManager::new()));
+        //         manager.lock().await.set_timeout(Arc::new(Mutex::new(self_clone)), KEEPALIVE_INTERVAL_MS).await;
+        //         self.keepalive_manager = Some(manager);
+        //     }
+        // }
+    }
+
+    //KeepAlive contains two send methods to replicate the functionality of Signal-Desktop to the best of my ability
+    async fn keepalive_super_send(&mut self) -> Result<bool> {
+        let sent_at = Instant::now();
+
+        let request_options = SendRequestOptions {
+            verb: "GET".to_string(),
+            path: "/v1/keepalive".to_string(),
+            body: None,
+            headers: None,
+            timeout: Some(KEEPALIVE_TIMEOUT_MS),
+        };
+
+        let result = self.send_request(request_options).await?;
+
+        if let Some(status) = result.status {
+            if (status < 200 && status >= 300) {
+                self.close(3001, format!("keepalive response with {} code", status));
+                anyhow::bail!("keepalive response with {} code", status);
+            }
+        } else {
+            anyhow::bail!("keepalive response without code");
+        }
+
+        Ok(true)
+    }
+
+    pub async fn keepalive_send(&mut self) -> Result<bool> {
+        if self.last_alive_at.lock().await.elapsed().as_millis() > STALE_THRESHOLD_MS.into() {
+            self.close(
+                3001,
+                format!(
+                    "Last keepalive request was too far in the past: {}",
+                    self.last_alive_at.lock().await.elapsed().as_millis()
+                ),
+            );
+            anyhow::bail!("Connection is stale")
+        }
+
+        let is_alive = self.clone().keepalive_super_send().await;
+        match is_alive {
+            Ok(b) => { Ok(b) }
+            Err(e) => {
+                anyhow::bail!(e)
+            }
+        }
+
+        //self.reset_keepalive();
+    }
+
+    pub async fn set_timeout(&mut self, timeout: u32) {
+        let counter = loop {
+            //Don't ask me why Signal-Desktop does this, but we're also doing it. Just be happy I didn't implement the 0 bit bitshift
+            let mut id = 0;
+            if self.timer_map.lock().await.contains_key(&id) {
+                id += 1;
+            } else {
+                break id;
+            }
+        };
+
+        let handler = Arc::new(Mutex::new(self.clone()));
+        println!("Pre spawn");
+        let handle = spawn(async move {
+            loop {
+                let now = Instant::now();
+                println!("Sleep for {} ms", timeout);
+                loop {
+                    if now.elapsed().as_millis() > timeout.into() {
+                        break;
+                    } else {
+                        yield_now();
+                    }
+                }
+                println!("Post sleep print");
+                match handler.lock().await.keepalive_send().await {
+                    Ok(true) => {
+                        println!("Continues")
+                    }
+                    _ => {
+                        println!("Keepalive failed, breaking");
+                        break;
+                    }
+                }
+                println!("Got keepalive");
+            }
+        });
+
+        println!("Post spawn");
+
+        // Lock the timer_map and insert the handle for the spawned task
+        self.timer_map.lock().await.insert(counter, handle);
+    }
+
+    pub async fn clear_timeout(&mut self) {
+        for (key, handle) in self.timer_map.lock().await.iter_mut() {
+            //handle.abort();
+            self.timer_map.lock().await.remove(key);
+        }
+    }
 }
 
 pub struct SendRequestOptions {
@@ -292,36 +419,9 @@ pub struct SendRequestOptions {
     headers: Option<Vec<(String, String)>>,
 }
 
+#[derive(Clone)]
 pub struct KeepAliveOptions {
     path: Option<String>,
-}
-
-pub struct KeepAlive {
-    ws: WebsocketHandler,
-    receiver: Arc<Mutex<mpsc::Receiver<Message>>>,
-    keepalive_options: KeepAliveOptions,
-    path: String,
-    keepalive_timer: Instant,
-    last_alive_at: Instant,
-}
-
-impl KeepAlive {
-    pub fn new() -> KeepAlive {
-        todo!()
-    }
-
-    pub fn reset(mut self) {
-        todo!()
-    }
-
-    //KeepAlive contains two send methods to replicate the functionality of Signal-Desktop to the best of my ability
-    pub async fn super_send(mut self) {
-        todo!()
-    }
-
-    pub fn send() {
-        todo!()
-    }
 }
 
 pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocketStream<tokio_native_tls::TlsStream<TcpStream>>> {
@@ -332,7 +432,7 @@ pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocket
 
     //TODO: Fix authentication
     let auth_kv_pair = format!("{}:{}", username, password);
-    let auth_value = engine::general_purpose::STANDARD.encode(&auth_kv_pair);
+    let auth_value = general_purpose::STANDARD.encode(&auth_kv_pair);
 
     let ws_url = format!(
         "wss://{}@{}:{}/v1/websocket",
@@ -418,7 +518,7 @@ where
 }
 
 #[cfg(test)]
-mod wstests {
+mod websocket_tests {
     use super::*;
     use async_std::prelude::FutureExt as pFutureExt;
     use axum::response::IntoResponseParts;
@@ -437,14 +537,19 @@ mod wstests {
     #[tokio::test]
     async fn test_websocket() {
         dotenv::dotenv().ok();
-        let mut handler = WebsocketHandler::try_new().await.unwrap();
-        let hand = handler.socket.clone();
+        let mut handler = WebsocketHandler::try_new(Some(KeepAliveOptions {
+            path: Some("/v1/keepalive".to_string()),
+        }))
+            .await
+            .unwrap();
+        // let hand = handler.socket.clone();
+        handler.reset_keepalive().await;
 
         handler
             .send_text_no_response_expected(format!(
                 "Hello World! {}",
                 SystemTime::now()
-                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs()
             ))
@@ -471,8 +576,7 @@ mod wstests {
 
         sleep(Duration::from_millis(100));
 
-        println!("Reached printing stage of test");
-        while let Ok(msg) = handler.rec_channel.try_recv() {
+        while let Ok(msg) = handler.rec_channel.lock().await.try_recv() {
             match msg {
                 Message::Text(msg) => println!("{}", msg),
                 Message::Ping(payload) => {
@@ -491,8 +595,10 @@ mod wstests {
             }
         }
 
-        println!("Reached close stage of test");
-        //handler.close(1000, "Normal closure".into()).await.unwrap();
+        println!("Testing keepalive");
+        sleep(Duration::from_millis(5000));
+
+        handler.close(1000, "Normal closure".into());
 
         assert!(true)
     }
