@@ -105,7 +105,7 @@ where
                     .find(|device| device.device_id() == device_id.into())
                     .ok_or_else(|| anyhow::anyhow!("Could not find device in account."))?;
 
-                self.persist_queue(&account, &device).await?;
+                self.persist_queue(&account, device).await?;
             }
         }
 

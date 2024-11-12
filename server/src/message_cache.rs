@@ -324,11 +324,11 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         let results = cmd("ZRANGE")
             .arg(&queue_index_key)
             .arg(0)
-            .arg(&max_time)
+            .arg(max_time)
             .arg("BYSCORE")
             .arg("LIMIT")
             .arg(0)
-            .arg(&limit)
+            .arg(limit)
             .query_async::<Vec<String>>(&mut connection)
             .await?;
 
