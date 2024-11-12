@@ -1104,6 +1104,8 @@ mod db_tests {
     };
     use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
     use libsignal_protocol::{IdentityKey, PublicKey};
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use std::sync::Mutex;
     use uuid::Uuid;
 
     use crate::{
@@ -1116,27 +1118,27 @@ mod db_tests {
         PostgresDatabase::connect("DATABASE_URL_TEST".to_string()).await
     }
 
-    #[tokio::test]
-    async fn test_add_and_get_user() {
-        let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob1_device".to_string(),
+    fn new_device() -> Device {
+        Device::new(
+            StdRng::from_entropy().gen::<u32>().into(),
+            "device".into(),
             0,
             0,
-            "bob1_token".into(),
-            "bob1_salt".into(),
+            "bob_token".into(),
+            "bob_salt".into(),
             1,
             1,
-        );
+        )
+    }
+    fn new_account() -> Account {
         let mut identity_key = [0u8; 33];
         identity_key[0] = 5;
-        let account = Account::new(
+        Account::new(
             Pni::from(Uuid::new_v4()),
-            device,
+            new_device(),
             IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
             IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number1".to_string(),
+            Uuid::new_v4().into(),
             AccountAttributes {
                 name: "name".into(),
                 fetches_messages: true,
@@ -1151,7 +1153,13 @@ mod db_tests {
                 },
                 unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
             },
-        );
+        )
+    }
+
+    #[tokio::test]
+    async fn test_add_and_get_user() {
+        let db = connect().await;
+        let account = new_account();
 
         db.add_account(&account).await.unwrap();
         let retrieved_account = db
@@ -1169,39 +1177,7 @@ mod db_tests {
     #[tokio::test]
     async fn test_update_account_aci() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device2".to_string(),
-            0,
-            0,
-            "bob_token2".to_string(),
-            "bob_salt2".to_string(),
-            1,
-            1,
-        );
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number2".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
         let new_aci = Aci::from(Uuid::new_v4());
 
         db.add_account(&account).await.unwrap();
@@ -1220,39 +1196,7 @@ mod db_tests {
     #[tokio::test]
     async fn test_update_account_pni() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device3".to_string(),
-            0,
-            0,
-            "bob_token3".to_string(),
-            "bob_salt3".to_string(),
-            1,
-            1,
-        );
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number3".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
         let new_pni = Pni::from(Uuid::new_v4());
 
         db.add_account(&account).await.unwrap();
@@ -1271,39 +1215,7 @@ mod db_tests {
     #[tokio::test]
     async fn test_delete_account() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device4".to_string(),
-            0,
-            0,
-            "bob_token4".to_string(),
-            "bob_salt4".to_string(),
-            1,
-            1,
-        );
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number4".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
 
         db.add_account(&account).await.unwrap();
         db.delete_account(&ServiceId::Aci(account.aci()))
@@ -1317,54 +1229,19 @@ mod db_tests {
     #[tokio::test]
     async fn test_add_and_get_device() {
         let db = connect().await;
-        let primary_device = Device::new(
-            1.into(),
-            "bob_device5".to_string(),
-            0,
-            0,
-            "bob_token5".to_string(),
-            "bob_salt5".to_string(),
-            1,
-            1,
-        );
-        let secondary_device = Device::new(
-            0.into(),
-            "bob_secondary_device1".to_string(),
-            0,
-            0,
-            "bob_secondary_token1".to_string(),
-            "bob_secondary_salt1".to_string(),
-            1,
-            1,
-        );
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            primary_device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number5".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
 
+        let account = new_account();
         db.add_account(&account).await.unwrap();
+
+        let secondary_device = new_device();
         db.add_device(&ServiceId::Aci(account.aci()), &secondary_device)
             .await
-            .unwrap();
+            .expect(&format!(
+                "Should be other device_id: {}, {}",
+                account.devices()[0].device_id(),
+                secondary_device.device_id()
+            ));
+
         let retrieved_device = db
             .get_device(
                 &ServiceId::Aci(account.aci()),
@@ -1382,54 +1259,17 @@ mod db_tests {
     #[tokio::test]
     async fn test_get_all_devices() {
         let db = connect().await;
-        let primary_device = Device::new(
-            1.into(),
-            "bob_device6".to_string(),
-            0,
-            0,
-            "bob_token6".to_string(),
-            "bob_salt6".to_string(),
-            1,
-            1,
-        );
-        let secondary_device = Device::new(
-            0.into(),
-            "bob_secondary_device2".to_string(),
-            0,
-            0,
-            "bob_secondary_token2".to_string(),
-            "bob_secondary_salt2".to_string(),
-            1,
-            1,
-        );
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            primary_device.clone(),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number6".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let device = new_device();
+        let mut account = new_account();
 
         db.add_account(&account).await.unwrap();
-        db.add_device(&ServiceId::Aci(account.aci()), &secondary_device)
+        db.add_device(&ServiceId::Aci(account.aci()), &device)
             .await
-            .unwrap();
+            .expect(&format!(
+                "Should be other device_id: {}, {}",
+                account.devices()[0].device_id(),
+                device.device_id()
+            ));
         let retrieved_devices = db
             .get_all_devices(&ServiceId::Aci(account.aci()))
             .await
@@ -1437,73 +1277,24 @@ mod db_tests {
         db.delete_account(&ServiceId::Aci(account.aci()))
             .await
             .unwrap();
+        account.add_device(device);
 
-        assert_eq!(vec![primary_device, secondary_device], retrieved_devices);
+        assert_eq!(account.devices(), retrieved_devices);
     }
 
     #[tokio::test]
     async fn test_delete_device() {
         let db = connect().await;
-        let primary_device = Device::new(
-            1.into(),
-            "bob_device7".to_string(),
-            0,
-            0,
-            "bob_token7".to_string(),
-            "bob_salt7".to_string(),
-            0,
-            0,
-        );
-        let secondary_device = Device::new(
-            0.into(),
-            "bob_secondary_device3".to_string(),
-            0,
-            0,
-            "bob_secondary_token3".to_string(),
-            "bob_secondary_salt3".to_string(),
-            1,
-            1,
-        );
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            primary_device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number7".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device = account.devices()[0].clone();
 
         db.add_account(&account).await.unwrap();
-        db.add_device(&ServiceId::Aci(account.aci()), &secondary_device)
+        db.delete_device(&ServiceId::Aci(account.aci()), device.device_id().into())
             .await
             .unwrap();
-        db.delete_device(
-            &ServiceId::Aci(account.aci()),
-            secondary_device.device_id().into(),
-        )
-        .await
-        .unwrap();
-        db.get_device(
-            &ServiceId::Aci(account.aci()),
-            secondary_device.device_id().into(),
-        )
-        .await
-        .expect_err("This devices should have been deleted");
+        db.get_device(&ServiceId::Aci(account.aci()), device.device_id().into())
+            .await
+            .expect_err("This devices should have been deleted");
         db.delete_account(&ServiceId::Aci(account.aci()))
             .await
             .unwrap();
@@ -1512,40 +1303,7 @@ mod db_tests {
     #[tokio::test]
     async fn test_push_and_pop_message_queue() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device8".to_string(),
-            0,
-            0,
-            "bob_token8".to_string(),
-            "bob_salt8".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number8".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
         let msg = Envelope {
             r#type: Some(0),
             source_service_id: Some(ServiceId::Aci(Aci::from(Uuid::new_v4())).service_id_string()),
@@ -1562,7 +1320,10 @@ mod db_tests {
             report_spam_token: None,
             shared_mrm_key: None,
         };
-        let address = ProtocolAddress::new(account.aci().service_id_string(), device_id);
+        let address = ProtocolAddress::new(
+            account.aci().service_id_string(),
+            account.devices()[0].device_id(),
+        );
 
         db.add_account(&account).await.unwrap();
         db.push_message_queue(&address, vec![msg.clone()])
@@ -1626,40 +1387,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_store_aci_signed_pre_key() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device9".to_string(),
-            0,
-            0,
-            "bob_token9".to_string(),
-            "bob_salt9".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number9".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let address = ProtocolAddress::new(account.aci().service_id_string(), device_id);
         let key = UploadSignedPreKey {
             key_id: 0,
@@ -1687,40 +1416,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_update_aci_signed_pre_key() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device10".to_string(),
-            0,
-            0,
-            "bob_token10".to_string(),
-            "bob_salt10".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number10".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let address = ProtocolAddress::new(account.aci().service_id_string(), device_id);
         let mut key = UploadSignedPreKey {
             key_id: 0,
@@ -1796,40 +1493,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_store_pni_signed_pre_key() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device11".to_string(),
-            0,
-            0,
-            "bob_token11".to_string(),
-            "bob_salt11".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number11".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let address = ProtocolAddress::new(account.aci().service_id_string(), device_id);
         let key = UploadSignedPreKey {
             key_id: 0,
@@ -1857,40 +1522,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_update_pni_signed_pre_key() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device12".to_string(),
-            0,
-            0,
-            "bob_token12".to_string(),
-            "bob_salt12".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number12".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let address = ProtocolAddress::new(account.aci().service_id_string(), device_id);
         let mut key = UploadSignedPreKey {
             key_id: 0,
@@ -1966,40 +1599,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_store_pq_aci_signed_pre_key() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device13".to_string(),
-            0,
-            0,
-            "bob_token13".to_string(),
-            "bob_salt13".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number13".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let address = ProtocolAddress::new(account.aci().service_id_string(), device_id);
         let key = UploadSignedPreKey {
             key_id: 0,
@@ -2029,40 +1630,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_update_pq_aci_signed_pre_key() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device14".to_string(),
-            0,
-            0,
-            "bob_token14".to_string(),
-            "bob_salt14".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number14".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let address = ProtocolAddress::new(account.aci().service_id_string(), device_id);
         let mut key = UploadSignedPreKey {
             key_id: 0,
@@ -2142,40 +1711,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_store_pq_pni_signed_pre_key() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device15".to_string(),
-            0,
-            0,
-            "bob_token15".to_string(),
-            "bob_salt15".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number15".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let address = ProtocolAddress::new(account.aci().service_id_string(), device_id);
         let key = UploadSignedPreKey {
             key_id: 0,
@@ -2205,40 +1742,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_update_pq_pni_signed_pre_key() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device16".to_string(),
-            0,
-            0,
-            "bob_token16".to_string(),
-            "bob_salt16".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number16".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let address = ProtocolAddress::new(account.aci().service_id_string(), device_id);
         let mut key = UploadSignedPreKey {
             key_id: 0,
@@ -2272,40 +1777,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_store_and_get_key_bundle() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device17".to_string(),
-            0,
-            0,
-            "bob_token17".to_string(),
-            "bob_salt17".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number17".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let key_bundle = DevicePreKeyBundle {
             aci_signed_pre_key: UploadSignedPreKey {
                 key_id: 1,
@@ -2343,40 +1816,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_get_one_time_ec_pre_key_count() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device18".to_string(),
-            0,
-            0,
-            "bob_token18".to_string(),
-            "bob_salt18".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number18".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let otpks = vec![
             UploadPreKey {
                 key_id: 0,
@@ -2415,40 +1856,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_get_one_time_pq_pre_key_count() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device19".to_string(),
-            0,
-            0,
-            "bob_token19".to_string(),
-            "bob_salt19".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number19".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let otpks = vec![
             UploadSignedPreKey {
                 key_id: 0,
@@ -2491,40 +1900,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_store_and_get_one_time_ec_pre_keys() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device20".to_string(),
-            0,
-            0,
-            "bob_token20".to_string(),
-            "bob_salt20".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number20".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let otpks = vec![UploadPreKey {
             key_id: 0,
             public_key: Box::new([1, 2, 3, 4]),
@@ -2546,40 +1923,8 @@ mod db_tests {
     #[tokio::test]
     async fn test_store_one_time_pq_pre_keys() {
         let db = connect().await;
-        let device = Device::new(
-            0.into(),
-            "bob_device21".to_string(),
-            0,
-            0,
-            "bob_token21".to_string(),
-            "bob_salt21".to_string(),
-            1,
-            1,
-        );
-        let device_id = device.device_id();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            device,
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            "test_number21".to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
-        );
+        let account = new_account();
+        let device_id = account.devices()[0].device_id();
         let otpks = vec![UploadSignedPreKey {
             key_id: 0,
             public_key: Box::new([1, 2, 3, 4]),
