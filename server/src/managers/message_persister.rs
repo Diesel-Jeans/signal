@@ -11,8 +11,7 @@ use libsignal_core::{ProtocolAddress, ServiceId};
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::task::JoinHandle;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const QUEUE_BATCH_LIMIT: u8 = 100;
 const MESSAGE_BATCH_LIMIT: u8 = 100;
@@ -20,10 +19,27 @@ const PERSIST_DELAY: u64 = 600;
 
 #[derive(Debug)]
 pub struct MessagePersister<T: SignalDatabase, U: MessageAvailabilityListener + Send> {
+    run_flag: Arc<AtomicBool>,
     message_cache: MessageCache<U>,
     messages_manager: MessagesManager<T, U>,
     account_manager: AccountManager,
     db: T,
+}
+
+impl<T, U> Clone for MessagePersister<T, U>
+where
+    T: SignalDatabase + Send + 'static + Sync,
+    U: MessageAvailabilityListener + Send + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            run_flag: self.run_flag.clone(),
+            message_cache: self.message_cache.clone(),
+            messages_manager: self.messages_manager.clone(),
+            account_manager: self.account_manager.clone(),
+            db: self.db.clone(),
+        }
+    }
 }
 
 /*
@@ -35,45 +51,51 @@ where
     T: SignalDatabase + Send + 'static + Sync,
     U: MessageAvailabilityListener + Send + 'static,
 {
-    pub fn new(
+    pub fn start(
+        run_flag: Arc<AtomicBool>,
         message_manager: MessagesManager<T, U>,
         message_cache: MessageCache<U>,
         db: T,
         account_manager: AccountManager,
-    ) -> Self {
-        Self {
+    ) -> MessagePersister<T, U> {
+        let mut message_persister = MessagePersister {
+            run_flag,
             message_cache,
             messages_manager: message_manager,
             account_manager,
             db,
-        }
-    }
+        };
 
-    pub async fn start(
-        mut message_persister: MessagePersister<T, U>,
-        flag: Arc<AtomicBool>,
-    ) -> JoinHandle<()> {
+        let message_persister_clone = message_persister.clone();
+
         tokio::spawn(async move {
-            while !flag.load(Ordering::Relaxed) {
+            while !message_persister.run_flag.load(Ordering::Relaxed) {
                 message_persister.persist_next_queues().await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
-        })
+        });
+        message_persister_clone
     }
 
-    pub async fn stop(flag: Arc<AtomicBool>) {
-        flag.store(true, Ordering::Relaxed);
+    pub async fn stop(&self) {
+        self.run_flag.store(true, Ordering::Relaxed);
     }
 
     // Finds the message queues where the oldest message is >10 minutes old.
     async fn persist_next_queues(&mut self) -> Result<()> {
         let mut queues_to_persist: Vec<String> = Vec::new();
         let time = SystemTime::now();
-        let time_in_secs: u64 = time.duration_since(UNIX_EPOCH)?.as_secs();
-        let mut queues_persisted: Vec<String> = Vec::new();
+        let time_in_secs: u64 = time
+            .duration_since(UNIX_EPOCH)
+            .expect("Failed to get time")
+            .as_secs();
 
         while {
             let time = SystemTime::now();
-            let time_in_secs: u64 = time.duration_since(UNIX_EPOCH)?.as_secs();
+            let time_in_secs: u64 = time
+                .duration_since(UNIX_EPOCH)
+                .expect("Failed to get time")
+                .as_secs();
 
             queues_to_persist = self
                 .message_cache
@@ -154,6 +176,7 @@ mod message_persister_tests {
     use redis::cmd;
     use serial_test::serial;
     use std::time::Duration;
+    use tokio::sync::Mutex;
     use uuid::Uuid;
 
     async fn insert_with_custom_timestamp(
@@ -246,15 +269,14 @@ mod message_persister_tests {
 
     async fn message_persister_test_setup_run(
         message_times: Vec<u64>,
-    ) -> (bool, bool, Vec<String>, Vec<String>) {
+    ) -> (bool, bool, bool, Vec<String>, Vec<String>) {
         let _ = dotenv::dotenv();
         let db = PostgresDatabase::connect("DATABASE_URL".to_string()).await;
         let cache = MessageCache::connect();
-        let message_manager = MessagesManager::new(db.clone(), cache.clone());
+        let mut message_manager = MessagesManager::new(db.clone(), cache.clone());
         let account_manager = AccountManager::new();
 
-        let message_persister: MessagePersister<PostgresDatabase, MockWebSocketConnection> =
-            MessagePersister::new(message_manager, cache.clone(), db.clone(), account_manager);
+        let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
 
         let now_timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -285,7 +307,7 @@ mod message_persister_tests {
             db.add_account(&account).await.unwrap();
 
             insert_with_custom_timestamp(
-                &message_persister.message_cache,
+                &cache,
                 message_time,
                 &protocol_address,
                 &mut envelope,
@@ -294,15 +316,22 @@ mod message_persister_tests {
             .await;
         }
 
+        message_manager
+            .add_message_availability_listener(
+                &protocol_addresses.first().unwrap(),
+                websocket.clone(),
+            )
+            .await;
+
         let mut queue_keys_before_message_persister = check_queue_key_timestamp(
-            &message_persister.message_cache,
+            &cache,
             now_timestamp, // now time
             10,
         )
         .await;
 
         let queues_over_ten_minutes = check_queue_key_timestamp(
-            &message_persister.message_cache,
+            &cache,
             ten_minutes_past_timestamp, // ten minutes
             10,
         )
@@ -310,18 +339,18 @@ mod message_persister_tests {
 
         let message_persister_stop_flag = Arc::new(AtomicBool::new(false));
 
-        MessagePersister::<PostgresDatabase, MockWebSocketConnection>::start(
-            message_persister,
-            message_persister_stop_flag.clone(),
-        )
-        .await;
+        let message_persister: MessagePersister<PostgresDatabase, MockWebSocketConnection> =
+            MessagePersister::start(
+                message_persister_stop_flag,
+                message_manager,
+                cache.clone(),
+                db.clone(),
+                account_manager,
+            );
 
         tokio::time::sleep(Duration::from_millis(2000)).await;
 
-        MessagePersister::<PostgresDatabase, MockWebSocketConnection>::stop(
-            message_persister_stop_flag,
-        )
-        .await;
+        message_persister.stop().await;
 
         let queue_keys_after_message_persister =
             check_queue_key_timestamp(&cache, now_timestamp, 10).await;
@@ -340,7 +369,11 @@ mod message_persister_tests {
                 .unwrap();
         }
 
+        let handle_persisted_messages_evoked =
+            websocket.lock().await.evoked_handle_messages_persisted;
+
         (
+            handle_persisted_messages_evoked,
             no_queue_persist_keys_in_cache,
             message_queues_older_than_10_minutes_has_been_deleted,
             queue_keys_before_message_persister,
@@ -357,9 +390,15 @@ mod message_persister_tests {
             .as_secs()
             - 660;
 
-        let (no_queue_lock_keys_in_cache, old_msg_deleted, msg_before, msg_after) =
-            message_persister_test_setup_run(vec![message_time]).await;
+        let (
+            handle_persisted_messages_evoked,
+            no_queue_lock_keys_in_cache,
+            old_msg_deleted,
+            msg_before,
+            msg_after,
+        ) = message_persister_test_setup_run(vec![message_time]).await;
 
+        assert_eq!(handle_persisted_messages_evoked, true);
         assert_eq!(no_queue_lock_keys_in_cache, true);
         assert_eq!(old_msg_deleted, true);
         assert_eq!(msg_before.len(), 1);
@@ -375,9 +414,14 @@ mod message_persister_tests {
             .as_secs()
             - 300;
 
-        let (no_queue_lock_keys_in_cache, old_msg_deleted, msg_before, msg_after) =
-            message_persister_test_setup_run(vec![message_time]).await;
-
+        let (
+            handle_persisted_messages_evoked,
+            no_queue_lock_keys_in_cache,
+            old_msg_deleted,
+            msg_before,
+            msg_after,
+        ) = message_persister_test_setup_run(vec![message_time]).await;
+        assert_eq!(handle_persisted_messages_evoked, false);
         assert_eq!(no_queue_lock_keys_in_cache, true);
         assert_eq!(old_msg_deleted, true);
         assert_eq!(msg_before.len(), 1);
@@ -394,16 +438,22 @@ mod message_persister_tests {
             - 600;
 
         let message_times = vec![
+            message_time - 100,
+            message_time - 200,
             message_time + 100,
             message_time + 200,
             message_time + 300,
-            message_time - 100,
-            message_time - 200,
         ];
 
-        let (no_queue_lock_keys_in_cache, old_msg_deleted, msg_before, msg_after) =
-            message_persister_test_setup_run(message_times).await;
+        let (
+            handle_persisted_messages_evoked,
+            no_queue_lock_keys_in_cache,
+            old_msg_deleted,
+            msg_before,
+            msg_after,
+        ) = message_persister_test_setup_run(message_times).await;
 
+        assert_eq!(handle_persisted_messages_evoked, true);
         assert_eq!(no_queue_lock_keys_in_cache, true);
         assert_eq!(old_msg_deleted, true);
         assert_eq!(msg_before.len(), 5);

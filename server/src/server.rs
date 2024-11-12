@@ -24,7 +24,7 @@ use common::web_api::{
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
 use serde::Serialize;
 use std::env;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tower_http::cors::CorsLayer;
 
 use crate::destination_device_validator::DestinationDeviceValidator;
@@ -380,7 +380,8 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let state = SignalServerState::<PostgresDatabase, WebSocket>::new().await;
 
     let message_persister_stop_flag = Arc::new(AtomicBool::new(false));
-    let message_persister = MessagePersister::new(
+    let message_persister = MessagePersister::start(
+        message_persister_stop_flag,
         state.message_manager.clone(),
         state.message_cache.clone(),
         state.db.clone(),
@@ -416,18 +417,11 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         https_port.parse()?,
     ));
 
-    MessagePersister::<PostgresDatabase, WebSocketConnection<WebSocket, PostgresDatabase>>::start(
-        message_persister,
-        message_persister_stop_flag.clone(),
-    );
-
     axum_server::bind_rustls(https_addr, config)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
-    MessagePersister::<PostgresDatabase, WebSocketConnection<WebSocket, PostgresDatabase>>::stop(
-        message_persister_stop_flag,
-    );
+    message_persister.stop();
 
     Ok(())
 }

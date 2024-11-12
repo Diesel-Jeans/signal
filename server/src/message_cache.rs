@@ -450,7 +450,7 @@ pub mod message_cache_tests {
     }
 
     impl MockWebSocketConnection {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             MockWebSocketConnection {
                 evoked_handle_new_messages: false,
                 evoked_handle_messages_persisted: false,
