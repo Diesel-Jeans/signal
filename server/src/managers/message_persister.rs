@@ -412,6 +412,7 @@ mod message_persister_tests {
             msg_before,
             msg_after,
         ) = message_persister_test_setup_run(vec![message_time]).await;
+
         assert_eq!(handle_persisted_messages_evoked, false);
         assert_eq!(no_queue_lock_keys_in_cache, true);
         assert_eq!(old_msg_deleted, true);
