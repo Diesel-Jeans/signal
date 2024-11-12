@@ -268,7 +268,7 @@ pub mod message_manager_tests {
             .unwrap();
 
         // Teardown cache
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(may_have_messages, (true, "cached"));
     }
@@ -355,7 +355,7 @@ pub mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(may_have_messages, (true, "both"));
     }
@@ -441,7 +441,7 @@ pub mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(messages_for_device_cache_and_db.len(), 4);
     }
@@ -492,7 +492,7 @@ pub mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(messages_for_device_cache_only.len(), 1);
         assert_eq!(messages_for_device_db_and_cache.len(), 2);
@@ -551,7 +551,7 @@ pub mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(messages_for_device_db_and_cache.len(), 3);
         assert_eq!(deleted_messages.len(), 3);
@@ -602,7 +602,7 @@ pub mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(&msg_manager);
+        teardown(&msg_manager).await;
 
         assert_eq!(messages_in_cache.len(), 2);
         assert_eq!(messages_in_db.len(), 0);
