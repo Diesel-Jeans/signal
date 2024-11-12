@@ -12,6 +12,8 @@ use axum_extra::{
     TypedHeader,
 };
 use libsignal_core::{DeviceId, ServiceId};
+use rand::{rngs::OsRng, RngCore};
+use sha2::{Digest, Sha256};
 
 use crate::{
     account::{Account, AuthenticatedDevice, Device},
@@ -19,6 +21,9 @@ use crate::{
     error::ApiError,
     managers::{state::SignalServerState, websocket::wsstream::WSStream},
 };
+
+const SALT_SIZE: usize = 16;
+const AUTH_TOKEN_HKDF_INFO: &[u8] = "authtoken".as_bytes();
 
 #[async_trait]
 impl<T: SignalDatabase, U: WSStream + Debug> FromRequestParts<SignalServerState<T, U>>
@@ -93,7 +98,12 @@ async fn authenticate_device<T: SignalDatabase, U: WSStream + Debug>(
         })?
         .to_owned();
 
-    if verify_password(device.auth_token(), device.salt(), password).await? {
+    let salted_token = SaltedTokenHash {
+        hash: device.auth_token().to_owned(),
+        salt: device.salt().to_owned(),
+    };
+
+    if salted_token.verify(&password.to_owned())? {
         Ok(AuthenticatedDevice::new(account, device))
     } else {
         Err(ApiError {
@@ -103,17 +113,47 @@ async fn authenticate_device<T: SignalDatabase, U: WSStream + Debug>(
     }
 }
 
-async fn verify_password(auth_token: &[u8], salt: &str, password: &str) -> Result<bool, ApiError> {
-    let password_hash = HKDF_DeriveSecrets(
-        32,
-        password.as_bytes(),
-        Some("authtoken".as_bytes()),
-        Some(salt.as_bytes()),
-    )?;
-    Ok(password_hash == *auth_token)
+pub struct SaltedTokenHash {
+    hash: String,
+    salt: String,
+}
+impl SaltedTokenHash {
+    pub fn generate_for(credentials: &String) -> Result<Self, ApiError> {
+        fn generate_salt() -> String {
+            let mut salt = [0u8; SALT_SIZE];
+            OsRng.fill_bytes(&mut salt);
+            hex::encode(salt)
+        }
+
+        let salt = generate_salt();
+        let token = SaltedTokenHash::calculate(&salt, credentials)?;
+
+        Ok(Self { salt, hash: token })
+    }
+
+    pub fn verify(&self, credentials: &String) -> Result<bool, ApiError> {
+        let their_value = SaltedTokenHash::calculate(&self.salt, credentials)?;
+        Ok(self.hash == their_value)
+    }
+
+    fn calculate(salt: &String, token: &String) -> Result<String, ApiError> {
+        Ok(hex::encode(HKDF_DeriveSecrets(
+            32,
+            token.as_bytes(),
+            Some(AUTH_TOKEN_HKDF_INFO),
+            Some(salt.as_bytes()),
+        )?))
+    }
+
+    pub fn hash(&self) -> String {
+        self.hash.clone()
+    }
+    pub fn salt(&self) -> String {
+        self.salt.clone()
+    }
 }
 
-//Function taken from libsignal-bridge
+// Function taken from libsignal-bridge
 #[allow(nonstandard_style)]
 fn HKDF_DeriveSecrets(
     output_length: u32,

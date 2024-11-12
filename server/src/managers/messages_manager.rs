@@ -186,11 +186,11 @@ pub mod message_manager_tests {
     pub fn create_device(device_id: u32, name: &str) -> Device {
         let last_seen = 0;
         let created = 0;
-        let auth_token = vec![0];
-        let salt = String::from("salt");
+        let auth_token = "token".into();
+        let salt = "salt".into();
         let registration_id = 1;
         let pni_registration_id = 1;
-        return Device::new(
+        Device::new(
             device_id.into(),
             name.to_string(),
             last_seen,
@@ -199,17 +199,18 @@ pub mod message_manager_tests {
             salt,
             registration_id,
             pni_registration_id,
-        );
+        )
     }
 
     fn create_identity_key() -> IdentityKey {
         let mut identity_key = [0u8; 33];
         identity_key[0] = 5;
-        return IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap());
+        IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap())
     }
 
     fn create_account_attributes() -> AccountAttributes {
-        return AccountAttributes {
+        AccountAttributes {
+            name: "name".into(),
             fetches_messages: true,
             registration_id: 1,
             pni_registration_id: 1,
@@ -221,7 +222,7 @@ pub mod message_manager_tests {
                 versioned_expiration_timer: true,
             },
             unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-        };
+        }
     }
 
     pub fn create_account(device: Device) -> Account {
@@ -231,14 +232,14 @@ pub mod message_manager_tests {
         let aci_identity_key = create_identity_key();
         let phone_number = generate_uuid();
         let account_attr = create_account_attributes();
-        return Account::new(
+        Account::new(
             pni,
             device,
             pni_identity_key,
             aci_identity_key,
             phone_number.to_string(),
             account_attr,
-        );
+        )
     }
 
     #[tokio::test]
