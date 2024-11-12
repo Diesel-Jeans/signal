@@ -23,6 +23,7 @@ use common::web_api::{
     DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SetKeyRequest, SignalMessages,
     UploadKeys,
 };
+use futures_util::StreamExt;
 use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKind};
 use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
 use serde::Serialize;
@@ -344,13 +345,14 @@ async fn create_websocket_endpoint(
     ws.on_upgrade(move |socket| {
         let mut wmgr = state.websocket_manager.clone();
         async move {
-            wmgr.insert(WebSocketConnection::new(
+            let (mut sender, mut receiver) = socket.split();
+            let ws = WebSocketConnection::new(
                 UserIdentity::AuthenticatedDevice(authenticated_device.into()),
                 addr,
-                socket,
+                sender,
                 state,
-            ))
-            .await
+            );
+            wmgr.insert(ws, receiver).await
         }
     })
 }
