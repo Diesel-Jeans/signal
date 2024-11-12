@@ -4,7 +4,7 @@ use common::signal_protobuf::{
     envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
-use libsignal_core::{ProtocolAddress, ServiceIdKind};
+use libsignal_core::{DeviceId, ProtocolAddress, ServiceIdKind};
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -20,26 +20,7 @@ use crate::message_cache::MessageAvailabilityListener;
 use prost::{bytes::Bytes, Message as PMessage};
 
 use super::net_helper::{create_request, current_millis, generate_req_id};
-
-#[async_trait::async_trait]
-pub trait WSStream {
-    async fn recv(&mut self) -> Option<Result<Message, Error>>;
-    async fn send(&mut self, msg: Message) -> Result<(), Error>;
-    async fn close(self) -> Result<(), Error>;
-}
-
-#[async_trait::async_trait]
-impl WSStream for WebSocket {
-    async fn recv(&mut self) -> Option<Result<Message, Error>> {
-        self.recv().await
-    }
-    async fn send(&mut self, msg: Message) -> Result<(), Error> {
-        self.send(msg).await
-    }
-    async fn close(self) -> Result<(), Error> {
-        self.close().await
-    }
-}
+use super::wsstream::WSStream;
 
 #[derive(Debug)]
 pub enum UserIdentity {
@@ -48,20 +29,29 @@ pub enum UserIdentity {
 }
 
 #[derive(Debug)]
-pub struct WebSocketConnection<T: WSStream + Debug> {
+pub struct WebSocketConnection<W: WSStream + Debug, DB: SignalDatabase> {
     identity: UserIdentity,
     socket_address: SocketAddr,
-    ws: ConnectionState<T>,
+    ws: ConnectionState<W>,
     pending_requests: HashSet<u64>,
+    state: SignalServerState<DB, W>,
 }
 
-impl<T: WSStream + Debug> WebSocketConnection<T> {
-    pub fn new(identity: UserIdentity, socket_addr: SocketAddr, ws: T) -> Self {
+impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
+    WebSocketConnection<W, DB>
+{
+    pub fn new(
+        identity: UserIdentity,
+        socket_addr: SocketAddr,
+        ws: W,
+        state: SignalServerState<DB, W>,
+    ) -> Self {
         Self {
             identity,
             socket_address: socket_addr,
             ws: ConnectionState::Active(ws),
             pending_requests: HashSet::new(),
+            state: state,
         }
     }
 
@@ -85,6 +75,27 @@ impl<T: WSStream + Debug> WebSocketConnection<T> {
             Ok(_) => Ok(()),
             Err(x) => Err(format!("{}", x)),
         }
+    }
+
+    pub async fn send_messages(&mut self, cached_only: bool) -> bool {
+        let msg_mgr = &self.state.message_manager;
+
+        let addr = self.protocol_address();
+        let res = msg_mgr.get_messages_for_device(&addr, cached_only).await;
+        let envelopes = match res {
+            Ok(x) => x,
+            Err(_) => {
+                println!("Failed to fetch messages");
+                return false;
+            }
+        };
+
+        for envelope in envelopes {
+            self.send_message(envelope)
+                .await
+                .map_err(|e| println!("{}", e));
+        }
+        return true;
     }
 
     fn create_message(
@@ -146,28 +157,55 @@ impl<T: WSStream + Debug> WebSocketConnection<T> {
         }
     }
 
-    pub async fn on_receive<U: SignalDatabase>(
-        &mut self,
-        state: SignalServerState<U>,
-        proto_message: WebSocketMessage,
-    ) {
+    async fn send_queue_empty(&mut self) -> bool {
+        let id = generate_req_id();
+        let time = if let Ok(x) = current_millis() {
+            x
+        } else {
+            return false;
+        };
+
+        let msg = create_request(
+            id,
+            "PUT",
+            "/api/v1/queue/empty",
+            vec![format!("X-Signal-Timestamp: {}", time)],
+            None,
+        );
+        let res = self.send(Message::Binary(msg.encode_to_vec())).await;
+        return !res.is_err();
+    }
+
+    pub async fn on_receive(&mut self, proto_message: WebSocketMessage) {
         todo!()
     }
 }
 
 #[async_trait::async_trait]
-impl<T> MessageAvailabilityListener for WebSocketConnection<T>
+impl<T, U> MessageAvailabilityListener for WebSocketConnection<T, U>
 where
-    T: WSStream + Debug + Send,
+    T: WSStream + Debug + 'static,
+    U: SignalDatabase,
 {
     async fn handle_new_messages_available(&mut self) -> bool {
-        // Implement the logic for handling new messages available
-        todo!()
+        if !self.is_active() {
+            return false;
+        }
+
+        if !self.send_messages(true).await {
+            return false;
+        }
+        return self.send_queue_empty().await;
     }
 
     async fn handle_messages_persisted(&mut self) -> bool {
-        // Implement the logic for handling messages persisted
-        todo!()
+        if !self.is_active() {
+            return false;
+        }
+        if !self.send_messages(false).await {
+            return false;
+        }
+        return self.send_queue_empty().await;
     }
 }
 
@@ -183,19 +221,22 @@ impl<T: WSStream + Debug> ConnectionState<T> {
     }
 }
 
-pub type ClientConnection<T> = Arc<Mutex<WebSocketConnection<T>>>;
-pub type ConnectionMap<T> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnection<T>>>>;
+pub type ClientConnection<T, U> = Arc<Mutex<WebSocketConnection<T, U>>>;
+pub type ConnectionMap<T, U> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnection<T, U>>>>;
 
 #[cfg(test)]
 pub(crate) mod test {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
+    use crate::managers::mock_helper::{MockDB, MockSocket};
+    use crate::managers::state::SignalServerState;
     use crate::managers::websocket::net_helper::{self, unpack_messages};
     use common::signal_protobuf::{envelope, Envelope, WebSocketMessage, WebSocketRequestMessage};
     use common::web_api::SignalMessages;
     use libsignal_core::ProtocolAddress;
     use sha2::digest::consts::False;
+    use uuid::Uuid;
 
     use super::{ClientConnection, UserIdentity, WSStream, WebSocketConnection};
     use axum::extract::ws::{CloseFrame, Message};
@@ -205,47 +246,8 @@ pub(crate) mod test {
 
     use prost::{bytes::Bytes, Message as PMessage};
     use std::sync::Arc;
+    use std::time::Duration;
     use tokio::sync::Mutex;
-
-    #[derive(Debug)]
-    pub struct MockSocket {
-        client_sender: Receiver<Result<Message, Error>>,
-        client_receiver: Sender<Message>,
-    }
-
-    impl MockSocket {
-        fn new() -> (Self, Sender<Result<Message, Error>>, Receiver<Message>) {
-            let (send_to_socket, client_sender) = channel(10); // Queue for test -> socket
-            let (client_receiver, receive_from_socket) = channel(10); // Queue for socket -> test
-
-            (
-                Self {
-                    client_sender,
-                    client_receiver,
-                },
-                send_to_socket,
-                receive_from_socket,
-            )
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl WSStream for MockSocket {
-        async fn recv(&mut self) -> Option<Result<Message, Error>> {
-            self.client_sender.recv().await
-        }
-
-        async fn send(&mut self, msg: Message) -> Result<(), Error> {
-            self.client_receiver
-                .send(msg)
-                .await
-                .map_err(|_| Error::new("Send failed".to_string()))
-        }
-
-        async fn close(self) -> Result<(), Error> {
-            Ok(())
-        }
-    }
 
     pub fn mock_envelope() -> Envelope {
         Envelope {
@@ -270,8 +272,9 @@ pub(crate) mod test {
         name: &str,
         device_id: u32,
         socket_addr: &str,
+        state: SignalServerState<MockDB, MockSocket>,
     ) -> (
-        WebSocketConnection<MockSocket>,
+        WebSocketConnection<MockSocket, MockDB>,
         Sender<Result<Message, Error>>,
         Receiver<Message>,
     ) {
@@ -279,34 +282,15 @@ pub(crate) mod test {
         let who = SocketAddr::from_str(socket_addr).unwrap();
         let paddr = ProtocolAddress::new(name.to_string(), device_id.into());
 
-        let ws = WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, mock);
+        let ws = WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, mock, state);
 
         (ws, sender, receiver)
     }
 
     #[tokio::test]
-    async fn test_mock() {
-        let (mut mock, mut sender, mut receiver) = MockSocket::new();
-
-        tokio::spawn(async move {
-            if let Some(Ok(Message::Text(x))) = mock.recv().await {
-                mock.send(Message::Text(x)).await
-            } else {
-                panic!("Expected Text Message");
-            }
-        });
-
-        sender.send(Ok(Message::Text("hello".to_string()))).await;
-
-        match receiver.recv().await.unwrap() {
-            Message::Text(x) => assert!(x == "hello", "Expected 'hello' in test_mock"),
-            _ => panic!("Did not receive text message"),
-        }
-    }
-
-    #[tokio::test]
     async fn test_send_and_recv() {
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
+        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
 
         sender.send(Ok(Message::Text("hello".to_string()))).await;
 
@@ -329,7 +313,8 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_close() {
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
+        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
 
         assert!(client.is_active());
         client.close().await;
@@ -338,7 +323,8 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_close_reason() {
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
+        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
         assert!(client.is_active());
         client.close_reason(666, "test").await;
         assert!(!client.is_active());
@@ -355,7 +341,8 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_send_message() {
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042");
+        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
         let env = mock_envelope();
         client.send_message(env.clone()).await;
 
@@ -383,5 +370,65 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_on_receive() {
         todo!()
+    }
+
+    // this is more of a integration test and should maybe be somewhere else
+    #[tokio::test]
+    async fn test_handle_new_messages_available() {
+        let mut state = SignalServerState::<MockDB, MockSocket>::new();
+        let (ws, sender, mut receiver) = create_connection(
+            &Uuid::new_v4().to_string(),
+            1,
+            "127.0.0.1:4043",
+            state.clone(),
+        );
+        let address = ws.protocol_address();
+        let mut mgr = state.websocket_manager.clone();
+        mgr.insert(ws).await;
+        let listener = mgr.get(&address).await.unwrap();
+        let mut env = mock_envelope();
+
+        state
+            .message_manager
+            .add_message_availability_listener(&address, listener)
+            .await;
+        state.message_manager.insert(&address, &mut env).await;
+        assert_eq!(
+            state
+                .message_manager
+                .get_messages_for_device(&address, true)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let msg = match receiver.recv().await {
+            Some(Message::Binary(x)) => {
+                WebSocketMessage::decode(Bytes::from(x)).expect("Did not unwrap ws message")
+            }
+            _ => panic!("Did not receive anything"),
+        };
+
+        let queue = match receiver.recv().await {
+            Some(Message::Binary(x)) => {
+                WebSocketMessage::decode(Bytes::from(x)).expect("Did not unwrap ws message (queue)")
+            }
+            _ => panic!("Did not receive anything"),
+        };
+
+        assert!(msg.request.is_some());
+        assert!(queue.request.is_some());
+
+        let req = msg.request.unwrap();
+        let queue_req = queue.request.unwrap();
+
+        assert!(queue_req.path.unwrap() == "/api/v1/queue/empty");
+        assert!(req.verb.unwrap() == "PUT");
+        assert!(req.path.unwrap() == "/api/v1/message");
+        assert!(req.headers.len() == 2);
+        assert!(req.headers[0] == "X-Signal-Key: false");
+        assert!(req.headers[1].starts_with("X-Signal-Timestamp:"));
+        assert!(req.body.unwrap() == env.encode_to_vec());
     }
 }

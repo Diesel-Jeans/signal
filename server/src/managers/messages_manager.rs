@@ -11,8 +11,8 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct MessagesManager<T, U>
 where
-    T: SignalDatabase,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Send,
+    U: MessageAvailabilityListener + Send,
 {
     db: T,
     message_cache: MessageCache<U>,
@@ -20,8 +20,8 @@ where
 
 impl<T, U> Clone for MessagesManager<T, U>
 where
-    T: SignalDatabase + Clone,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Clone + Send,
+    U: MessageAvailabilityListener + Send,
 {
     fn clone(&self) -> Self {
         Self {
@@ -33,8 +33,8 @@ where
 
 impl<T, U> MessagesManager<T, U>
 where
-    T: SignalDatabase,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Send,
+    U: MessageAvailabilityListener + Send,
 {
     pub fn new(db: T, message_cache: MessageCache<U>) -> Self {
         Self { db, message_cache }
@@ -118,25 +118,27 @@ where
         Ok(removed_from_cache.len())
     }
 
-    pub fn add_message_availability_listener(
+    pub async fn add_message_availability_listener(
         &mut self,
         address: &ProtocolAddress,
         listener: Arc<Mutex<U>>,
     ) {
         self.message_cache
-            .add_message_availability_listener(address, listener);
+            .add_message_availability_listener(address, listener)
+            .await;
     }
 
-    pub fn remove_message_availability_listener(&mut self, address: &ProtocolAddress) {
+    pub async fn remove_message_availability_listener(&mut self, address: &ProtocolAddress) {
         self.message_cache
-            .remove_message_availability_listener(address);
+            .remove_message_availability_listener(address)
+            .await;
     }
 }
 
 impl<T, U> MessagesManager<T, U>
 where
-    T: SignalDatabase,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Send,
+    U: MessageAvailabilityListener + Send,
 {
     async fn has_messages(&self, address: &ProtocolAddress) -> Result<bool> {
         let count = self.db.count_messages(address).await?;
