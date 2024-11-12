@@ -125,10 +125,12 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
         if let ConnectionState::Active(mut socket) =
             std::mem::replace(&mut self.ws, ConnectionState::Closed)
         {
-            socket.send(Message::Close(Some(CloseFrame{
-                code: axum::extract::ws::close_code::NORMAL,
-                reason: "Goodbye".into(),
-            }))).await;
+            socket
+                .send(Message::Close(Some(CloseFrame {
+                    code: axum::extract::ws::close_code::NORMAL,
+                    reason: "Goodbye".into(),
+                })))
+                .await;
         }
     }
 
@@ -278,13 +280,14 @@ pub(crate) mod test {
         WebSocketConnection<MockSocket, MockDB>,
         Sender<Result<Message, Error>>,
         Receiver<Message>,
-        SplitStream<MockSocket>
+        SplitStream<MockSocket>,
     ) {
         let (mock, sender, mut receiver) = MockSocket::new();
         let (msender, mreceiver) = mock.split();
         let who = SocketAddr::from_str(socket_addr).unwrap();
         let paddr = ProtocolAddress::new(name.to_string(), device_id.into());
-        let ws = WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, msender, state);
+        let ws =
+            WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, msender, state);
 
         (ws, sender, receiver, mreceiver)
     }
@@ -292,7 +295,8 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_send_and_recv() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut client, sender, mut receiver, mut mreceiver) = create_connection("a", 1, "127.0.0.1:4042", state);
+        let (mut client, sender, mut receiver, mut mreceiver) =
+            create_connection("a", 1, "127.0.0.1:4042", state);
 
         sender.send(Ok(Message::Text("hello".to_string()))).await;
 
@@ -344,7 +348,8 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_send_message() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut client, sender, mut receiver, mut mreceiver) = create_connection("a", 1, "127.0.0.1:4042", state);
+        let (mut client, sender, mut receiver, mut mreceiver) =
+            create_connection("a", 1, "127.0.0.1:4042", state);
         let env = mock_envelope();
         client.send_message(env.clone()).await;
 

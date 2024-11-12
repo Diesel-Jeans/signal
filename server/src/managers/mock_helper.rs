@@ -1,5 +1,6 @@
 use crate::account::{Account, Device};
 use crate::database::SignalDatabase;
+use crate::managers::websocket::wsstream::WSStream;
 use anyhow::{anyhow, Result};
 use axum::async_trait;
 use axum::extract::ws::Message;
@@ -7,6 +8,8 @@ use axum::Error;
 use common::pre_key::PreKeyType;
 use common::signal_protobuf::Envelope;
 use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
+use futures_util::stream::Stream;
+use futures_util::Sink;
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
@@ -14,9 +17,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Mutex;
-use futures_util::Sink;
-use crate::managers::websocket::wsstream::WSStream;
-use futures_util::stream::Stream;
 
 #[cfg(test)]
 #[derive(Clone)]
@@ -220,7 +220,7 @@ pub(crate) mod test {
     use super::WSStream;
     use axum::extract::ws::Message;
     use futures_util::SinkExt;
-    use futures_util::{StreamExt, stream::SplitStream};
+    use futures_util::{stream::SplitStream, StreamExt};
     #[tokio::test]
     async fn test_mock_echo() {
         let (mut mock, mut sender, mut receiver) = MockSocket::new();
@@ -242,7 +242,7 @@ pub(crate) mod test {
             _ => panic!("Did not receive text message"),
         }
     }
-    
+
     #[tokio::test]
     async fn test_mock_dropped_sender() {
         let (mut mock, mut sender, mut receiver) = MockSocket::new();
@@ -250,10 +250,9 @@ pub(crate) mod test {
         let (mut ms, mut mr) = mock.split();
 
         drop(sender);
-        
+
         if let Some(res) = mr.next().await {
             panic!("Expected None");
-        } 
+        }
     }
-
 }
