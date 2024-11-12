@@ -1,4 +1,4 @@
-use crate::account::{Account, AuthenticatedDevice, Device};
+use crate::account::{AuthenticatedDevice, Device};
 use crate::database::SignalDatabase;
 use crate::error::ApiError;
 use crate::managers::state::SignalServerState;
@@ -13,25 +13,24 @@ use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
 use axum::BoxError;
 use axum::{debug_handler, Json, Router};
-use common::signal_protobuf::Envelope;
 use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{
-    DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SetKeyRequest, SignalMessages,
-    UploadKeys,
+    DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SignalMessages,
 };
-use libsignal_core::{DeviceId, Pni, ProtocolAddress, ServiceId};
-use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
+use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use std::env;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
-use uuid::Uuid;
 
-use crate::message_cache::MessageCache;
+use crate::managers::message_persister::MessagePersister;
+use crate::message_cache::MessageAvailabilityListener;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 async fn handle_put_messages<T: SignalDatabase>(
     state: SignalServerState<T>,
@@ -299,6 +298,14 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = SignalServerState::<PostgresDatabase>::new().await;
 
+    let message_persister_stop_flag = Arc::new(AtomicBool::new(false));
+    let message_persister = MessagePersister::new(
+        state.message_manager().clone(),
+        state.message_cache().clone(),
+        state.database().clone(),
+        state.account_manager().clone(),
+    );
+
     let app = Router::new()
         .route("/", get(|| async { "Hello from Signal Server" }))
         .route("/v1/messages", get(get_messages_endpoint))
@@ -328,9 +335,18 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         https_port.parse()?,
     ));
 
+    MessagePersister::<PostgresDatabase, WebSocketConnection<WebSocket>>::start(
+        message_persister,
+        message_persister_stop_flag.clone(),
+    );
+
     axum_server::bind_rustls(https_addr, config)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
+
+    MessagePersister::<PostgresDatabase, WebSocketConnection<WebSocket>>::stop(
+        message_persister_stop_flag,
+    );
 
     Ok(())
 }

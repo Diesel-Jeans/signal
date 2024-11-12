@@ -20,22 +20,38 @@ pub trait MessageAvailabilityListener {
     async fn handle_messages_persisted(&mut self) -> bool;
 }
 
-#[derive(Clone, Debug)]
+type ListenerMap<T> = Arc<Mutex<HashMap<String, Arc<Mutex<T>>>>>;
+
+#[derive(Debug)]
 pub struct MessageCache<T: MessageAvailabilityListener> {
     pool: deadpool_redis::Pool,
-    hashmap: HashMap<String, Arc<Mutex<T>>>,
+    listeners: ListenerMap<T>,
+}
+
+impl<T> Clone for MessageCache<T>
+where
+    T: MessageAvailabilityListener,
+{
+    fn clone(&self) -> Self {
+        Self {
+            pool: self.pool.clone(),
+            listeners: self.listeners.clone(),
+        }
+    }
 }
 
 impl<T: MessageAvailabilityListener> MessageCache<T> {
-    pub async fn connect() -> Result<MessageCache<T>> {
+    pub fn connect() -> Self {
         let _ = dotenv::dotenv();
         let redis_url = std::env::var("REDIS_URL").expect("Unable to read REDIS_URL .env var");
         let mut redis_config = Config::from_url(redis_url);
-        let redis_pool: deadpool_redis::Pool = redis_config.create_pool(Some(Runtime::Tokio1))?;
-        Ok(MessageCache {
+        let redis_pool: deadpool_redis::Pool = redis_config
+            .create_pool(Some(Runtime::Tokio1))
+            .expect("Failed to create connection pool");
+        Self {
             pool: redis_pool,
-            hashmap: HashMap::new(),
-        })
+            listeners: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     pub async fn get_connection(&self) -> Result<Connection> {
@@ -123,7 +139,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 
         // notifies the message availability manager
         let queue_name = format!("{}::{}", address.name(), address.device_id());
-        if let Some(listener) = self.hashmap.get(&queue_name) {
+        if let Some(listener) = self.listeners.lock().await.get(&queue_name) {
             listener.lock().await.handle_new_messages_available().await;
         }
 
@@ -217,6 +233,10 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
             .arg(self.get_message_queue_key(address))
             .query_async::<u32>(&mut connection)
             .await?;
+        let queue_name = format!("{}::{}", address.name(), address.device_id());
+        if let Some(listener) = self.listeners.lock().await.get(&queue_name) {
+            listener.lock().await.handle_new_messages_available().await;
+        }
 
         Ok(msg_count > 0)
     }
@@ -300,6 +320,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
     ) -> Result<Vec<String>> {
         let mut connection = self.pool.get().await?;
         let queue_index_key = self.get_queue_index_key();
+
         let results = cmd("ZRANGE")
             .arg(&queue_index_key)
             .arg(0)
@@ -341,6 +362,11 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
             .query_async::<()>(&mut connection)
             .await?;
 
+        let queue_name = format!("{}::{}", address.name(), address.device_id());
+        if let Some(listener) = self.listeners.lock().await.get(&queue_name) {
+            listener.lock().await.handle_messages_persisted().await;
+        }
+
         Ok(())
     }
 
@@ -352,7 +378,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         )
     }
 
-    fn get_persist_in_progress_key(&self, address: &ProtocolAddress) -> String {
+    pub fn get_persist_in_progress_key(&self, address: &ProtocolAddress) -> String {
         format!(
             "user_queue_persisting::{{{}::{}}}",
             address.name(),
@@ -385,12 +411,12 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         listener: Arc<Mutex<T>>,
     ) {
         let queue_name = format!("{}::{}", address.name(), address.device_id());
-        self.hashmap.insert(queue_name, listener);
+        self.listeners.lock().await.insert(queue_name, listener);
     }
 
     pub async fn remove_message_availability_listener(&mut self, address: &ProtocolAddress) {
         let queue_name: String = format!("{}::{}", address.name(), address.device_id());
-        self.hashmap.remove(&queue_name);
+        self.listeners.lock().await.remove(&queue_name);
     }
 }
 
@@ -448,8 +474,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_message_availability_listener_new_messages() {
-        let mut message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect().await.unwrap();
+        let mut message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let uuid = generate_uuid();
         let mut envelope = generate_random_envelope("Hello this is a test of insert()", &uuid);
@@ -475,8 +500,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_insert() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect().await.unwrap();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -512,8 +536,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_insert_same_id() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect().await.unwrap();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -557,8 +580,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_insert_different_ids() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect().await.unwrap();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -613,8 +635,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_remove() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect().await.unwrap();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -644,8 +665,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_get_all_messages() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect().await.unwrap();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -683,8 +703,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_has_messages() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect().await.unwrap();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
@@ -714,8 +733,7 @@ pub mod message_cache_tests {
     #[tokio::test]
     #[serial]
     async fn test_get_messages_to_persist() {
-        let message_cache: MessageCache<MockWebSocketConnection> =
-            MessageCache::connect().await.unwrap();
+        let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
         let mut connection = message_cache.pool.get().await.unwrap();
 

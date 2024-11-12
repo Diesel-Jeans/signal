@@ -1,9 +1,6 @@
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::Error;
-use common::signal_protobuf::{
-    envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
-    WebSocketResponseMessage,
-};
+use common::signal_protobuf::{Envelope, WebSocketMessage};
 use libsignal_core::{ProtocolAddress, ServiceIdKind};
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -15,8 +12,9 @@ use tokio::sync::Mutex;
 use crate::account::AuthenticatedDevice;
 use crate::database::SignalDatabase;
 use crate::managers::state::SignalServerState;
+use crate::message_cache::MessageAvailabilityListener;
 
-use prost::{bytes::Bytes, Message as PMessage};
+use prost::Message as PMessage;
 
 use super::net_helper::{create_request, current_millis, generate_req_id};
 
@@ -154,6 +152,22 @@ impl<T: WSStream + Debug> WebSocketConnection<T> {
     }
 }
 
+#[async_trait::async_trait]
+impl<T> MessageAvailabilityListener for WebSocketConnection<T>
+where
+    T: WSStream + Debug + Send,
+{
+    async fn handle_new_messages_available(&mut self) -> bool {
+        // Implement the logic for handling new messages available
+        todo!()
+    }
+
+    async fn handle_messages_persisted(&mut self) -> bool {
+        // Implement the logic for handling messages persisted
+        todo!()
+    }
+}
+
 #[derive(Debug)]
 pub enum ConnectionState<T: WSStream> {
     Active(T),
@@ -174,21 +188,16 @@ pub(crate) mod test {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
-    use crate::managers::websocket::net_helper::{self, unpack_messages};
-    use common::signal_protobuf::{envelope, Envelope, WebSocketMessage, WebSocketRequestMessage};
-    use common::web_api::SignalMessages;
+    use common::signal_protobuf::{envelope, Envelope, WebSocketMessage};
     use libsignal_core::ProtocolAddress;
-    use sha2::digest::consts::False;
 
-    use super::{ClientConnection, UserIdentity, WSStream, WebSocketConnection};
-    use axum::extract::ws::{CloseFrame, Message};
+    use super::{UserIdentity, WSStream, WebSocketConnection};
+    use axum::extract::ws::Message;
     use axum::Error;
 
     use tokio::sync::mpsc::{channel, Receiver, Sender};
 
     use prost::{bytes::Bytes, Message as PMessage};
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     #[derive(Debug)]
     pub struct MockSocket {
