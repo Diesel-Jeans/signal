@@ -52,14 +52,13 @@ where
     U: MessageAvailabilityListener + Send + 'static,
 {
     pub fn start(
-        run_flag: Arc<AtomicBool>,
         message_manager: MessagesManager<T, U>,
         message_cache: MessageCache<U>,
         db: T,
         account_manager: AccountManager,
     ) -> MessagePersister<T, U> {
         let mut message_persister = MessagePersister {
-            run_flag,
+            run_flag: Arc::new(AtomicBool::new(true)),
             message_cache,
             messages_manager: message_manager,
             account_manager,
@@ -337,16 +336,8 @@ mod message_persister_tests {
         )
         .await;
 
-        let message_persister_run_flag = Arc::new(AtomicBool::new(true));
-
         let message_persister: MessagePersister<PostgresDatabase, MockWebSocketConnection> =
-            MessagePersister::start(
-                message_persister_run_flag,
-                message_manager,
-                cache.clone(),
-                db.clone(),
-                account_manager,
-            );
+            MessagePersister::start(message_manager, cache.clone(), db.clone(), account_manager);
 
         tokio::time::sleep(Duration::from_millis(2000)).await;
 

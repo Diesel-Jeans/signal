@@ -1,5 +1,6 @@
 use crate::account::{Account, Device};
 use crate::database::SignalDatabase;
+use crate::managers::websocket::wsstream::WSStream;
 use anyhow::{anyhow, Result};
 use axum::async_trait;
 use axum::extract::ws::Message;
@@ -7,13 +8,15 @@ use axum::Error;
 use common::pre_key::PreKeyType;
 use common::signal_protobuf::Envelope;
 use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
+use futures_util::stream::Stream;
+use futures_util::Sink;
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use std::collections::{HashMap, VecDeque};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Mutex;
-
-use crate::managers::websocket::wsstream::WSStream;
 
 #[cfg(test)]
 #[derive(Clone)]
@@ -161,6 +164,36 @@ impl MockSocket {
     }
 }
 
+impl Stream for MockSocket {
+    type Item = Result<Message, Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.get_mut().client_sender).poll_recv(cx)
+    }
+}
+
+impl Sink<Message> for MockSocket {
+    type Error = Error;
+
+    fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+        self.client_receiver
+            .try_send(item)
+            .map_err(|_| Error::new("Send failed".to_string()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
 #[async_trait::async_trait]
 impl WSStream for MockSocket {
     async fn recv(&mut self) -> Option<Result<Message, Error>> {
@@ -181,16 +214,22 @@ impl WSStream for MockSocket {
 
 #[cfg(test)]
 pub(crate) mod test {
+    use std::time::Duration;
+
     use super::MockSocket;
     use super::WSStream;
     use axum::extract::ws::Message;
+    use futures_util::SinkExt;
+    use futures_util::{stream::SplitStream, StreamExt};
     #[tokio::test]
-    async fn test_mock() {
+    async fn test_mock_echo() {
         let (mut mock, mut sender, mut receiver) = MockSocket::new();
 
+        let (mut ms, mut mr) = mock.split();
+
         tokio::spawn(async move {
-            if let Some(Ok(Message::Text(x))) = mock.recv().await {
-                mock.send(Message::Text(x)).await
+            if let Some(Ok(Message::Text(x))) = mr.next().await {
+                ms.send(Message::Text(x)).await
             } else {
                 panic!("Expected Text Message");
             }
@@ -201,6 +240,19 @@ pub(crate) mod test {
         match receiver.recv().await.unwrap() {
             Message::Text(x) => assert!(x == "hello", "Expected 'hello' in test_mock"),
             _ => panic!("Did not receive text message"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mock_dropped_sender() {
+        let (mut mock, mut sender, mut receiver) = MockSocket::new();
+
+        let (mut ms, mut mr) = mock.split();
+
+        drop(sender);
+
+        if let Some(res) = mr.next().await {
+            panic!("Expected None");
         }
     }
 }

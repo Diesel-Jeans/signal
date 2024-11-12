@@ -21,6 +21,7 @@ use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{
     DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SignalMessages,
 };
+use futures_util::StreamExt;
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
 use serde::Serialize;
 use std::env;
@@ -36,8 +37,6 @@ use axum_server::tls_rustls::RustlsConfig;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 
 async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
     state: SignalServerState<T, U>,
@@ -343,13 +342,14 @@ async fn create_websocket_endpoint(
     ws.on_upgrade(move |socket| {
         let mut wmgr = state.websocket_manager.clone();
         async move {
-            wmgr.insert(WebSocketConnection::new(
+            let (mut sender, mut receiver) = socket.split();
+            let ws = WebSocketConnection::new(
                 UserIdentity::AuthenticatedDevice(authenticated_device.into()),
                 addr,
-                socket,
+                sender,
                 state,
-            ))
-            .await
+            );
+            wmgr.insert(ws, receiver).await
         }
     })
 }
@@ -379,9 +379,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = SignalServerState::<PostgresDatabase, WebSocket>::new().await;
 
-    let message_persister_run_flag = Arc::new(AtomicBool::new(true));
     let message_persister = MessagePersister::start(
-        message_persister_run_flag,
         state.message_manager.clone(),
         state.message_cache.clone(),
         state.db.clone(),

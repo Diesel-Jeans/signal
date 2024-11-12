@@ -4,6 +4,9 @@ use common::signal_protobuf::{
     envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
+use futures_util::io::Close;
+use futures_util::stream::SplitSink;
+use futures_util::{SinkExt, StreamExt};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceIdKind};
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -43,7 +46,7 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
     pub fn new(
         identity: UserIdentity,
         socket_addr: SocketAddr,
-        ws: W,
+        ws: SplitSink<W, Message>,
         state: SignalServerState<DB, W>,
     ) -> Self {
         Self {
@@ -119,10 +122,15 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
     }
 
     pub async fn close(&mut self) {
-        if let ConnectionState::Active(socket) =
+        if let ConnectionState::Active(mut socket) =
             std::mem::replace(&mut self.ws, ConnectionState::Closed)
         {
-            socket.close().await;
+            socket
+                .send(Message::Close(Some(CloseFrame {
+                    code: axum::extract::ws::close_code::NORMAL,
+                    reason: "Goodbye".into(),
+                })))
+                .await;
         }
     }
 
@@ -141,13 +149,6 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
 
     pub fn is_active(&self) -> bool {
         self.ws.is_active()
-    }
-
-    pub async fn recv(&mut self) -> Option<Result<Message, axum::Error>> {
-        match self.ws {
-            ConnectionState::Active(ref mut socket) => socket.recv().await,
-            ConnectionState::Closed => None,
-        }
     }
 
     pub async fn send(&mut self, msg: Message) -> Result<(), axum::Error> {
@@ -211,7 +212,7 @@ where
 
 #[derive(Debug)]
 pub enum ConnectionState<T: WSStream> {
-    Active(T),
+    Active(SplitSink<T, Message>),
     Closed,
 }
 
@@ -234,6 +235,8 @@ pub(crate) mod test {
     use crate::managers::websocket::net_helper::{self, unpack_messages};
     use common::signal_protobuf::{envelope, Envelope, WebSocketMessage, WebSocketRequestMessage};
     use common::web_api::SignalMessages;
+    use futures_util::stream::SplitStream;
+    use futures_util::StreamExt;
     use libsignal_core::ProtocolAddress;
     use sha2::digest::consts::False;
     use uuid::Uuid;
@@ -277,24 +280,27 @@ pub(crate) mod test {
         WebSocketConnection<MockSocket, MockDB>,
         Sender<Result<Message, Error>>,
         Receiver<Message>,
+        SplitStream<MockSocket>,
     ) {
         let (mock, sender, mut receiver) = MockSocket::new();
+        let (msender, mreceiver) = mock.split();
         let who = SocketAddr::from_str(socket_addr).unwrap();
         let paddr = ProtocolAddress::new(name.to_string(), device_id.into());
+        let ws =
+            WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, msender, state);
 
-        let ws = WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, mock, state);
-
-        (ws, sender, receiver)
+        (ws, sender, receiver, mreceiver)
     }
 
     #[tokio::test]
     async fn test_send_and_recv() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
+        let (mut client, sender, mut receiver, mut mreceiver) =
+            create_connection("a", 1, "127.0.0.1:4042", state);
 
         sender.send(Ok(Message::Text("hello".to_string()))).await;
 
-        match client.recv().await {
+        match mreceiver.next().await {
             Some(Ok(Message::Text(x))) => assert!(x == "hello", "message was not hello"),
             _ => panic!("Unexpected error when receiving msg"),
         }
@@ -314,7 +320,7 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_close() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
+        let (mut client, _, _, _) = create_connection("a", 1, "127.0.0.1:4042", state);
 
         assert!(client.is_active());
         client.close().await;
@@ -324,7 +330,7 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_close_reason() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
+        let (mut client, _, mut receiver, _) = create_connection("a", 1, "127.0.0.1:4042", state);
         assert!(client.is_active());
         client.close_reason(666, "test").await;
         assert!(!client.is_active());
@@ -342,7 +348,8 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_send_message() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut client, sender, mut receiver) = create_connection("a", 1, "127.0.0.1:4042", state);
+        let (mut client, sender, mut receiver, mut mreceiver) =
+            create_connection("a", 1, "127.0.0.1:4042", state);
         let env = mock_envelope();
         client.send_message(env.clone()).await;
 
@@ -376,7 +383,7 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_handle_new_messages_available() {
         let mut state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver) = create_connection(
+        let (mut ws, sender, mut receiver, mut mreceiver) = create_connection(
             &Uuid::new_v4().to_string(),
             1,
             "127.0.0.1:4043",
@@ -384,7 +391,7 @@ pub(crate) mod test {
         );
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
-        mgr.insert(ws).await;
+        mgr.insert(ws, mreceiver).await;
         let listener = mgr.get(&address).await.unwrap();
         let mut env = mock_envelope();
 
