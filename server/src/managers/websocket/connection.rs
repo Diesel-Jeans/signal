@@ -28,7 +28,7 @@ use super::wsstream::WSStream;
 #[derive(Debug)]
 pub enum UserIdentity {
     ProtocolAddress(ProtocolAddress),
-    AuthenticatedDevice(AuthenticatedDevice),
+    AuthenticatedDevice(Box<AuthenticatedDevice>),
 }
 
 #[derive(Debug)]
@@ -54,7 +54,7 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
             socket_address: socket_addr,
             ws: ConnectionState::Active(ws),
             pending_requests: HashSet::new(),
-            state: state,
+            state,
         }
     }
 
@@ -98,7 +98,7 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
                 .await
                 .map_err(|e| println!("{}", e));
         }
-        return true;
+        true
     }
 
     fn create_message(
@@ -172,7 +172,7 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
             None,
         );
         let res = self.send(Message::Binary(msg.encode_to_vec())).await;
-        return !res.is_err();
+        res.is_ok()
     }
 
     pub async fn on_receive(&mut self, proto_message: WebSocketMessage) {
@@ -357,7 +357,7 @@ pub(crate) mod test {
         };
 
         assert!(msg.request.is_some());
-        assert!(client.pending_requests.len() != 0);
+        assert!(!client.pending_requests.is_empty());
         let req = msg.request.unwrap();
 
         assert!(req.verb.unwrap() == "PUT");

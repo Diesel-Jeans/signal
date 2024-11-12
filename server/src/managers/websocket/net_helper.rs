@@ -160,7 +160,7 @@ pub(crate) mod test {
         assert!(res.id() == 1);
         assert!(res.message() == "OK");
         assert!(res.status() == 200);
-        assert!(res.body == None);
+        assert!(res.body.is_none());
         assert!(res.headers[0] == "my-header: ok");
     }
 
@@ -178,7 +178,7 @@ pub(crate) mod test {
         assert!(req.id() == 1);
         assert!(req.verb() == "PUT");
         assert!(req.path() == "/v1/messages");
-        assert!(req.body == None);
+        assert!(req.body.is_none());
         assert!(req.headers[0] == "my-header: ok");
     }
 
@@ -204,7 +204,7 @@ pub(crate) mod test {
         let req = create_request(1, "PUT", "/v1/messages", vec![], Some(b));
 
         let msg = unpack_messages(req).unwrap();
-        assert!(msg.online == false);
+        assert!(!msg.online);
         assert!(msg.urgent);
         assert!(msg.timestamp == 1730217386);
         assert!(msg.messages[0].content == "aGVsbG8=");
