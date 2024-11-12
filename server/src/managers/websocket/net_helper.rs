@@ -1,4 +1,4 @@
-use axum::http::Uri;
+use axum::http::{StatusCode, Uri};
 use common::signal_protobuf::{
     web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
 };
@@ -10,7 +10,7 @@ use std::str::FromStr;
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 use url::Url;
 
-struct PathExtractor {
+pub struct PathExtractor {
     parts: Vec<String>,
 }
 
@@ -46,11 +46,10 @@ impl PathExtractor {
 
 pub fn create_response(
     id: u64,
-    status: u32,
-    message: &str,
+    status_code: StatusCode,
     mut headers: Vec<String>,
     body: Option<Vec<u8>>,
-) -> WebSocketMessage {
+) -> Result<WebSocketMessage, String> {
     if !headers.iter().any(|x| x.starts_with("Content-Length")) {
         headers.push(format!(
             "Content-Length: {}",
@@ -60,17 +59,22 @@ pub fn create_response(
 
     let res = WebSocketResponseMessage {
         id: Some(id),
-        status: Some(status),
-        message: Some(message.to_string()),
+        status: Some(status_code.as_u16() as u32),
+        message: Some(
+            status_code
+                .canonical_reason()
+                .ok_or("Invalid canonical reason")?
+                .to_string(),
+        ),
         headers,
         body,
     };
 
-    WebSocketMessage {
+    Ok(WebSocketMessage {
         r#type: Some(web_socket_message::Type::Response as i32),
         request: None,
         response: Some(res),
-    }
+    })
 }
 
 pub fn create_request(
@@ -94,15 +98,8 @@ pub fn create_request(
     }
 }
 
-pub fn unpack_messages(ws_message: WebSocketMessage) -> Result<SignalMessages, String> {
-    let req = match ws_message.r#type() {
-        web_socket_message::Type::Request => match ws_message.request {
-            Some(x) => x,
-            None => return Err("Message was not a SignalMessages".to_string()),
-        },
-        _ => return Err("Message was not a SignalMessages".to_string()),
-    };
-    let body = match req.body {
+pub fn unpack_messages(body: Option<Vec<u8>>) -> Result<SignalMessages, String> {
+    let body = match body {
         None => return Err("Body was none".to_string()),
         Some(x) => x,
     };
@@ -133,7 +130,7 @@ pub(crate) mod test {
     use std::str::FromStr;
 
     use super::{create_request, create_response, unpack_messages, PathExtractor};
-    use axum::http::Uri;
+    use axum::http::{StatusCode, Uri};
     use common::signal_protobuf::web_socket_message;
 
     #[test]
@@ -154,7 +151,8 @@ pub(crate) mod test {
 
     #[test]
     fn test_create_response() {
-        let msg = create_response(1, 200, "OK", vec!["my-header: ok".to_string()], None);
+        let msg =
+            create_response(1, StatusCode::OK, vec!["my-header: ok".to_string()], None).unwrap();
         assert!(msg.r#type() == web_socket_message::Type::Response);
         let res = msg.response.unwrap();
         assert!(res.id() == 1);
@@ -203,7 +201,7 @@ pub(crate) mod test {
 
         let req = create_request(1, "PUT", "/v1/messages", vec![], Some(b));
 
-        let msg = unpack_messages(req).unwrap();
+        let msg = unpack_messages(req.request.unwrap().body).unwrap();
         assert!(!msg.online);
         assert!(msg.urgent);
         assert!(msg.timestamp == 1730217386);
