@@ -148,6 +148,24 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static> 
         }
     }
 
+    async fn send_queue_empty(&mut self) -> bool{
+        let id = generate_req_id();
+        let time = if let Ok(x) = current_millis(){
+            x
+        } else {
+            return false
+        };
+
+        let msg = create_request(
+            id, 
+            "PUT", 
+            "/api/v1/queue/empty", 
+            vec![format!("X-Signal-Timestamp: {}", time)], 
+            None);
+        let res = self.send(Message::Binary(msg.encode_to_vec())).await;
+        return !res.is_err()
+    }
+
     pub async fn on_receive(
         &mut self,
         proto_message: WebSocketMessage,
@@ -165,14 +183,20 @@ where T: WSStream + Debug + 'static, U: SignalDatabase{
             return false
         }
         
-        self.send_messages(true).await
+        if !self.send_messages(true).await{
+            return false
+        }
+        return self.send_queue_empty().await
     }
 
     async fn handle_messages_persisted(&mut self) -> bool {
         if !self.is_active(){
             return false
         }
-        self.send_messages(false).await
+        if !self.send_messages(false).await{
+            return false
+        }
+        return self.send_queue_empty().await
     }
 }
 
@@ -360,12 +384,19 @@ pub(crate) mod test {
             _ => panic!("Did not receive anything"),
         };
 
+        let queue = match  receiver.recv().await {
+            Some(Message::Binary(x)) => WebSocketMessage::decode(Bytes::from(x)).expect("Did not unwrap ws message (queue)"),
+            _ => panic!("Did not receive anything"),
+        };
         
 
         assert!(msg.request.is_some());
+        assert!(queue.request.is_some());
 
         let req = msg.request.unwrap();
+        let queue_req = queue.request.unwrap();
 
+        assert!(queue_req.path.unwrap() == "/api/v1/queue/empty");
         assert!(req.verb.unwrap() == "PUT");
         assert!(req.path.unwrap() == "/api/v1/message");
         assert!(req.headers.len() == 2);
