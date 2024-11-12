@@ -19,7 +19,7 @@ const MESSAGE_BATCH_LIMIT: u8 = 100;
 const PERSIST_DELAY: u64 = 600;
 
 #[derive(Debug)]
-pub struct MessagePersister<T: SignalDatabase, U: MessageAvailabilityListener> {
+pub struct MessagePersister<T: SignalDatabase, U: MessageAvailabilityListener + Send> {
     message_cache: MessageCache<U>,
     messages_manager: MessagesManager<T, U>,
     account_manager: AccountManager,

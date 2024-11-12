@@ -192,9 +192,9 @@ impl SignalDatabase for PostgresDatabase {
         sqlx::query!(
             r#"
             INSERT INTO
-                devices (owner, device_id, name, auth_token, salt, registration_id)
+                devices (owner, device_id, name, auth_token, salt, registration_id, pni_registration_id)
             SELECT
-                id, $2, $3, $4, $5, $6
+                id, $2, $3, $4, $5, $6, $7
             FROM
                 accounts
             WHERE
@@ -207,6 +207,7 @@ impl SignalDatabase for PostgresDatabase {
             device.auth_token(),
             device.salt(),
             device.registration_id().to_string(),
+            device.pni_registration_id().to_string(),
         )
         .execute(&self.pool)
         .await
@@ -222,7 +223,8 @@ impl SignalDatabase for PostgresDatabase {
                 name,
                 auth_token,
                 salt,
-                registration_id
+                registration_id,
+                pni_registration_id
             FROM
                 devices
             WHERE
@@ -251,6 +253,7 @@ impl SignalDatabase for PostgresDatabase {
                         row.auth_token,
                         row.salt,
                         row.registration_id.parse().unwrap(),
+                        row.pni_registration_id.parse().unwrap(),
                     )
                 })
                 .collect()
@@ -266,7 +269,8 @@ impl SignalDatabase for PostgresDatabase {
                 name,
                 auth_token,
                 salt,
-                registration_id
+                registration_id,
+                pni_registration_id
             FROM
                 devices
             WHERE
@@ -295,6 +299,7 @@ impl SignalDatabase for PostgresDatabase {
                 row.auth_token,
                 row.salt,
                 row.registration_id.parse().unwrap(),
+                row.pni_registration_id.parse().unwrap(),
             )
         })
         .map_err(|err| err.into())
@@ -1121,7 +1126,8 @@ mod db_tests {
             0,
             "bob1_token".as_bytes().to_vec(),
             "bob1_salt".to_string(),
-            0,
+            1,
+            1,
         );
         let mut identity_key = [0u8; 33];
         identity_key[0] = 5;
@@ -1133,8 +1139,8 @@ mod db_tests {
             "test_number1".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -1169,7 +1175,8 @@ mod db_tests {
             0,
             "bob_token2".as_bytes().to_vec(),
             "bob_salt2".to_string(),
-            0,
+            1,
+            1,
         );
         let mut identity_key = [0u8; 33];
         identity_key[0] = 5;
@@ -1218,7 +1225,8 @@ mod db_tests {
             0,
             "bob_token3".as_bytes().to_vec(),
             "bob_salt3".to_string(),
-            0,
+            1,
+            1,
         );
         let mut identity_key = [0u8; 33];
         identity_key[0] = 5;
@@ -1230,8 +1238,8 @@ mod db_tests {
             "test_number3".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -1267,7 +1275,8 @@ mod db_tests {
             0,
             "bob_token4".as_bytes().to_vec(),
             "bob_salt4".to_string(),
-            0,
+            1,
+            1,
         );
         let mut identity_key = [0u8; 33];
         identity_key[0] = 5;
@@ -1279,8 +1288,8 @@ mod db_tests {
             "test_number4".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -1311,7 +1320,8 @@ mod db_tests {
             0,
             "bob_token5".as_bytes().to_vec(),
             "bob_salt5".to_string(),
-            0,
+            1,
+            1,
         );
         let secondary_device = Device::new(
             0.into(),
@@ -1320,7 +1330,8 @@ mod db_tests {
             0,
             "bob_secondary_token1".as_bytes().to_vec(),
             "bob_secondary_salt1".to_string(),
-            0,
+            1,
+            1,
         );
         let mut identity_key = [0u8; 33];
         identity_key[0] = 5;
@@ -1332,8 +1343,8 @@ mod db_tests {
             "test_number5".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -1373,7 +1384,8 @@ mod db_tests {
             0,
             "bob_token6".as_bytes().to_vec(),
             "bob_salt6".to_string(),
-            0,
+            1,
+            1,
         );
         let secondary_device = Device::new(
             0.into(),
@@ -1382,7 +1394,8 @@ mod db_tests {
             0,
             "bob_secondary_token2".as_bytes().to_vec(),
             "bob_secondary_salt2".to_string(),
-            0,
+            1,
+            1,
         );
         let mut identity_key = [0u8; 33];
         identity_key[0] = 5;
@@ -1394,8 +1407,8 @@ mod db_tests {
             "test_number6".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -1433,6 +1446,7 @@ mod db_tests {
             "bob_token7".as_bytes().to_vec(),
             "bob_salt7".to_string(),
             0,
+            0,
         );
         let secondary_device = Device::new(
             0.into(),
@@ -1441,7 +1455,8 @@ mod db_tests {
             0,
             "bob_secondary_token3".as_bytes().to_vec(),
             "bob_secondary_salt3".to_string(),
-            0,
+            1,
+            1,
         );
         let mut identity_key = [0u8; 33];
         identity_key[0] = 5;
@@ -1453,8 +1468,8 @@ mod db_tests {
             "test_number7".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -1497,7 +1512,8 @@ mod db_tests {
             0,
             "bob_token8".as_bytes().to_vec(),
             "bob_salt8".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -1510,8 +1526,8 @@ mod db_tests {
             "test_number8".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -1609,7 +1625,8 @@ mod db_tests {
             0,
             "bob_token9".as_bytes().to_vec(),
             "bob_salt9".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -1622,8 +1639,8 @@ mod db_tests {
             "test_number9".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -1668,7 +1685,8 @@ mod db_tests {
             0,
             "bob_token10".as_bytes().to_vec(),
             "bob_salt10".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -1681,8 +1699,8 @@ mod db_tests {
             "test_number10".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -1775,7 +1793,8 @@ mod db_tests {
             0,
             "bob_token11".as_bytes().to_vec(),
             "bob_salt11".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -1788,8 +1807,8 @@ mod db_tests {
             "test_number11".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -1834,7 +1853,8 @@ mod db_tests {
             0,
             "bob_token12".as_bytes().to_vec(),
             "bob_salt12".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -1847,8 +1867,8 @@ mod db_tests {
             "test_number12".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -1941,7 +1961,8 @@ mod db_tests {
             0,
             "bob_token13".as_bytes().to_vec(),
             "bob_salt13".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -1954,8 +1975,8 @@ mod db_tests {
             "test_number13".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -2002,7 +2023,8 @@ mod db_tests {
             0,
             "bob_token14".as_bytes().to_vec(),
             "bob_salt14".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -2015,8 +2037,8 @@ mod db_tests {
             "test_number14".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -2113,7 +2135,8 @@ mod db_tests {
             0,
             "bob_token15".as_bytes().to_vec(),
             "bob_salt15".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -2126,8 +2149,8 @@ mod db_tests {
             "test_number15".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -2174,7 +2197,8 @@ mod db_tests {
             0,
             "bob_token16".as_bytes().to_vec(),
             "bob_salt16".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -2187,8 +2211,8 @@ mod db_tests {
             "test_number16".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -2239,7 +2263,8 @@ mod db_tests {
             0,
             "bob_token17".as_bytes().to_vec(),
             "bob_salt17".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -2252,8 +2277,8 @@ mod db_tests {
             "test_number17".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -2308,7 +2333,8 @@ mod db_tests {
             0,
             "bob_token18".as_bytes().to_vec(),
             "bob_salt18".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -2321,8 +2347,8 @@ mod db_tests {
             "test_number18".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -2378,7 +2404,8 @@ mod db_tests {
             0,
             "bob_token19".as_bytes().to_vec(),
             "bob_salt19".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -2391,8 +2418,8 @@ mod db_tests {
             "test_number19".to_string(),
             AccountAttributes {
                 fetches_messages: true,
-                registration_id: 0,
-                pni_registration_id: 0,
+                registration_id: 1,
+                pni_registration_id: 1,
                 capabilities: DeviceCapabilities {
                     storage: true,
                     transfer: true,
@@ -2452,7 +2479,8 @@ mod db_tests {
             0,
             "bob_token20".as_bytes().to_vec(),
             "bob_salt20".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];
@@ -2505,7 +2533,8 @@ mod db_tests {
             0,
             "bob_token21".as_bytes().to_vec(),
             "bob_salt21".to_string(),
-            0,
+            1,
+            1,
         );
         let device_id = device.device_id();
         let mut identity_key = [0u8; 33];

@@ -11,8 +11,8 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct MessagesManager<T, U>
 where
-    T: SignalDatabase,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Send,
+    U: MessageAvailabilityListener + Send,
 {
     db: T,
     message_cache: MessageCache<U>,
@@ -20,8 +20,8 @@ where
 
 impl<T, U> Clone for MessagesManager<T, U>
 where
-    T: SignalDatabase + Clone,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Clone + Send,
+    U: MessageAvailabilityListener + Send,
 {
     fn clone(&self) -> Self {
         Self {
@@ -33,8 +33,8 @@ where
 
 impl<T, U> MessagesManager<T, U>
 where
-    T: SignalDatabase,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Send,
+    U: MessageAvailabilityListener + Send,
 {
     pub fn new(db: T, message_cache: MessageCache<U>) -> Self {
         Self { db, message_cache }
@@ -118,25 +118,27 @@ where
         Ok(removed_from_cache.len())
     }
 
-    pub fn add_message_availability_listener(
+    pub async fn add_message_availability_listener(
         &mut self,
         address: &ProtocolAddress,
         listener: Arc<Mutex<U>>,
     ) {
         self.message_cache
-            .add_message_availability_listener(address, listener);
+            .add_message_availability_listener(address, listener)
+            .await;
     }
 
-    pub fn remove_message_availability_listener(&mut self, address: &ProtocolAddress) {
+    pub async fn remove_message_availability_listener(&mut self, address: &ProtocolAddress) {
         self.message_cache
-            .remove_message_availability_listener(address);
+            .remove_message_availability_listener(address)
+            .await;
     }
 }
 
 impl<T, U> MessagesManager<T, U>
 where
-    T: SignalDatabase,
-    U: MessageAvailabilityListener,
+    T: SignalDatabase + Send,
+    U: MessageAvailabilityListener + Send,
 {
     async fn has_messages(&self, address: &ProtocolAddress) -> Result<bool> {
         let count = self.db.count_messages(address).await?;
@@ -186,7 +188,8 @@ pub mod message_manager_tests {
         let created = 0;
         let auth_token = vec![0];
         let salt = String::from("salt");
-        let registration_id = 0;
+        let registration_id = 1;
+        let pni_registration_id = 1;
         return Device::new(
             device_id.into(),
             name.to_string(),
@@ -195,6 +198,7 @@ pub mod message_manager_tests {
             auth_token,
             salt,
             registration_id,
+            pni_registration_id,
         );
     }
 
@@ -207,8 +211,8 @@ pub mod message_manager_tests {
     fn create_account_attributes() -> AccountAttributes {
         return AccountAttributes {
             fetches_messages: true,
-            registration_id: 0,
-            pni_registration_id: 0,
+            registration_id: 1,
+            pni_registration_id: 1,
             capabilities: DeviceCapabilities {
                 storage: true,
                 transfer: true,

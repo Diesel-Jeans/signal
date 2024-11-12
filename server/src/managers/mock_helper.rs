@@ -2,18 +2,18 @@ use crate::account::{Account, Device};
 use crate::database::SignalDatabase;
 use anyhow::{anyhow, Result};
 use axum::async_trait;
+use axum::extract::ws::Message;
+use axum::Error;
 use common::pre_key::PreKeyType;
 use common::signal_protobuf::Envelope;
 use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Mutex;
 
-type MessageTable = HashMap<ProtocolAddress, VecDeque<Envelope>>;
-type DeviceTable = HashMap<ServiceId, Vec<Device>>;
-type KeysTable =
-    HashMap<ServiceId, HashMap<DeviceId, HashMap<PreKeyType, Vec<UploadSignedPreKey>>>>;
+use crate::managers::websocket::wsstream::WSStream;
 
 #[cfg(test)]
 #[derive(Clone)]
@@ -136,5 +136,71 @@ impl SignalDatabase for MockDB {
 
     async fn delete_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
         todo!()
+    }
+}
+
+#[derive(Debug)]
+pub struct MockSocket {
+    client_sender: Receiver<Result<Message, Error>>,
+    client_receiver: Sender<Message>,
+}
+
+impl MockSocket {
+    pub fn new() -> (Self, Sender<Result<Message, Error>>, Receiver<Message>) {
+        let (send_to_socket, client_sender) = channel(10); // Queue for test -> socket
+        let (client_receiver, receive_from_socket) = channel(10); // Queue for socket -> test
+
+        (
+            Self {
+                client_sender,
+                client_receiver,
+            },
+            send_to_socket,
+            receive_from_socket,
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl WSStream for MockSocket {
+    async fn recv(&mut self) -> Option<Result<Message, Error>> {
+        self.client_sender.recv().await
+    }
+
+    async fn send(&mut self, msg: Message) -> Result<(), Error> {
+        self.client_receiver
+            .send(msg)
+            .await
+            .map_err(|_| Error::new("Send failed".to_string()))
+    }
+
+    async fn close(self) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test {
+    use super::MockSocket;
+    use super::WSStream;
+    use axum::extract::ws::Message;
+    #[tokio::test]
+    async fn test_mock() {
+        let (mut mock, mut sender, mut receiver) = MockSocket::new();
+
+        tokio::spawn(async move {
+            if let Some(Ok(Message::Text(x))) = mock.recv().await {
+                mock.send(Message::Text(x)).await
+            } else {
+                panic!("Expected Text Message");
+            }
+        });
+
+        sender.send(Ok(Message::Text("hello".to_string()))).await;
+
+        match receiver.recv().await.unwrap() {
+            Message::Text(x) => assert!(x == "hello", "Expected 'hello' in test_mock"),
+            _ => panic!("Did not receive text message"),
+        }
     }
 }

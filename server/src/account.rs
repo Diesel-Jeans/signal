@@ -4,38 +4,6 @@ use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKi
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
 
-/*
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Account {
-    pub aci: Option<String>,
-    pub pni: Option<String>,
-    pub auth_token: String,
-    pub identity_key: IdentityKey,
-    pub attributes: AccountAttributes,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct AccountAttributes {
-    pub aci_registration_id: i64,
-    pub pni_registration_id: i64,
-}
-
-impl Account {
-    /// Get the service id for this account.
-    ///
-    /// An account has an ACI (Account Identifier), or
-    /// a PNI (Phone Number Identifier) or both.
-    pub fn service_id(&self) -> ServiceId {
-        let id = self
-            .aci
-            .as_ref()
-            .or(self.pni.as_ref())
-            .expect("An account must have an Aci, a Pni or both");
-        ServiceId::parse_from_service_id_string(id).unwrap()
-    }
-}
-*/
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Account {
     pni: Pni,
@@ -131,6 +99,7 @@ pub struct Device {
     auth_token: Vec<u8>,
     salt: String,
     registration_id: u32,
+    pni_registration_id: u32,
 }
 
 impl Device {
@@ -142,6 +111,7 @@ impl Device {
         auth_token: Vec<u8>,
         salt: String,
         registration_id: u32,
+        pni_registration_id: u32,
     ) -> Self {
         Self {
             device_id,
@@ -151,6 +121,7 @@ impl Device {
             auth_token,
             salt,
             registration_id,
+            pni_registration_id,
         }
     }
     pub fn device_id(&self) -> DeviceId {
@@ -176,6 +147,10 @@ impl Device {
 
     pub fn registration_id(&self) -> u32 {
         self.registration_id
+    }
+
+    pub fn pni_registration_id(&self) -> u32 {
+        self.pni_registration_id
     }
 }
 

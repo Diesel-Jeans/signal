@@ -1,59 +1,58 @@
-use super::websocket::connection::WebSocketConnection;
+use std::fmt::Debug;
+
+use super::{
+    mock_helper::MockSocket,
+    websocket::{connection::WebSocketConnection, wsstream::WSStream},
+};
 use crate::{
-    account::{Account, AuthenticatedDevice, Device},
+    account::{self, Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
     error::ApiError,
     message_cache::MessageCache,
     postgres::PostgresDatabase,
 };
 use anyhow::{Ok, Result};
-use common::web_api::{AccountAttributes, DevicePreKeyBundle, PreKeyResponse, SetKeyRequest};
+use common::web_api::{
+    AccountAttributes, DevicePreKeyBundle, PreKeyResponse, SetKeyRequest, UploadPreKey,
+    UploadSignedPreKey,
+};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKind};
 use libsignal_protocol::IdentityKey;
 
-#[cfg(test)]
-use super::mock_db::MockDB;
 use super::{
     account_manager::AccountManager, key_manager::KeyManager, messages_manager::MessagesManager,
     websocket::websocket_manager::WebSocketManager,
 };
 use axum::extract::ws::WebSocket;
 
-#[derive(Clone, Debug)]
-pub struct SignalServerState<T: SignalDatabase> {
-    db: T,
-    websocket_manager: WebSocketManager<WebSocket>,
-    account_manager: AccountManager,
-    key_manager: KeyManager,
-    message_manager: MessagesManager<T, WebSocketConnection<WebSocket>>,
-    message_cache: MessageCache<WebSocketConnection<WebSocket>>,
+#[cfg(test)]
+use super::mock_helper::MockDB;
+
+#[derive(Debug)]
+pub struct SignalServerState<T: SignalDatabase, U: WSStream + Debug> {
+    pub db: T,
+    pub websocket_manager: WebSocketManager<U, T>,
+    pub account_manager: AccountManager,
+    pub key_manager: KeyManager,
+    pub message_manager: MessagesManager<T, WebSocketConnection<U, T>>,
+    pub message_cache: MessageCache<WebSocketConnection<U, T>>,
 }
 
-impl<T: SignalDatabase> SignalServerState<T> {
-    pub fn database(&self) -> &T {
-        &self.db
-    }
-    pub fn websocket_manager(&self) -> &WebSocketManager<WebSocket> {
-        &self.websocket_manager
-    }
-    pub fn account_manager(&self) -> &AccountManager {
-        &self.account_manager
-    }
-    pub fn key_manager(&self) -> &KeyManager {
-        &self.key_manager
-    }
-
-    pub fn message_manager(&self) -> &MessagesManager<T, WebSocketConnection<WebSocket>> {
-        &self.message_manager
-    }
-
-    pub fn message_cache(&self) -> &MessageCache<WebSocketConnection<WebSocket>> {
-        &self.message_cache
+impl<T: SignalDatabase + Clone, U: WSStream + Debug> Clone for SignalServerState<T, U> {
+    fn clone(&self) -> Self {
+        Self {
+            db: self.db.clone(),
+            websocket_manager: self.websocket_manager.clone(),
+            account_manager: self.account_manager.clone(),
+            key_manager: self.key_manager.clone(),
+            message_manager: self.message_manager.clone(),
+            message_cache: self.message_cache.clone(),
+        }
     }
 }
 
 #[cfg(test)]
-impl SignalServerState<MockDB> {
+impl SignalServerState<MockDB, MockSocket> {
     pub fn new() -> Self {
         let db = MockDB {};
         let cache = MessageCache::connect();
@@ -69,7 +68,7 @@ impl SignalServerState<MockDB> {
     }
 }
 
-impl SignalServerState<PostgresDatabase> {
+impl SignalServerState<PostgresDatabase, WebSocket> {
     pub async fn new() -> Self {
         let db = PostgresDatabase::connect("DATABASE_URL".to_string()).await;
         let cache = MessageCache::connect();
@@ -84,7 +83,7 @@ impl SignalServerState<PostgresDatabase> {
     }
 }
 
-impl<T: SignalDatabase> SignalServerState<T> {
+impl<T: SignalDatabase, U: WSStream + Debug> SignalServerState<T, U> {
     pub async fn create_account(
         &self,
         phone_number: String,
@@ -181,12 +180,7 @@ impl<T: SignalDatabase> SignalServerState<T> {
         target_device_id: Option<DeviceId>,
     ) -> Result<PreKeyResponse, ApiError> {
         self.key_manager
-            .handle_get_keys(
-                self.database(),
-                auth_device,
-                target_service_id,
-                target_device_id,
-            )
+            .handle_get_keys(&self.db, auth_device, target_service_id, target_device_id)
             .await
     }
 

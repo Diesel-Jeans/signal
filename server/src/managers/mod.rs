@@ -3,6 +3,6 @@ mod client_presence_manager;
 pub mod key_manager;
 pub mod message_persister;
 pub mod messages_manager;
-mod mock_db;
+mod mock_helper;
 pub mod state;
 pub mod websocket;
