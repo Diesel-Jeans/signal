@@ -533,7 +533,7 @@ mod websocket_tests {
     use std::time::{Duration, UNIX_EPOCH};
     use tokio::io::AsyncReadExt;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_websocket() {
         dotenv::dotenv().ok();
         let mut handler = WebsocketHandler::try_new(Some(KeepAliveOptions {
