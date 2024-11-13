@@ -74,12 +74,12 @@ impl StreamHandler {
     }
 }
 
-//Rust can suck my fucking dick. Everything must be wrapped in an Arc because fuck you that's why.
 #[derive(Clone)]
 pub(crate) struct WebsocketHandler {
     socket: Arc<Mutex<StreamHandler>>,
     receiver_handle: Arc<thread::JoinHandle<JoinHandle<()>>>,
-    rec_channel: Arc<Mutex<mpsc::Receiver<Message>>>,
+    text_channel: Arc<Mutex<mpsc::Receiver<Message>>>,
+    ws_request_channel: Arc<Mutex<mpsc::Receiver<WebSocketRequestMessage>>>,
     outgoing_id: Arc<Mutex<u64>>,
     outgoing_map: Arc<Mutex<HashMap<u64, AbortHandle>>>,
     incoming_response: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>>,
@@ -92,24 +92,35 @@ impl WebsocketHandler {
         let res: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let out: Arc<Mutex<HashMap<u64, AbortHandle>>> = Arc::new(Mutex::new(HashMap::new()));
-        let (handle, rec_channel) =
+        let (handle, text_channel, request_channel) =
             WebsocketHandler::get_handle_for_ws_listener(socket.clone(), res.clone(), out.clone());
 
         let mut ws_handler = WebsocketHandler {
             socket,
             receiver_handle: Arc::new(handle),
-            rec_channel: Arc::new(Mutex::new(rec_channel)),
+            text_channel: Arc::new(Mutex::new(text_channel)),
             outgoing_id: Arc::new(Mutex::new(1)),
             outgoing_map: out,
             has_keepalive: keepalive_options.is_some(),
             incoming_response: res,
             keepalive_handler: None,
+            ws_request_channel: Arc::new(Mutex::new(request_channel)),
         };
 
         if keepalive_options.is_some() {
-            let keepalive = KeepaliveHandler::new(keepalive_options.unwrap(), Arc::new(Mutex::new(ws_handler.clone())));
+            let keepalive = KeepaliveHandler::new(
+                keepalive_options.unwrap(),
+                Arc::new(Mutex::new(ws_handler.clone())),
+            );
             ws_handler.keepalive_handler = Some(Arc::new(Mutex::new(keepalive)));
-            ws_handler.keepalive_handler.clone().unwrap().lock().await.reset_keepalive().await;
+            ws_handler
+                .keepalive_handler
+                .clone()
+                .unwrap()
+                .lock()
+                .await
+                .reset_keepalive()
+                .await;
         }
 
         Ok(ws_handler)
@@ -119,10 +130,15 @@ impl WebsocketHandler {
         mut sock: Arc<Mutex<StreamHandler>>,
         mut incoming: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>>,
         mut outgoing: Arc<Mutex<HashMap<u64, AbortHandle>>>,
-    ) -> (thread::JoinHandle<JoinHandle<()>>, mpsc::Receiver<Message>) {
-        let (mut tx, mut rx) = mpsc::channel::<Message>();
+    ) -> (
+        thread::JoinHandle<JoinHandle<()>>,
+        mpsc::Receiver<Message>,
+        mpsc::Receiver<WebSocketRequestMessage>,
+    ) {
+        let (mut message_tx, mut message_rx) = mpsc::channel::<Message>();
         let handle = Handle::current();
-        let mtx = tx.clone();
+        let mtx = message_tx.clone();
+        let (mut request_tx, mut request_rx) = mpsc::channel::<WebSocketRequestMessage>();
 
         //This is a fragile house of cards so don't change the spawn structure
         let hand = thread::spawn(move || {
@@ -137,10 +153,14 @@ impl WebsocketHandler {
 
                         Message::Binary(data) => {
                             if let Ok(wsm) = WebSocketMessage::decode(data.as_slice()) {
-                                //TODO: Extend this match case to include the other types of WebSocketMessage.
                                 //Types of WebSocketMessage: 0 = UNKNOWN, 1 = REQUEST, 2 = RESPONSE
                                 match wsm.r#type {
-                                    Some(1) => { todo!() } //We still need to handle requests in our client
+                                    Some(1) => {
+                                        let request = wsm.request.expect("Got a request type without an attached request");
+                                        if let Err(e) = request_tx.send(request) { //Requests will be handled by the receive channel
+                                            break;
+                                        }
+                                    }
                                     Some(2) => {
                                         //Expect is fine here, as it is system breaking to get a type mismatch
                                         let wsrm = wsm.response.expect(
@@ -168,7 +188,7 @@ impl WebsocketHandler {
                 }
             })
         });
-        (hand, rx)
+        (hand, message_rx, request_rx)
     }
 
     //ONLY FOR TESTING PURPOSES!!!
@@ -186,12 +206,12 @@ impl WebsocketHandler {
         &mut self,
         options: SendRequestOptions,
     ) -> Result<(WebSocketResponseMessage)> {
-        let mut id = 0;
+        let mut id;
 
         //In a smaller scope to free the lock as fast as possible
         {
             let mut lock = self.outgoing_id.lock().await;
-            id = lock.clone();
+            id = *lock;
             *lock += 1;
         }
 
@@ -266,7 +286,7 @@ impl WebsocketHandler {
                 _ => panic!(),
             };
 
-            if (status >= 200 && status <= 300) {
+            if (200..300).contains(&status) {
                 Ok(incoming.clone())
             } else {
                 anyhow::bail!("Got a bad response")
@@ -343,11 +363,19 @@ impl KeepaliveHandler {
             timeout: Some(KEEPALIVE_TIMEOUT_MS),
         };
 
-        let result = self.websocket_resource.lock().await.send_request(request_options).await?;
+        let result = self
+            .websocket_resource
+            .lock()
+            .await
+            .send_request(request_options)
+            .await?;
 
         if let Some(status) = result.status {
-            if (status < 200 && status >= 300) {
-                self.websocket_resource.lock().await.close(3001, format!("keepalive response with {} code", status));
+            if !(200..300).contains(&status) {
+                self.websocket_resource
+                    .lock()
+                    .await
+                    .close(3001, format!("keepalive response with {} code", status));
                 anyhow::bail!("keepalive response with {} code", status);
             }
         } else {
@@ -574,7 +602,7 @@ mod websocket_tests {
 
         sleep(Duration::from_millis(100));
 
-        while let Ok(msg) = handler.rec_channel.lock().await.try_recv() {
+        while let Ok(msg) = handler.text_channel.lock().await.try_recv() {
             match msg {
                 Message::Text(msg) => println!("{}", msg),
                 Message::Ping(payload) => {
