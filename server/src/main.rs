@@ -11,6 +11,7 @@ mod postgres;
 mod query;
 mod response;
 mod server;
+mod test_utils;
 
 #[tokio::main]
 pub async fn main() {

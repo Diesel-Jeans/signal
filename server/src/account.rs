@@ -101,7 +101,7 @@ pub struct Device {
     registration_id: u32,
     pni_registration_id: u32,
 }
-
+#[allow(clippy::too_many_arguments)]
 impl Device {
     pub fn new(
         device_id: DeviceId,

@@ -168,10 +168,12 @@ where
 mod message_persister_tests {
     use super::*;
     use crate::managers::messages_manager::message_manager_tests::*;
-    use crate::message_cache::message_cache_tests::{
+    use crate::postgres::PostgresDatabase;
+    use crate::test_utils::database::database_connect;
+    use crate::test_utils::message_cache::{
         generate_random_envelope, generate_uuid, teardown, MockWebSocketConnection,
     };
-    use crate::postgres::PostgresDatabase;
+    use crate::test_utils::user::new_account;
     use redis::cmd;
     use serial_test::serial;
     use std::time::Duration;
@@ -270,7 +272,7 @@ mod message_persister_tests {
         message_times: Vec<u64>,
     ) -> (bool, bool, bool, Vec<String>, Vec<String>) {
         let _ = dotenv::dotenv();
-        let db = PostgresDatabase::connect("DATABASE_URL".to_string()).await;
+        let db = database_connect().await;
         let cache = MessageCache::connect();
         let mut message_manager = MessagesManager::new(db.clone(), cache.clone());
         let account_manager = AccountManager::new();
@@ -288,15 +290,12 @@ mod message_persister_tests {
         let mut protocol_addresses = Vec::new();
 
         for message_time in message_times {
-            let user_id = Uuid::new_v4().to_string();
-            let device = create_device(1, &user_id);
-            let device_id = device.device_id();
-
-            let account = create_account(device);
-            let account_aci = account.aci().service_id_string();
+            let account = new_account();
+            let protocol_address = ProtocolAddress::new(
+                account.aci().service_id_string(),
+                account.devices()[0].device_id(),
+            );
             accounts.push(account.clone());
-
-            let protocol_address = ProtocolAddress::new(account_aci, device_id);
             protocol_addresses.push(protocol_address.clone());
 
             let envelope_uuid = generate_uuid();

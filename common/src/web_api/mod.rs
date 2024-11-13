@@ -298,7 +298,7 @@ pub struct DevicePreKeyBundle {
     pub pni_pq_pre_key: UploadSignedPreKey,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SetKeyRequest {
     pub pre_key: Option<Vec<UploadPreKey>>,

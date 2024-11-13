@@ -1,7 +1,7 @@
 use crate::account::{Account, Device};
 use crate::database::SignalDatabase;
 use crate::managers::websocket::wsstream::WSStream;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use axum::async_trait;
 use axum::extract::ws::Message;
 use axum::Error;
@@ -18,11 +18,9 @@ use std::task::{Context, Poll};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Mutex;
 
-#[cfg(test)]
 #[derive(Clone)]
 pub struct MockDB {}
 
-#[cfg(test)]
 #[async_trait]
 impl SignalDatabase for MockDB {
     async fn store_signed_pre_key(
