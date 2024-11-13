@@ -289,273 +289,77 @@ mod key_manager_tests {
     use uuid::Uuid;
 
     use crate::postgres::PostgresDatabase;
+    use crate::test_utils::key::new_device_pre_key_bundle;
+    use crate::test_utils::key::new_upload_pre_keys;
+    use crate::test_utils::key::new_upload_signed_pre_key;
 
     use super::*;
-    async fn create_authenticated_device(
-        device_id: DeviceId,
-        registration_id: u32,
-        pni_registration_id: u32,
-        phone_nr: String,
-        identity_key: IdentityKey,
-    ) -> AuthenticatedDevice {
-        let device = Device::new(
-            device_id,
-            "test".into(),
-            0,
-            0,
-            "token".into(),
-            "salt".into(),
-            registration_id,
-            pni_registration_id,
-        );
-        let device_capabilities = DeviceCapabilities {
-            storage: false,
-            transfer: false,
-            payment_activation: false,
-            delete_sync: false,
-            versioned_expiration_timer: false,
-        };
-        let account_attr = AccountAttributes {
-            fetches_messages: false,
-            name: "name".to_owned(),
-            registration_id: registration_id.try_into().unwrap(),
-            pni_registration_id: registration_id.try_into().unwrap(),
-            capabilities: device_capabilities,
-            unidentified_access_key: <Box<[u8]>>::default(),
-        };
-        let account = Account::new(
+    use crate::test_utils::database::*;
+    use crate::test_utils::user::*;
+
+    pub fn new_account_from_identity_key(identity_key: IdentityKey) -> Account {
+        Account::new(
             Pni::from(Uuid::new_v4()),
-            device.clone(),
+            new_device(),
             identity_key,
             identity_key,
-            phone_nr,
-            account_attr,
-        );
-        AuthenticatedDevice::new(account, device)
-    }
-
-    async fn add_target<S: SignalDatabase>(
-        database: &S,
-        target_device_id: &DeviceId,
-        target_service_id: &Pni,
-        target_identity_key: &IdentityKey,
-    ) {
-        let device_capabilities = DeviceCapabilities {
-            storage: false,
-            transfer: false,
-            payment_activation: false,
-            delete_sync: false,
-            versioned_expiration_timer: false,
-        };
-        let account_attr = AccountAttributes {
-            name: "name".to_owned(),
-            fetches_messages: false,
-            registration_id: 1,
-            pni_registration_id: 1,
-            capabilities: device_capabilities,
-            unidentified_access_key: <Box<[u8]>>::default(),
-        };
-
-        let device = Device::new(
-            *target_device_id,
-            "name".into(),
-            0,
-            0,
-            "no token".into(),
-            "no salt".into(),
-            1,
-            1,
-        );
-
-        database
-            .add_account(&Account::new(
-                *target_service_id,
-                device,
-                *target_identity_key,
-                *target_identity_key,
-                Uuid::new_v4().to_string(),
-                account_attr,
-            ))
-            .await
-            .unwrap();
-    }
-    async fn get_ec_pni_signed_pre_key(
-        db: &PostgresDatabase,
-        key_id: u32,
-        service_id: &ServiceId,
-        device_id: u32,
-    ) -> Result<UploadSignedPreKey> {
-        sqlx::query!(
-            r#"
-            SELECT
-                key_id, public_key, signature
-            FROM
-                pni_signed_pre_key_store
-            WHERE
-                key_id = $1 AND
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        devices
-                    WHERE
-                        owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $2 OR
-                                pni = $2
-                        ) AND
-                        device_id = $3
-                )
-            "#,
-            key_id.to_string(),
-            service_id.service_id_string(),
-            device_id.to_string()
+            Uuid::new_v4().into(),
+            new_account_attributes(),
         )
-        .fetch_one(db.pool())
-        .await
-        .map(|row| UploadSignedPreKey {
-            key_id: row.key_id.parse().unwrap(),
-            public_key: row.public_key.into(),
-            signature: row.signature.into(),
-        })
-        .map_err(|err| err.into())
-    }
-    async fn get_pq_last_resort_pre_key(
-        db: &PostgresDatabase,
-        key_id: u32,
-        service_id: &ServiceId,
-        device_id: u32,
-    ) -> Result<UploadSignedPreKey> {
-        sqlx::query!(
-            r#"
-            SELECT
-                key_id, public_key, signature
-            FROM
-                pni_pq_last_resort_pre_key_store
-            WHERE
-                key_id = $1 AND
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        devices
-                    WHERE
-                        owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $2 OR
-                                pni = $2
-                        ) AND
-                        device_id = $3
-                )
-            "#,
-            key_id.to_string(),
-            service_id.service_id_string(),
-            device_id.to_string()
-        )
-        .fetch_one(db.pool())
-        .await
-        .map(|row| UploadSignedPreKey {
-            key_id: row.key_id.parse().unwrap(),
-            public_key: row.public_key.into(),
-            signature: row.signature.into(),
-        })
-        .map_err(|err| err.into())
     }
 
     #[tokio::test]
     async fn get_keys_test() {
         let km = KeyManager::new();
-        let database = PostgresDatabase::connect("DATABASE_URL_TEST".into()).await;
+        let database = database_connect().await;
 
-        let target_device_id = DeviceId::from(111);
-        let target_service_id = Pni::from(Uuid::new_v4());
-        let identity_key = IdentityKey::from(KeyPair::generate(&mut OsRng).public_key);
-        add_target(
-            &database,
-            &target_device_id,
-            &target_service_id,
-            &identity_key,
-        )
-        .await;
-
-        let key_bundle = DevicePreKeyBundle {
-            aci_signed_pre_key: UploadSignedPreKey {
-                key_id: 1,
-                public_key: Box::new([1, 2, 3, 4]),
-                signature: Box::new([1, 2, 3, 4]),
-            },
-            pni_signed_pre_key: UploadSignedPreKey {
-                key_id: 1,
-                public_key: Box::new([1, 2, 3, 4]),
-                signature: Box::new([1, 2, 3, 4]),
-            },
-            aci_pq_pre_key: UploadSignedPreKey {
-                key_id: 1,
-                public_key: Box::new([1, 2, 3, 4]),
-                signature: Box::new([1, 2, 3, 4]),
-            },
-            pni_pq_pre_key: UploadSignedPreKey {
-                key_id: 1,
-                public_key: Box::new([1, 2, 3, 4]),
-                signature: Box::new([1, 2, 3, 4]),
-            },
-        };
+        let target = new_account();
+        let target_device = target.devices()[0].clone();
         let target_address =
-            &ProtocolAddress::new(target_service_id.service_id_string(), target_device_id);
+            &ProtocolAddress::new(target.aci().service_id_string(), target_device.device_id());
+
+        let key_bundle = new_device_pre_key_bundle();
+        let one_time = new_upload_pre_keys(1);
+
+        database.add_account(&target).await;
+
         database
             .store_key_bundle(&key_bundle, target_address)
             .await
             .unwrap();
-
-        let one_time = UploadPreKey {
-            key_id: 1,
-            public_key: Box::new([1, 2, 3, 4]),
-        };
         database
-            .store_one_time_ec_pre_keys(vec![one_time.clone()], target_address)
+            .store_one_time_ec_pre_keys(one_time.clone(), target_address)
             .await
             .unwrap();
 
-        let auth_device1 = create_authenticated_device(
-            0.into(),
-            1,
-            1,
-            "key_manager_test1".to_string(),
-            identity_key,
-        )
-        .await;
+        let auth_device1 = new_authenticated_device();
 
         let keys = km
             .handle_get_keys(
                 &database,
                 &auth_device1,
-                target_service_id.into(),
-                Some(target_device_id),
+                target.aci().into(),
+                Some(target_device.device_id()),
             )
             .await
             .unwrap();
 
         let device_bundle = keys.keys();
 
-        database
-            .delete_account(&target_service_id.into())
-            .await
-            .unwrap();
+        database.delete_account(&target.aci().into()).await.unwrap();
 
-        assert_eq!(keys.identity_key().clone(), identity_key);
+        assert_eq!(keys.identity_key().clone(), target.aci_identity_key());
         assert!(device_bundle.len() == 1);
 
-        assert_eq!(device_bundle[0].device_id().clone(), target_device_id);
-        assert_eq!(device_bundle[0].registration_id(), 1);
-        assert_eq!(device_bundle[0].pre_key().clone(), one_time);
+        assert_eq!(
+            device_bundle[0].device_id().clone(),
+            target_device.device_id()
+        );
+        assert_eq!(
+            device_bundle[0].registration_id(),
+            target_device.registration_id()
+        );
+        assert_eq!(device_bundle[0].pre_key().clone(), one_time[0]);
         assert_eq!(
             device_bundle[0].signed_pre_key().clone(),
             key_bundle.pni_signed_pre_key
@@ -569,23 +373,17 @@ mod key_manager_tests {
     #[tokio::test]
     async fn put_keys_test() {
         let km = KeyManager::new();
-        let database = PostgresDatabase::connect("DATABASE_URL_TEST".into()).await;
+        let database = database_connect().await;
 
-        let target_device_id = DeviceId::from(112);
         let mut csprng = OsRng;
         let identity_key = KeyPair::generate(&mut csprng);
-        let auth_device = create_authenticated_device(
-            target_device_id,
-            1,
-            1,
-            "key_manager_test2".to_string(),
-            IdentityKey::from(identity_key.public_key),
-        )
-        .await;
+        let account = new_account_from_identity_key(IdentityKey::from(identity_key.public_key));
+        let device = account.devices()[0].clone();
+        let auth_device = AuthenticatedDevice::new(account, device);
 
+        let target_device_id = auth_device.device().device_id();
         let target_service_id = auth_device.account().pni();
         let address = auth_device.get_protocol_address(ServiceIdKind::Pni);
-        database.add_account(auth_device.account()).await.unwrap();
 
         let key = Box::new([1, 2, 3, 4]);
         let sign = identity_key
@@ -593,41 +391,28 @@ mod key_manager_tests {
             .calculate_signature(&*key, &mut csprng)
             .unwrap();
 
-        let prekey = UploadPreKey {
-            key_id: 1,
-            public_key: key.clone(),
-        };
-        let signed_pre_key = UploadSignedPreKey {
-            key_id: 1,
-            public_key: key.clone(),
-            signature: sign.clone(),
-        };
-        let pq_pre_key = UploadSignedPreKey {
-            key_id: 1,
-            public_key: key.clone(),
-            signature: sign.clone(),
-        };
-        let pq_last_resort_pre_key = UploadSignedPreKey {
-            key_id: 1,
-            public_key: key,
-            signature: sign,
-        };
+        let prekey = new_upload_pre_keys(1);
+        let signed_pre_key = new_upload_signed_pre_key(Some(identity_key.private_key));
+        let pq_pre_key = new_upload_signed_pre_key(Some(identity_key.private_key));
+        let pq_last_resort_pre_key = new_upload_signed_pre_key(Some(identity_key.private_key));
 
         let request = SetKeyRequest {
-            pre_key: Some(vec![prekey.clone()]),
+            pre_key: Some(prekey.clone()),
             signed_pre_key: Some(signed_pre_key.clone()),
             pq_pre_key: Some(vec![pq_pre_key.clone()]),
             pq_last_resort_pre_key: Some(pq_last_resort_pre_key.clone()),
         };
 
-        km.handle_put_keys(&database, &auth_device, request, ServiceIdKind::Pni)
+        database.add_account(auth_device.account()).await.unwrap();
+
+        km.handle_put_keys(&database, &auth_device, request.clone(), ServiceIdKind::Pni)
             .await
             .unwrap();
 
         let prekey_db = database.get_one_time_ec_pre_key(&address).await.unwrap();
         let signed_pre_key_db = get_ec_pni_signed_pre_key(
             &database,
-            1,
+            request.signed_pre_key.unwrap().key_id,
             &ServiceId::Pni(target_service_id),
             target_device_id.into(),
         )
@@ -636,7 +421,7 @@ mod key_manager_tests {
         let pq_pre_key_db = database.get_one_time_pq_pre_key(&address).await.unwrap();
         let pq_last_resort_pre_key_db = get_pq_last_resort_pre_key(
             &database,
-            1,
+            request.pq_last_resort_pre_key.unwrap().key_id,
             &ServiceId::Pni(target_service_id),
             target_device_id.into(),
         )
@@ -648,51 +433,20 @@ mod key_manager_tests {
             .await
             .unwrap();
 
-        assert_eq!(prekey, prekey_db);
+        assert_eq!(prekey[0], prekey_db);
         assert_eq!(signed_pre_key, signed_pre_key_db);
         assert_eq!(pq_pre_key, pq_pre_key_db);
         assert_eq!(pq_last_resort_pre_key, pq_last_resort_pre_key_db);
     }
     #[tokio::test]
     async fn check_keys_test() {
-        let device_id = DeviceId::from(113);
-        let database = PostgresDatabase::connect("DATABASE_URL_TEST".into()).await;
-        let auth_device = create_authenticated_device(
-            device_id,
-            1,
-            1,
-            "key_manager_test3".to_string(),
-            IdentityKey::new(KeyPair::generate(&mut OsRng).public_key),
-        )
-        .await;
+        let database = database_connect().await;
+        let auth_device = new_authenticated_device();
+        database.add_account(auth_device.account()).await;
 
-        database.add_account(auth_device.account()).await.unwrap();
-
-        let signed_pre_key = UploadSignedPreKey {
-            key_id: 1,
-            public_key: Box::new([1, 2, 3, 4]),
-            signature: Box::new([1, 2, 3, 4]),
-        };
-        let pq_last_resort_pre_key = UploadSignedPreKey {
-            key_id: 1,
-            public_key: Box::new([1, 2, 3, 4]),
-            signature: Box::new([1, 2, 3, 4]),
-        };
-
-        let key_bundle = DevicePreKeyBundle {
-            aci_signed_pre_key: UploadSignedPreKey {
-                key_id: 1,
-                public_key: Box::new([1, 2, 3, 4]),
-                signature: Box::new([1, 2, 3, 4]),
-            },
-            pni_signed_pre_key: signed_pre_key.clone(),
-            aci_pq_pre_key: UploadSignedPreKey {
-                key_id: 1,
-                public_key: Box::new([1, 2, 3, 4]),
-                signature: Box::new([1, 2, 3, 4]),
-            },
-            pni_pq_pre_key: pq_last_resort_pre_key.clone(),
-        };
+        let key_bundle = new_device_pre_key_bundle();
+        let signed_pre_key = key_bundle.pni_signed_pre_key.clone();
+        let pq_last_resort_pre_key = key_bundle.pni_pq_pre_key.clone();
 
         database
             .store_key_bundle(

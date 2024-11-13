@@ -1,11 +1,10 @@
 use std::fmt::Debug;
 
-use super::{
-    mock_helper::MockSocket,
-    websocket::{connection::WebSocketConnection, wsstream::WSStream},
-};
+use super::websocket::{connection::WebSocketConnection, wsstream::WSStream};
+#[cfg(test)]
+use crate::test_utils::websocket::{MockDB, MockSocket};
 use crate::{
-    account::{self, Account, AuthenticatedDevice, Device},
+    account::{Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
     error::ApiError,
     message_cache::MessageCache,
@@ -24,9 +23,6 @@ use super::{
     websocket::websocket_manager::WebSocketManager,
 };
 use axum::extract::ws::WebSocket;
-
-#[cfg(test)]
-use super::mock_helper::MockDB;
 
 #[derive(Debug)]
 pub struct SignalServerState<T: SignalDatabase, U: WSStream + Debug> {

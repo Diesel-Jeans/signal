@@ -230,9 +230,10 @@ pub(crate) mod test {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
-    use crate::managers::mock_helper::{MockDB, MockSocket};
     use crate::managers::state::SignalServerState;
     use crate::managers::websocket::net_helper::{self, unpack_messages};
+    use crate::test_utils::message_cache::teardown;
+    use crate::test_utils::websocket::{MockDB, MockSocket};
     use common::signal_protobuf::{envelope, Envelope, WebSocketMessage, WebSocketRequestMessage};
     use common::web_api::SignalMessages;
     use futures_util::stream::SplitStream;
@@ -423,6 +424,8 @@ pub(crate) mod test {
             }
             _ => panic!("Did not receive anything"),
         };
+
+        teardown(state.message_cache.get_connection().await.unwrap()).await;
 
         assert!(msg.request.is_some());
         assert!(queue.request.is_some());

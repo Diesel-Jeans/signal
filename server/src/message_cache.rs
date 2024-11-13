@@ -422,68 +422,26 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 
 #[cfg(test)]
 pub mod message_cache_tests {
+    use crate::test_utils::{
+        message_cache::{
+            generate_random_envelope, generate_uuid, teardown, MockWebSocketConnection,
+        },
+        user::new_protocol_address,
+    };
+
     use super::*;
     use serial_test::serial;
     use uuid::Uuid;
-
-    pub fn generate_uuid() -> String {
-        let guid = Uuid::new_v4();
-        guid.to_string()
-    }
-
-    pub fn generate_random_envelope(message: &str, uuid: &str) -> Envelope {
-        let mut data = bincode::serialize(message).unwrap();
-        Envelope {
-            content: Some(data),
-            server_guid: Some(uuid.to_string()),
-            ..Default::default()
-        }
-    }
-
-    pub async fn teardown(mut con: deadpool_redis::Connection) {
-        cmd("FLUSHALL").query_async::<()>(&mut con).await.unwrap();
-    }
-
-    pub struct MockWebSocketConnection {
-        pub evoked_handle_new_messages: bool,
-        pub evoked_handle_messages_persisted: bool,
-    }
-
-    impl MockWebSocketConnection {
-        pub(crate) fn new() -> Self {
-            MockWebSocketConnection {
-                evoked_handle_new_messages: false,
-                evoked_handle_messages_persisted: false,
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl MessageAvailabilityListener for MockWebSocketConnection {
-        async fn handle_new_messages_available(&mut self) -> bool {
-            self.evoked_handle_new_messages = true;
-            true
-        }
-
-        async fn handle_messages_persisted(&mut self) -> bool {
-            self.evoked_handle_messages_persisted = true;
-            true
-        }
-    }
 
     #[tokio::test]
     #[serial]
     async fn test_message_availability_listener_new_messages() {
         let mut message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
-
-        let uuid = generate_uuid();
-        let mut envelope = generate_random_envelope("Hello this is a test of insert()", &uuid);
-
-        let user_id = generate_uuid();
-        let device_id = 1;
-        let address = ProtocolAddress::new(user_id, device_id.into());
-
         let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
+        let uuid = generate_uuid();
+        let address = new_protocol_address();
+
+        let mut envelope = generate_random_envelope("Hello this is a test of insert()", &uuid);
 
         message_cache
             .add_message_availability_listener(&address, websocket.clone())
@@ -501,14 +459,10 @@ pub mod message_cache_tests {
     #[serial]
     async fn test_insert() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
-
         let mut connection = message_cache.pool.get().await.unwrap();
-
-        let user_id = generate_uuid();
-        let device_id = 1;
-        let address = ProtocolAddress::new(user_id, device_id.into());
-
+        let address = new_protocol_address();
         let message_guid = generate_uuid();
+
         let mut envelope =
             generate_random_envelope("Hello this is a test of insert()", &message_guid);
 
@@ -540,9 +494,7 @@ pub mod message_cache_tests {
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
-        let user_id = generate_uuid();
-        let device_id = 1;
-        let address = ProtocolAddress::new(user_id, device_id.into());
+        let address = new_protocol_address();
 
         let message_guid = generate_uuid();
         let mut envelope1 = generate_random_envelope("This is a message", &message_guid);
@@ -584,9 +536,7 @@ pub mod message_cache_tests {
 
         let mut connection = message_cache.pool.get().await.unwrap();
 
-        let user_id = generate_uuid();
-        let device_id = 1;
-        let address = ProtocolAddress::new(user_id, device_id.into());
+        let address = new_protocol_address();
 
         let message_guid1 = generate_uuid();
         let message_guid2 = generate_uuid();
@@ -636,13 +586,8 @@ pub mod message_cache_tests {
     #[serial]
     async fn test_remove() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
-
         let mut connection = message_cache.pool.get().await.unwrap();
-
-        let user_id = generate_uuid();
-        let device_id = 1;
-        let address = ProtocolAddress::new(user_id, device_id.into());
-
+        let address = new_protocol_address();
         let message_guid = generate_uuid();
         let mut envelope = generate_random_envelope("This is a test of remove()", &message_guid);
 
@@ -666,13 +611,8 @@ pub mod message_cache_tests {
     #[serial]
     async fn test_get_all_messages() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
-
         let mut connection = message_cache.pool.get().await.unwrap();
-
-        let user_id = generate_uuid();
-        let device_id = 1;
-        let address = ProtocolAddress::new(user_id, device_id.into());
-
+        let address = new_protocol_address();
         let mut envelopes = Vec::new();
 
         for i in 0..10 {
@@ -704,14 +644,10 @@ pub mod message_cache_tests {
     #[serial]
     async fn test_has_messages() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
-
         let mut connection = message_cache.pool.get().await.unwrap();
-
-        let user_id = generate_uuid();
-        let device_id = 1;
-        let address = ProtocolAddress::new(user_id, device_id.into());
-
+        let address = new_protocol_address();
         let message_guid = generate_uuid();
+
         let mut envelope =
             generate_random_envelope("Hello this is a test of has_messages()", &message_guid);
 
@@ -734,14 +670,10 @@ pub mod message_cache_tests {
     #[serial]
     async fn test_get_messages_to_persist() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
-
         let mut connection = message_cache.pool.get().await.unwrap();
-
-        let user_id = generate_uuid();
-        let device_id = 1;
-        let address = ProtocolAddress::new(user_id, device_id.into());
-
+        let address = new_protocol_address();
         let message_guid = generate_uuid();
+
         let mut envelope = generate_random_envelope("Hello this is a test", &message_guid);
 
         message_cache

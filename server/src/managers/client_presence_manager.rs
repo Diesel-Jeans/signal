@@ -189,8 +189,9 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
 
 #[cfg(test)]
 mod client_presence_manager_test {
+    use crate::test_utils::message_cache::{generate_uuid, teardown};
+
     use super::*;
-    use crate::message_cache::message_cache_tests::{generate_uuid, teardown};
     use serial_test::serial;
 
     pub struct MockWebSocketConnection {
