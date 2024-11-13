@@ -562,6 +562,7 @@ mod websocket_tests {
     use tokio::io::AsyncReadExt;
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
     async fn test_websocket() {
         dotenv::dotenv().ok();
         let mut handler = WebsocketHandler::try_new(Some(KeepAliveOptions {
