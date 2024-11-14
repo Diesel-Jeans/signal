@@ -86,6 +86,7 @@ pub(crate) struct WebsocketHandler {
     keepalive_handler: Option<Arc<Mutex<KeepaliveHandler>>>,
     has_keepalive: bool,
 }
+
 impl WebsocketHandler {
     pub async fn try_new(keepalive_options: Option<KeepAliveOptions>) -> Result<WebsocketHandler> {
         let socket = Arc::new(Mutex::new(StreamHandler::try_new().await?));
