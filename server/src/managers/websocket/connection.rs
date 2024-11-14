@@ -156,10 +156,7 @@ impl<T: WSStream + Debug> WebSocketConnection<T> {
                 let request = proto_message
                     .request
                     .expect("Got a request type message without an attached request");
-                let id = match request.id {
-                    Some(id) => id,
-                    _ => panic!("Message needs to contain an ID for this to work"),
-                };
+                let id = request.id.expect("Message needs to contain an ID for this to work");
 
                 println!("WebSocketMessage received with id: {} and path: {}", id, request.path.unwrap());
 
