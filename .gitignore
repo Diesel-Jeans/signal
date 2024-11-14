@@ -7,3 +7,5 @@ server/cert/rootCA.crt
 server/cert/server.crt
 server/cert/server.key
 **/client.py
+**/*.log
+server/logs

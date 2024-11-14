@@ -9,8 +9,8 @@ libsignal-protocol = { git = "https://github.com/Diesel-Jeans/libsignal.git", ve
 
 common = { path = "../common" }
 tokio = { version = "1.40.0", features = ["full"] }
-axum = { version = "0.7.6", features = ["macros", "ws", "query"] }
-axum-extra = {version = "0.9.4", features = ["typed-header"] }
+axum = { version = "0.7.6", features = ["macros", "ws", "query", "http2", "multipart"] }
+axum-extra = { version = "0.9.4", features = ["typed-header"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 tokio-tungstenite = "0.24.0"
 serde = { version = "1.0.210", features = ["derive"] }
@@ -38,6 +38,14 @@ serial_test = "3.1.1"
 base64 = "0.21.7"
 chrono = "0.4.38"
 hkdf = "0.12.4"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+env_filter = "0.1.2"
+tower = "0.5.1"
+hyper = { version = "1.5.0", features = ["full"] }
+futures = "0.3.31"
+log = "0.4.22"
+tracing-appender = "0.2.3"
 bon = "3.0.0"
 
 [build-dependencies]

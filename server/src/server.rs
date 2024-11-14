@@ -9,14 +9,13 @@ use crate::managers::websocket::wsstream::WSStream;
 use crate::postgres::PostgresDatabase;
 use crate::response::SendMessageResponse;
 use anyhow::Result;
-use axum::extract::{connect_info::ConnectInfo, Host, Path, State};
+use axum::extract::{connect_info::ConnectInfo, FromRequest, Host, Path, State};
 use axum::handler::HandlerWithoutStateExt;
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
-use axum::BoxError;
-use axum::{debug_handler, Json, Router};
+use axum::{debug_handler, BoxError, Json, Router};
 use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{
     DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SignalMessages,
@@ -32,11 +31,30 @@ use crate::destination_device_validator::DestinationDeviceValidator;
 use crate::managers::message_persister::MessagePersister;
 use crate::message_cache::MessageAvailabilityListener;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
+use axum::{
+    body::{self, Bytes, *},
+    extract::{Extension, FromRequestParts},
+    http::Request,
+    middleware::Next,
+    response::Response,
+};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use std::fmt::Debug;
+use std::io::BufRead;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use tonic::service::AxumBody;
+use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::trace;
+use tracing::Level;
+
+use async_trait::async_trait;
+use futures::future::{self, Ready};
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use tower::{Layer, Service, ServiceBuilder};
+use tower_http::trace;
 
 pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
     state: &SignalServerState<T, U>,
@@ -412,6 +430,16 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/devices/:device_id", delete(delete_device_endpoint))
         .route("/v1/websocket", any(create_websocket_endpoint))
         .with_state(state)
+        .layer(
+            ServiceBuilder::new()
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(trace::DefaultMakeSpan::new().level(Level::DEBUG)), // .on_request(trace::DefaultOnRequest::new().level(Level::TRACE))
+                                                                                            // .on_response(trace::DefaultOnResponse::new().level(Level::TRACE))
+                                                                                            // .on_body_chunk(trace::DefaultOnBodyChunk::new()),
+                )
+                .layer(TraceLayer::new_for_grpc()),
+        )
         .layer(cors);
 
     let address = env::var("SERVER_ADDRESS")?;
