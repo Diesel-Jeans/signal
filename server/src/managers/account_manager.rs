@@ -9,22 +9,24 @@ use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::IdentityKey;
 use sqlx::database;
 use uuid::Uuid;
-#[derive(Debug, Clone)]
-pub struct AccountManager {}
 
-impl Default for AccountManager {
-    fn default() -> Self {
-        Self::new()
-    }
+#[derive(Default, Debug, Clone)]
+pub struct AccountManager<T>
+where
+    T: SignalDatabase,
+{
+    db: T,
 }
 
-impl AccountManager {
-    pub fn new() -> Self {
-        Self {}
+impl<T> AccountManager<T>
+where
+    T: SignalDatabase,
+{
+    pub fn new(db: T) -> Self {
+        Self { db }
     }
-    pub async fn create_account<T: SignalDatabase>(
+    pub async fn create_account(
         &self,
-        db: &T,
         phone_number: String,
         account_attributes: AccountAttributes,
         aci_identity_key: IdentityKey,
@@ -39,83 +41,45 @@ impl AccountManager {
             phone_number,
             account_attributes,
         );
-        db.add_account(&account).await?;
+        self.db.add_account(&account).await?;
         Ok(account)
     }
 
-    pub async fn get_account<T: SignalDatabase>(
-        &self,
-        db: &T,
-        service_id: &ServiceId,
-    ) -> Result<Account> {
-        db.get_account(service_id).await
+    pub async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
+        self.db.get_account(service_id).await
     }
 
-    pub async fn update_account_aci<T: SignalDatabase>(
-        &self,
-        db: &T,
-        service_id: &ServiceId,
-        new_aci: Aci,
-    ) -> Result<()> {
-        db.update_account_aci(service_id, new_aci).await
+    pub async fn update_account_aci(&self, service_id: &ServiceId, new_aci: Aci) -> Result<()> {
+        self.db.update_account_aci(service_id, new_aci).await
     }
 
-    pub async fn update_account_pni<T: SignalDatabase>(
-        &self,
-        db: &T,
-        service_id: &ServiceId,
-        new_pni: Pni,
-    ) -> Result<()> {
-        db.update_account_pni(service_id, new_pni).await
+    pub async fn update_account_pni(&self, service_id: &ServiceId, new_pni: Pni) -> Result<()> {
+        self.db.update_account_pni(service_id, new_pni).await
     }
 
-    pub async fn delete_account<T: SignalDatabase>(
-        &self,
-        db: &T,
-        service_id: &ServiceId,
-    ) -> Result<()> {
-        db.delete_account(service_id).await
+    pub async fn delete_account(&self, service_id: &ServiceId) -> Result<()> {
+        self.db.delete_account(service_id).await
     }
 
-    pub async fn add_device<T: SignalDatabase>(
-        &self,
-        db: &T,
-        service_id: &ServiceId,
-        device: &Device,
-    ) -> Result<()> {
-        db.add_device(service_id, device).await
+    pub async fn add_device(&self, service_id: &ServiceId, device: &Device) -> Result<()> {
+        self.db.add_device(service_id, device).await
     }
 
-    pub async fn get_all_devices<T: SignalDatabase>(
-        &self,
-        db: &T,
-        service_id: &ServiceId,
-    ) -> Result<Vec<Device>> {
-        db.get_all_devices(service_id).await
+    pub async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
+        self.db.get_all_devices(service_id).await
     }
-    pub async fn get_device<T: SignalDatabase>(
-        &self,
-        db: &T,
-        service_id: &ServiceId,
-        device_id: u32,
-    ) -> Result<Device> {
-        db.get_device(service_id, device_id).await
+    pub async fn get_device(&self, service_id: &ServiceId, device_id: u32) -> Result<Device> {
+        self.db.get_device(service_id, device_id).await
     }
-    pub async fn delete_device<T: SignalDatabase>(
-        &self,
-        db: &T,
-        service_id: &ServiceId,
-        device_id: u32,
-    ) -> Result<()> {
-        db.delete_device(service_id, device_id).await
+    pub async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()> {
+        self.db.delete_device(service_id, device_id).await
     }
 
-    pub async fn store_key_bundle<T: SignalDatabase>(
+    pub async fn store_key_bundle(
         &self,
-        db: &T,
         data: &DevicePreKeyBundle,
         address: &ProtocolAddress,
     ) -> Result<()> {
-        db.store_key_bundle(data, address).await
+        self.db.store_key_bundle(data, address).await
     }
 }

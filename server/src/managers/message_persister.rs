@@ -22,7 +22,7 @@ pub struct MessagePersister<T: SignalDatabase, U: MessageAvailabilityListener + 
     run_flag: Arc<AtomicBool>,
     message_cache: MessageCache<U>,
     messages_manager: MessagesManager<T, U>,
-    account_manager: AccountManager,
+    account_manager: AccountManager<T>,
     db: T,
 }
 
@@ -55,7 +55,7 @@ where
         message_manager: MessagesManager<T, U>,
         message_cache: MessageCache<U>,
         db: T,
-        account_manager: AccountManager,
+        account_manager: AccountManager<T>,
     ) -> MessagePersister<T, U> {
         let mut message_persister = MessagePersister {
             run_flag: Arc::new(AtomicBool::new(true)),
@@ -113,10 +113,7 @@ where
                         anyhow::anyhow!("Failed to parse service id from queue: {}", queue_key)
                     })?;
 
-                let account = self
-                    .account_manager
-                    .get_account(&self.db, &service_id)
-                    .await?;
+                let account = self.account_manager.get_account(&service_id).await?;
 
                 let device_id = device_id.parse::<u32>()?;
 
@@ -275,7 +272,7 @@ mod message_persister_tests {
         let db = database_connect().await;
         let cache = MessageCache::connect();
         let mut message_manager = MessagesManager::new(db.clone(), cache.clone());
-        let account_manager = AccountManager::new();
+        let account_manager = AccountManager::new(db.clone());
 
         let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
 

@@ -74,7 +74,8 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
         authenticated_device.account().clone()
     } else {
         state
-            .get_account(destination_identifier)
+            .account_manager
+            .get_account(&destination_identifier)
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::NOT_FOUND,
@@ -149,32 +150,35 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
     auth_header: BasicAuthorizationHeader,
     registration: RegistrationRequest,
 ) -> Result<RegistrationResponse, ApiError> {
-    println!("Register client");
     let time_now = time_now()?;
     let phone_number = auth_header.username();
     let hash = SaltedTokenHash::generate_for(auth_header.password())?;
+    let device = Device::builder()
+        .device_id(1.into())
+        .name(registration.account_attributes().name.clone())
+        .last_seen(time_now)
+        .created(time_now)
+        .auth_token(hash.hash())
+        .salt(hash.salt())
+        .registration_id(registration.account_attributes().registration_id)
+        .pni_registration_id(registration.account_attributes().pni_registration_id)
+        .build();
+
+    let device_pre_key_bundle = DevicePreKeyBundle {
+        aci_signed_pre_key: registration.aci_signed_pre_key().to_owned(),
+        pni_signed_pre_key: registration.pni_signed_pre_key().to_owned(),
+        aci_pq_pre_key: registration.aci_pq_last_resort_pre_key().to_owned(),
+        pni_pq_pre_key: registration.pni_pq_last_resort_pre_key().to_owned(),
+    };
+
     let account = state
+        .account_manager
         .create_account(
             phone_number.to_owned(),
             registration.account_attributes().to_owned(),
             registration.aci_identity_key().to_owned(),
             registration.pni_identity_key().to_owned(),
-            Device::builder()
-                .device_id(1.into())
-                .name(registration.account_attributes().name.clone())
-                .last_seen(time_now)
-                .created(time_now)
-                .auth_token(hash.hash())
-                .salt(hash.salt())
-                .registration_id(registration.account_attributes().registration_id)
-                .pni_registration_id(registration.account_attributes().pni_registration_id)
-                .build(),
-            DevicePreKeyBundle {
-                aci_signed_pre_key: registration.aci_signed_pre_key().to_owned(),
-                pni_signed_pre_key: registration.pni_signed_pre_key().to_owned(),
-                aci_pq_pre_key: registration.aci_pq_last_resort_pre_key().to_owned(),
-                pni_pq_pre_key: registration.pni_pq_last_resort_pre_key().to_owned(),
-            },
+            device.clone(),
         )
         .await
         .map_err(|err| ApiError {
@@ -182,12 +186,18 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
         })?;
 
-    let aci = account.aci().into();
-    let pni = account.pni().into();
+    let aci = account.aci();
+    let address = ProtocolAddress::new(aci.service_id_string(), device.device_id());
+
+    // Store key bunde for new account
+    state
+        .account_manager
+        .store_key_bundle(&device_pre_key_bundle, &address)
+        .await;
 
     Ok(RegistrationResponse {
-        uuid: aci,
-        pni,
+        uuid: aci.into(),
+        pni: account.pni().into(),
         number: phone_number.to_owned(),
         username_hash: None,
         storage_capable: true,

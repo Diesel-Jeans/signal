@@ -69,12 +69,20 @@ use chrono::Utc;
     "v1/storage/auth",
 ];*/
 
-#[derive(Debug)]
-pub struct WebSocketManager<T: WSStream + Debug, U: SignalDatabase> {
+#[derive(Default, Debug)]
+pub struct WebSocketManager<T, U>
+where
+    T: WSStream + Debug,
+    U: SignalDatabase,
+{
     sockets: ConnectionMap<T, U>,
 }
 
-impl<T: WSStream + Debug, U: SignalDatabase> Clone for WebSocketManager<T, U> {
+impl<T, U> Clone for WebSocketManager<T, U>
+where
+    T: WSStream + Debug,
+    U: SignalDatabase,
+{
     fn clone(&self) -> Self {
         Self {
             sockets: Arc::clone(&self.sockets),
@@ -82,16 +90,10 @@ impl<T: WSStream + Debug, U: SignalDatabase> Clone for WebSocketManager<T, U> {
     }
 }
 
-impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static> Default
-    for WebSocketManager<T, U>
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static>
-    WebSocketManager<T, U>
+impl<T, U> WebSocketManager<T, U>
+where
+    T: WSStream + Debug + Send + 'static,
+    U: SignalDatabase + Send + 'static,
 {
     pub fn new() -> Self {
         Self {
