@@ -28,7 +28,7 @@ use axum::extract::ws::WebSocket;
 pub struct SignalServerState<T: SignalDatabase, U: WSStream + Debug> {
     pub db: T,
     pub websocket_manager: WebSocketManager<U, T>,
-    pub account_manager: AccountManager,
+    pub account_manager: AccountManager<T>,
     pub key_manager: KeyManager,
     pub message_manager: MessagesManager<T, WebSocketConnection<U, T>>,
     pub message_cache: MessageCache<WebSocketConnection<U, T>>,
@@ -63,7 +63,7 @@ impl SignalServerState<MockDB, MockSocket> {
         Self {
             db: db.clone(),
             websocket_manager: WebSocketManager::new(),
-            account_manager: AccountManager::new(),
+            account_manager: AccountManager::new(db.clone()),
             key_manager: KeyManager::new(),
             message_manager: MessagesManager::new(db, cache.clone()),
             message_cache: cache,
@@ -78,7 +78,7 @@ impl SignalServerState<PostgresDatabase, WebSocket> {
         Self {
             db: db.clone(),
             websocket_manager: WebSocketManager::new(),
-            account_manager: AccountManager::new(),
+            account_manager: AccountManager::new(db.clone()),
             key_manager: KeyManager::new(),
             message_manager: MessagesManager::new(db, cache.clone()),
             message_cache: cache,
@@ -87,83 +87,6 @@ impl SignalServerState<PostgresDatabase, WebSocket> {
 }
 
 impl<T: SignalDatabase, U: WSStream + Debug> SignalServerState<T, U> {
-    pub async fn create_account(
-        &self,
-        phone_number: String,
-        account_attributes: AccountAttributes,
-        aci_identity_key: IdentityKey,
-        pni_identity_key: IdentityKey,
-        primary_device: Device,
-        key_bundle: DevicePreKeyBundle,
-    ) -> Result<Account> {
-        let device_id = primary_device.device_id();
-        let account = self
-            .account_manager
-            .create_account(
-                &self.db,
-                phone_number,
-                account_attributes,
-                aci_identity_key,
-                pni_identity_key,
-                primary_device,
-            )
-            .await?;
-
-        self.store_key_bundle(
-            &key_bundle,
-            &ProtocolAddress::new(account.pni().service_id_string(), device_id),
-        )
-        .await?;
-
-        Ok(account)
-    }
-
-    pub async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
-        self.account_manager.get_account(&self.db, service_id).await
-    }
-
-    pub async fn update_account_aci(&self, service_id: &ServiceId, new_aci: Aci) -> Result<()> {
-        self.account_manager
-            .update_account_aci(&self.db, service_id, new_aci)
-            .await
-    }
-
-    pub async fn update_account_pni(&self, service_id: &ServiceId, new_pni: Pni) -> Result<()> {
-        self.account_manager
-            .update_account_pni(&self.db, service_id, new_pni)
-            .await
-    }
-
-    pub async fn delete_account(&self, service_id: &ServiceId) -> Result<()> {
-        self.account_manager
-            .delete_account(&self.db, service_id)
-            .await
-    }
-
-    pub async fn add_device(&self, service_id: &ServiceId, device: &Device) -> Result<()> {
-        self.account_manager
-            .add_device(&self.db, service_id, device)
-            .await
-    }
-
-    pub async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
-        self.account_manager
-            .get_all_devices(&self.db, service_id)
-            .await
-    }
-
-    pub async fn get_device(&self, service_id: &ServiceId, device_id: u32) -> Result<Device> {
-        self.account_manager
-            .get_device(&self.db, service_id, device_id)
-            .await
-    }
-
-    pub async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()> {
-        self.account_manager
-            .delete_device(&self.db, service_id, device_id)
-            .await
-    }
-
     pub async fn handle_put_keys(
         &self,
         auth_device: &AuthenticatedDevice,
@@ -204,9 +127,7 @@ impl<T: SignalDatabase, U: WSStream + Debug> SignalServerState<T, U> {
         data: &DevicePreKeyBundle,
         address: &ProtocolAddress,
     ) -> Result<()> {
-        self.account_manager
-            .store_key_bundle(&self.db, data, address)
-            .await
+        self.account_manager.store_key_bundle(data, address).await
     }
 
     pub async fn get_one_time_pre_key_count(&self, service_id: &ServiceId) -> Result<(u32, u32)> {
