@@ -90,7 +90,7 @@ impl Account {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, bon::Builder)]
 pub struct Device {
     device_id: DeviceId,
     name: String,
@@ -101,29 +101,7 @@ pub struct Device {
     registration_id: u32,
     pni_registration_id: u32,
 }
-#[allow(clippy::too_many_arguments)]
 impl Device {
-    pub fn new(
-        device_id: DeviceId,
-        name: String,
-        last_seen: u64,
-        created: u64,
-        auth_token: String,
-        salt: String,
-        registration_id: u32,
-        pni_registration_id: u32,
-    ) -> Self {
-        Self {
-            device_id,
-            name,
-            last_seen,
-            created,
-            auth_token,
-            salt,
-            registration_id,
-            pni_registration_id,
-        }
-    }
     pub fn device_id(&self) -> DeviceId {
         self.device_id
     }

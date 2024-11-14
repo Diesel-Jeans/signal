@@ -38,20 +38,20 @@ use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
-    state: SignalServerState<T, U>,
-    authenticated_device: AuthenticatedDevice,
-    destination_identifier: ServiceId,
+pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
+    state: &SignalServerState<T, U>,
+    authenticated_device: &AuthenticatedDevice,
+    destination_identifier: &ServiceId,
     payload: SignalMessages,
 ) -> Result<SendMessageResponse, ApiError> {
-    if destination_identifier == authenticated_device.account().pni() {
+    if *destination_identifier == authenticated_device.account().pni() {
         return Err(ApiError {
             status_code: StatusCode::FORBIDDEN,
             message: "".to_owned(),
         });
     }
 
-    let is_sync_message = destination_identifier == authenticated_device.account().aci();
+    let is_sync_message = *destination_identifier == authenticated_device.account().aci();
     let destination: Account = if is_sync_message {
         authenticated_device.account().clone()
     } else {
@@ -94,9 +94,9 @@ async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
         message: "".to_owned(),
     })?;
 
-    payload.messages.into_iter().map(|message| {
+    for message in payload.messages {
         let mut envelope = message.to_envelope(
-            &destination_identifier,
+            destination_identifier,
             authenticated_device.account(),
             u32::from(authenticated_device.device().device_id()) as u8,
             payload.timestamp,
@@ -106,8 +106,15 @@ async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
             destination.aci().service_id_string(),
             message.destination_device_id.into(),
         );
-        state.message_manager.insert(&address, &mut envelope);
-    });
+        state
+            .message_manager
+            .insert(&address, &mut envelope)
+            .await
+            .map_err(|_| ApiError {
+                status_code: StatusCode::INTERNAL_SERVER_ERROR,
+                message: "Could not insert message".to_owned(),
+            })?;
+    }
 
     let needs_sync = !is_sync_message && authenticated_device.account().devices().len() > 1;
     Ok(SendMessageResponse { needs_sync })
@@ -128,16 +135,16 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
     let time_now = time_now()?;
     let phone_number = auth_header.username();
     let hash = SaltedTokenHash::generate_for(auth_header.password())?;
-    let device = Device::new(
-        1.into(),                                              // Device id
-        registration.account_attributes().name.clone(),        // Name
-        time_now,                                              // Last seen
-        time_now,                                              // Created
-        hash.hash(),                                           // Token
-        hash.salt(),                                           // Salt
-        registration.account_attributes().registration_id,     // Registration id
-        registration.account_attributes().pni_registration_id, // Pni registration id
-    );
+    let device = Device::builder()
+        .device_id(1.into())
+        .name(registration.account_attributes().name.clone())
+        .last_seen(time_now)
+        .created(time_now)
+        .auth_token(hash.hash())
+        .salt(hash.salt())
+        .registration_id(registration.account_attributes().registration_id)
+        .pni_registration_id(registration.account_attributes().pni_registration_id)
+        .build();
 
     let device_pre_key_bundle = DevicePreKeyBundle {
         aci_signed_pre_key: registration.aci_signed_pre_key().to_owned(),
@@ -146,7 +153,6 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
         pni_pq_pre_key: registration.pni_pq_last_resort_pre_key().to_owned(),
     };
 
-    // Create and get new account
     let account = state
         .account_manager
         .create_account(
@@ -245,10 +251,16 @@ async fn put_messages_endpoint(
     State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
     authenticated_device: AuthenticatedDevice,
     Path(destination_identifier): Path<String>,
-    Json(payload): Json<SignalMessages>, // TODO: Multiple messages could be sent at one time
+    Json(payload): Json<SignalMessages>,
 ) -> Result<SendMessageResponse, ApiError> {
     let destination_identifier = parse_service_id(destination_identifier)?;
-    handle_put_messages(state, authenticated_device, destination_identifier, payload).await
+    handle_put_messages(
+        &state,
+        &authenticated_device,
+        &destination_identifier,
+        payload,
+    )
+    .await
 }
 
 /// Handler for the GET v1/messages endpoint.
@@ -358,9 +370,9 @@ async fn create_websocket_endpoint(
                 UserIdentity::AuthenticatedDevice(authenticated_device.into()),
                 addr,
                 sender,
-                state,
+                state.clone(),
             );
-            wmgr.insert(ws, receiver).await
+            wmgr.insert(ws, receiver).await;
         }
     })
 }

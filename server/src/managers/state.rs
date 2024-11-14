@@ -55,9 +55,16 @@ where
     }
 }
 
-impl SignalServerState<PostgresDatabase, WebSocket> {
+impl<U> SignalServerState<PostgresDatabase, U>
+where
+    U: WSStream + Debug,
+{
     pub async fn new() -> Self {
-        let db = PostgresDatabase::connect("DATABASE_URL".to_string()).await;
+        SignalServerState::connect("DATABASE_URL").await
+    }
+
+    pub async fn connect(connection_str: &str) -> Self {
+        let db = PostgresDatabase::connect(connection_str.to_string()).await;
         let cache = MessageCache::connect();
         Self {
             db: db.clone(),

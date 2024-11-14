@@ -200,7 +200,7 @@ pub(crate) mod test {
     async fn test_insert() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone());
+            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -212,7 +212,7 @@ pub(crate) mod test {
     async fn test_none_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone());
+            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -232,7 +232,7 @@ pub(crate) mod test {
     async fn test_error_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone());
+            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -252,7 +252,7 @@ pub(crate) mod test {
     async fn test_close_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone());
+            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -272,7 +272,7 @@ pub(crate) mod test {
     async fn test_text_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone());
+            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -299,7 +299,7 @@ pub(crate) mod test {
     async fn test_binary_decode_error() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone());
+            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -348,7 +348,7 @@ pub(crate) mod test {
 
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone());
+            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
