@@ -12,7 +12,7 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::task::LocalSpawnExt;
 use futures_util::{FutureExt, SinkExt, StreamExt, TryStream, TryStreamExt};
 use libsignal_protocol::InMemSignalProtocolStore;
-use native_tls::{Certificate, TlsConnector as NativeTlsConnector, TlsStream};
+use native_tls::{Certificate, TlsConnector as NativeTlsConnector};
 use prost::encoding::hash_map::encode;
 use prost::Message as ProstMessage;
 use serde::de::IntoDeserializer;
