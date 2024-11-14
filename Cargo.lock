@@ -4306,10 +4306,8 @@ dependencies = [
  "futures-util",
  "log",
  "native-tls",
- "rustls",
  "tokio",
  "tokio-native-tls",
- "tokio-rustls",
  "tungstenite",
 ]
 
