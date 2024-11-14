@@ -15,29 +15,20 @@ pub async fn get_ec_pni_signed_pre_key(
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
-            SELECT
-                key_id, public_key, signature
-            FROM
-                pni_signed_pre_key_store
-            WHERE
-                key_id = $1 AND
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        devices
-                    WHERE
-                        owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $2 OR
-                                pni = $2
-                        ) AND
-                        device_id = $3
-                )
+            SELECT key_id, 
+                   public_key, 
+                   signature
+            FROM pni_signed_pre_key_store
+            WHERE key_id = $1 
+              AND owner =
+                    (SELECT id
+                     FROM devices
+                     WHERE owner =
+                            (SELECT id
+                             FROM accounts
+                             WHERE aci = $2 
+                                OR pni = $2) 
+                       AND device_id = $3)
             "#,
         key_id.to_string(),
         service_id.service_id_string(),
@@ -61,29 +52,20 @@ pub async fn get_aci_signed_pre_key(
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
-            SELECT
-                key_id, public_key, signature
-            FROM
-                aci_signed_pre_key_store
-            WHERE
-                key_id = $1 AND
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        devices
-                    WHERE
-                        owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $2 OR
-                                pni = $2
-                        ) AND
-                        device_id = $3
-                )
+            SELECT key_id, 
+                   public_key, 
+                   signature
+            FROM aci_signed_pre_key_store
+            WHERE key_id = $1 
+              AND owner =
+                    (SELECT id
+                     FROM devices
+                     WHERE owner =
+                            (SELECT id
+                            FROM accounts
+                            WHERE aci = $2 
+                               OR pni = $2) 
+                       AND device_id = $3)
             "#,
         key_id.to_string(),
         service_id.service_id_string(),
@@ -107,29 +89,20 @@ pub async fn get_pni_signed_pre_key(
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
-            SELECT
-                key_id, public_key, signature
-            FROM
-                pni_signed_pre_key_store
-            WHERE
-                key_id = $1 AND
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        devices
-                    WHERE
-                        owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $2 OR
-                                pni = $2
-                        ) AND
-                        device_id = $3
-                )
+            SELECT key_id, 
+                   public_key, 
+                   signature
+            FROM pni_signed_pre_key_store
+            WHERE key_id = $1 
+              AND owner =
+                    (SELECT id
+                     FROM devices
+                     WHERE owner =
+                            (SELECT id
+                             FROM accounts
+                             WHERE aci = $2 
+                                OR pni = $2) 
+                       AND device_id = $3)
             "#,
         key_id.to_string(),
         service_id.service_id_string(),
@@ -153,29 +126,20 @@ pub async fn get_pq_aci_signed_pre_key(
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
-            SELECT
-                key_id, public_key, signature
-            FROM
-                aci_pq_last_resort_pre_key_store
-            WHERE
-                key_id = $1 AND
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        devices
-                    WHERE
-                        owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $2 OR
-                                pni = $2
-                        ) AND
-                        device_id = $3
-                )
+            SELECT key_id, 
+                   public_key, 
+                   signature
+            FROM aci_pq_last_resort_pre_key_store
+            WHERE key_id = $1 
+              AND owner =
+                    (SELECT id
+                     FROM devices
+                     WHERE owner =
+                            (SELECT id
+                             FROM accounts
+                             WHERE aci = $2 
+                                OR pni = $2) 
+                       AND device_id = $3)
             "#,
         key_id.to_string(),
         service_id.service_id_string(),
@@ -198,29 +162,20 @@ pub async fn get_pq_pni_signed_pre_key(
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
-            SELECT
-                key_id, public_key, signature
-            FROM
-                pni_pq_last_resort_pre_key_store
-            WHERE
-                key_id = $1 AND
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        devices
-                    WHERE
-                        owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $2 OR
-                                pni = $2
-                        ) AND
-                        device_id = $3
-                )
+            SELECT key_id, 
+                   public_key, 
+                   signature
+            FROM pni_pq_last_resort_pre_key_store
+            WHERE key_id = $1 
+              AND owner =
+                    (SELECT id
+                     FROM devices
+                     WHERE owner =
+                            (SELECT id
+                             FROM accounts
+                             WHERE aci = $2
+                                OR pni = $2) 
+                       AND device_id = $3)
             "#,
         key_id.to_string(),
         service_id.service_id_string(),
@@ -244,29 +199,20 @@ pub async fn get_pq_last_resort_pre_key(
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
-            SELECT
-                key_id, public_key, signature
-            FROM
-                pni_pq_last_resort_pre_key_store
-            WHERE
-                key_id = $1 AND
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        devices
-                    WHERE
-                        owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $2 OR
-                                pni = $2
-                        ) AND
-                        device_id = $3
-                )
+            SELECT key_id, 
+                   public_key, 
+                   signature
+            FROM pni_pq_last_resort_pre_key_store
+            WHERE key_id = $1 
+              AND owner =
+                    (SELECT id
+                     FROM devices
+                     WHERE owner =
+                            (SELECT id
+                             FROM accounts
+                             WHERE aci = $2 
+                                OR pni = $2) 
+                       AND device_id = $3)
             "#,
         key_id.to_string(),
         service_id.service_id_string(),

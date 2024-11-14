@@ -77,10 +77,8 @@ impl SignalDatabase for PostgresDatabase {
         let data = bincode::serialize(account.account_attr())?;
         match sqlx::query!(
             r#"
-            INSERT INTO
-                accounts (aci, pni, aci_identity_key, pni_identity_key, phone_number, account_attr)
-            VALUES
-                ($1, $2, $3, $4, $5, $6)
+            INSERT INTO accounts (aci, pni, aci_identity_key, pni_identity_key, phone_number, account_attr)
+            VALUES ($1, $2, $3, $4, $5, $6)
             "#,
             account.aci().service_id_string(),
             account.pni().service_id_string(),
@@ -105,13 +103,15 @@ impl SignalDatabase for PostgresDatabase {
 
         sqlx::query!(
             r#"
-            SELECT 
-                aci, pni, aci_identity_key, pni_identity_key, phone_number, account_attr
-            FROM
-                accounts
-            WHERE
-                aci = $1 OR
-                pni = $1
+            SELECT aci, 
+                   pni, 
+                   aci_identity_key, 
+                   pni_identity_key, 
+                   phone_number, 
+                   account_attr
+            FROM accounts
+            WHERE aci = $1 
+               OR pni = $1
             "#,
             service_id.service_id_string(),
         )
@@ -134,13 +134,10 @@ impl SignalDatabase for PostgresDatabase {
     async fn update_account_aci(&self, service_id: &ServiceId, new_aci: Aci) -> Result<()> {
         sqlx::query!(
             r#"
-            UPDATE
-                accounts
-            SET
-                aci = $2
-            WHERE
-                aci = $1 OR
-                pni = $1
+            UPDATE accounts
+            SET aci = $2
+            WHERE aci = $1 
+               OR pni = $1
             "#,
             service_id.service_id_string(),
             new_aci.service_id_string()
@@ -154,13 +151,10 @@ impl SignalDatabase for PostgresDatabase {
     async fn update_account_pni(&self, service_id: &ServiceId, new_pni: Pni) -> Result<()> {
         sqlx::query!(
             r#"
-            UPDATE
-                accounts
-            SET
-                pni = $2
-            WHERE
-                aci = $1 OR
-                pni = $1
+            UPDATE accounts
+            SET pni = $2
+            WHERE aci = $1 
+               OR pni = $1
             "#,
             service_id.service_id_string(),
             new_pni.service_id_string()
@@ -174,11 +168,10 @@ impl SignalDatabase for PostgresDatabase {
     async fn delete_account(&self, service_id: &ServiceId) -> Result<()> {
         sqlx::query!(
             r#"
-            DELETE FROM
-                accounts
-            WHERE
-                aci = $1 OR
-                pni = $1
+            DELETE 
+            FROM accounts
+            WHERE aci = $1 
+               OR pni = $1
             "#,
             service_id.service_id_string()
         )
@@ -191,15 +184,17 @@ impl SignalDatabase for PostgresDatabase {
     async fn add_device(&self, service_id: &ServiceId, device: &Device) -> Result<()> {
         sqlx::query!(
             r#"
-            INSERT INTO
-                devices (owner, device_id, name, auth_token, salt, registration_id, pni_registration_id)
-            SELECT
-                id, $2, $3, $4, $5, $6, $7
-            FROM
-                accounts
-            WHERE
-                aci = $1 OR
-                pni = $1
+            INSERT INTO devices (owner, device_id, name, auth_token, salt, registration_id, pni_registration_id)
+            SELECT id, 
+                   $2, 
+                   $3, 
+                   $4, 
+                   $5, 
+                   $6, 
+                   $7
+            FROM accounts
+            WHERE aci = $1 
+               OR pni = $1
             "#,
             service_id.service_id_string(),
             device.device_id().to_string(),
@@ -218,25 +213,18 @@ impl SignalDatabase for PostgresDatabase {
     async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
         sqlx::query!(
             r#"
-            SELECT
-                device_id,
-                name,
-                auth_token,
-                salt,
-                registration_id,
-                pni_registration_id
-            FROM
-                devices
-            WHERE
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        accounts
-                    WHERE
-                        aci = $1 OR
-                        pni = $1
-                )
+            SELECT device_id,
+                   name,
+                   auth_token,
+                   salt,
+                   registration_id,
+                   pni_registration_id
+            FROM devices
+            WHERE owner =
+                    (SELECT id
+                     FROM accounts
+                     WHERE aci = $1 
+                        OR pni = $1)
             "#,
             service_id.service_id_string()
         )
@@ -264,26 +252,19 @@ impl SignalDatabase for PostgresDatabase {
     async fn get_device(&self, service_id: &ServiceId, device_id: u32) -> Result<Device> {
         sqlx::query!(
             r#"
-            SELECT
-                device_id,
-                name,
-                auth_token,
-                salt,
-                registration_id,
-                pni_registration_id
-            FROM
-                devices
-            WHERE
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        accounts
-                    WHERE
-                        aci = $1 OR
-                        pni = $1
-                )
-                AND device_id = $2
+            SELECT device_id,
+                   name,
+                   auth_token,
+                   salt,
+                   registration_id,
+                   pni_registration_id
+            FROM devices
+            WHERE owner =
+                    (SELECT id
+                     FROM accounts
+                     WHERE aci = $1 
+                        OR pni = $1)
+              AND device_id = $2
             "#,
             service_id.service_id_string(),
             device_id.to_string()
@@ -308,19 +289,14 @@ impl SignalDatabase for PostgresDatabase {
     async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()> {
         sqlx::query!(
             r#"
-            DELETE FROM
-                devices
-            WHERE
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        accounts
-                    WHERE
-                        aci = $1 OR
-                        pni = $1
-                )
-                AND device_id = $2
+            DELETE 
+            FROM devices
+            WHERE owner =
+                    (SELECT id
+                     FROM accounts
+                     WHERE aci = $1 
+                        OR pni = $1)
+             AND device_id = $2
             "#,
             service_id.service_id_string(),
             device_id.to_string()
@@ -340,23 +316,16 @@ impl SignalDatabase for PostgresDatabase {
             let data = bincode::serialize(&msg)?;
             sqlx::query!(
                 r#"
-                INSERT INTO
-                    msq_queue (receiver, msg)
-                SELECT
-                    id, $1
-                FROM
-                    devices
-                WHERE
-                    owner = (
-                        SELECT
-                            id
-                        FROM
-                            accounts
-                        WHERE
-                            aci = $2 OR
-                            pni = $2
-                    )
-                    AND device_id = $3
+                INSERT INTO msq_queue (receiver, msg)
+                SELECT id, 
+                       $1
+                FROM devices
+                WHERE owner = 
+                        (SELECT id
+                         FROM accounts
+                         WHERE aci = $2 
+                            OR pni = $2)
+                  AND device_id = $3
                 "#,
                 data,
                 address.name(),
@@ -373,22 +342,15 @@ impl SignalDatabase for PostgresDatabase {
     async fn pop_msg_queue(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
         sqlx::query!(
             r#"
-            SELECT
-                msq_queue.msg
-            FROM
-                msq_queue
-                INNER JOIN devices on devices.id = msq_queue.receiver
-            WHERE
-                devices.owner = (
-                    SELECT
-                        id
-                    FROM
-                        accounts
-                    WHERE
-                        aci = $1 OR
-                        pni = $1
-                )
-                AND devices.device_id = $2
+            SELECT msq_queue.msg
+            FROM msq_queue
+            INNER JOIN devices on devices.id = msq_queue.receiver
+            WHERE devices.owner = 
+                    (SELECT id
+                     FROM accounts
+                     WHERE aci = $1 
+                        OR pni = $1)
+              AND devices.device_id = $2
             "#,
             address.name(),
             address.device_id().to_string()
@@ -443,30 +405,23 @@ impl SignalDatabase for PostgresDatabase {
 
         sqlx::query!(
             r#"
-            INSERT INTO
-                device_keys (owner, aci_signed_pre_key, pni_signed_pre_key, aci_pq_last_resort_pre_key, pni_pq_last_resort_pre_key)
-            SELECT
-                devices.id, 
-                aci_signed_pre_key_store.id, 
-                pni_signed_pre_key_store.id, 
-                aci_pq_last_resort_pre_key_store.id, 
-                pni_pq_last_resort_pre_key_store.id
-            FROM
-                devices 
-                INNER JOIN aci_signed_pre_key_store ON aci_signed_pre_key_store.owner = devices.id
-                INNER JOIN pni_signed_pre_key_store ON pni_signed_pre_key_store.owner = devices.id
-                INNER JOIN aci_pq_last_resort_pre_key_store ON aci_pq_last_resort_pre_key_store.owner = devices.id
-                INNER JOIN pni_pq_last_resort_pre_key_store ON pni_pq_last_resort_pre_key_store.owner = devices.id
-            WHERE
-                devices.owner = (
-                    SELECT
-                        id
-                    FROM
-                        accounts
-                    WHERE
-                        aci = $1 OR
-                        pni = $1
-                ) AND devices.device_id = $2
+            INSERT INTO device_keys (owner, aci_signed_pre_key, pni_signed_pre_key, aci_pq_last_resort_pre_key, pni_pq_last_resort_pre_key)
+            SELECT devices.id, 
+                   aci_signed_pre_key_store.id, 
+                   pni_signed_pre_key_store.id, 
+                   aci_pq_last_resort_pre_key_store.id, 
+                   pni_pq_last_resort_pre_key_store.id
+            FROM devices 
+            INNER JOIN aci_signed_pre_key_store ON aci_signed_pre_key_store.owner = devices.id
+            INNER JOIN pni_signed_pre_key_store ON pni_signed_pre_key_store.owner = devices.id
+            INNER JOIN aci_pq_last_resort_pre_key_store ON aci_pq_last_resort_pre_key_store.owner = devices.id
+            INNER JOIN pni_pq_last_resort_pre_key_store ON pni_pq_last_resort_pre_key_store.owner = devices.id
+            WHERE devices.owner = 
+                    (SELECT id
+                     FROM accounts
+                     WHERE aci = $1 
+                        OR pni = $1) 
+              AND devices.device_id = $2
             "#,
             address.name(),
             address.device_id().to_string(),
@@ -480,37 +435,30 @@ impl SignalDatabase for PostgresDatabase {
     async fn get_key_bundle(&self, address: &ProtocolAddress) -> Result<DevicePreKeyBundle> {
         sqlx::query!(
             r#"
-            SELECT
-                aci_signed_pre_key_store.key_id AS aspk_id,
-                aci_signed_pre_key_store.public_key AS aspk,
-                aci_signed_pre_key_store.signature AS aspk_sig,
-                pni_signed_pre_key_store.key_id AS pspk_id,
-                pni_signed_pre_key_store.public_key AS pspk,
-                pni_signed_pre_key_store.signature AS pspk_sig,
-                aci_pq_last_resort_pre_key_store.key_id AS apqlrpk_id,
-                aci_pq_last_resort_pre_key_store.public_key AS apqlrpk,
-                aci_pq_last_resort_pre_key_store.signature AS apqlrpk_sig,
-                pni_pq_last_resort_pre_key_store.key_id AS ppqlrpk_id,
-                pni_pq_last_resort_pre_key_store.public_key AS ppqlrpk,
-                pni_pq_last_resort_pre_key_store.signature AS ppqlrpk_sig
-            FROM
-                device_keys
-                INNER JOIN aci_signed_pre_key_store ON aci_signed_pre_key_store.id = device_keys.aci_signed_pre_key
-                INNER JOIN pni_signed_pre_key_store ON pni_signed_pre_key_store.id = device_keys.pni_signed_pre_key
-                INNER JOIN aci_pq_last_resort_pre_key_store ON aci_pq_last_resort_pre_key_store.id = device_keys.aci_pq_last_resort_pre_key
-                INNER JOIN pni_pq_last_resort_pre_key_store ON pni_pq_last_resort_pre_key_store.id = device_keys.pni_pq_last_resort_pre_key
-                INNER JOIN devices ON devices.id = device_keys.owner
-            WHERE
-                devices.owner = (
-                    SELECT
-                        id
-                    FROM
-                        accounts
-                    WHERE
-                        aci = $1 OR
-                        pni = $1
-                )
-                AND devices.device_id = $2
+            SELECT aci_signed_pre_key_store.key_id AS aspk_id,
+                   aci_signed_pre_key_store.public_key AS aspk,
+                   aci_signed_pre_key_store.signature AS aspk_sig,
+                   pni_signed_pre_key_store.key_id AS pspk_id,
+                   pni_signed_pre_key_store.public_key AS pspk,
+                   pni_signed_pre_key_store.signature AS pspk_sig,
+                   aci_pq_last_resort_pre_key_store.key_id AS apqlrpk_id,
+                   aci_pq_last_resort_pre_key_store.public_key AS apqlrpk,
+                   aci_pq_last_resort_pre_key_store.signature AS apqlrpk_sig,
+                   pni_pq_last_resort_pre_key_store.key_id AS ppqlrpk_id,
+                   pni_pq_last_resort_pre_key_store.public_key AS ppqlrpk,
+                   pni_pq_last_resort_pre_key_store.signature AS ppqlrpk_sig
+            FROM device_keys
+            INNER JOIN aci_signed_pre_key_store ON aci_signed_pre_key_store.id = device_keys.aci_signed_pre_key
+            INNER JOIN pni_signed_pre_key_store ON pni_signed_pre_key_store.id = device_keys.pni_signed_pre_key
+            INNER JOIN aci_pq_last_resort_pre_key_store ON aci_pq_last_resort_pre_key_store.id = device_keys.aci_pq_last_resort_pre_key
+            INNER JOIN pni_pq_last_resort_pre_key_store ON pni_pq_last_resort_pre_key_store.id = device_keys.pni_pq_last_resort_pre_key
+            INNER JOIN devices ON devices.id = device_keys.owner
+            WHERE devices.owner = 
+                    (SELECT id
+                    FROM accounts
+                    WHERE aci = $1 
+                       OR pni = $1)
+              AND devices.device_id = $2
             "#,
             address.name(),
             address.device_id().to_string(),
@@ -547,21 +495,14 @@ impl SignalDatabase for PostgresDatabase {
     async fn get_one_time_ec_pre_key_count(&self, service_id: &ServiceId) -> Result<u32> {
         sqlx::query!(
             r#"
-            SELECT
-                COUNT(*) AS pre_key_count
-            FROM
-                one_time_ec_pre_key_store
-                INNER JOIN devices on devices.id = one_time_ec_pre_key_store.owner
-            WHERE
-                devices.owner = (
-                    SELECT
-                        id
-                    FROM
-                        accounts
-                    WHERE
-                        aci = $1 OR
-                        pni = $1
-                )
+            SELECT COUNT(*) AS pre_key_count
+            FROM one_time_ec_pre_key_store
+            INNER JOIN devices on devices.id = one_time_ec_pre_key_store.owner
+            WHERE devices.owner = 
+            (SELECT id
+             FROM accounts
+             WHERE aci = $1 
+                OR pni = $1)
             "#,
             service_id.service_id_string()
         )
@@ -574,21 +515,14 @@ impl SignalDatabase for PostgresDatabase {
     async fn get_one_time_pq_pre_key_count(&self, service_id: &ServiceId) -> Result<u32> {
         sqlx::query!(
             r#"
-            SELECT
-                COUNT(*) AS pre_key_count
-            FROM
-                one_time_pq_pre_key_store
-                INNER JOIN devices on devices.id = one_time_pq_pre_key_store.owner
-            WHERE
-                devices.owner = (
-                    SELECT
-                        id
-                    FROM
-                        accounts
-                    WHERE
-                        aci = $1 OR
-                        pni = $1
-                )
+            SELECT COUNT(*) AS pre_key_count
+            FROM one_time_pq_pre_key_store
+            INNER JOIN devices on devices.id = one_time_pq_pre_key_store.owner
+            WHERE devices.owner = 
+                    (SELECT id
+                     FROM accounts
+                     WHERE aci = $1 
+                        OR pni = $1)
             "#,
             service_id.service_id_string()
         )
@@ -606,26 +540,17 @@ impl SignalDatabase for PostgresDatabase {
         let mut tx = self.pool.begin().await?;
         sqlx::query!(
             r#"
-            DELETE FROM 
-                one_time_ec_pre_key_store
-            WHERE 
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        devices
-                    WHERE
-                        owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $1 OR
-                                pni = $1
-                        )
-                        AND devices.device_id = $2
-                )
+            DELETE 
+            FROM one_time_ec_pre_key_store
+            WHERE owner = 
+                (SELECT id
+                 FROM devices
+                 WHERE owner = 
+                         (SELECT id
+                         FROM accounts
+                         WHERE aci = $1 
+                            OR pni = $1)
+                   AND devices.device_id = $2)
             "#,
             owner.name(),
             owner.device_id().to_string(),
@@ -636,23 +561,17 @@ impl SignalDatabase for PostgresDatabase {
         for otpk in otpks {
             match sqlx::query!(
                 r#"
-                INSERT INTO
-                    one_time_ec_pre_key_store (owner, key_id, public_key)
-                SELECT
-                    id, $3, $4
-                FROM
-                    devices
-                WHERE
-                    owner = (
-                        SELECT
-                            id
-                        FROM
-                            accounts
-                        WHERE
-                            aci = $1 OR
-                            pni = $1
-                    )
-                    AND devices.device_id = $2
+                INSERT INTO one_time_ec_pre_key_store (owner, key_id, public_key)
+                SELECT id, 
+                       $3, 
+                       $4
+                FROM devices
+                WHERE owner = 
+                        (SELECT id
+                         FROM accounts
+                         WHERE aci = $1 
+                            OR pni = $1)
+                  AND devices.device_id = $2
                 "#,
                 owner.name(),
                 owner.device_id().to_string(),
@@ -680,26 +599,17 @@ impl SignalDatabase for PostgresDatabase {
         let mut tx = self.pool.begin().await?;
         sqlx::query!(
             r#"
-            DELETE FROM 
-                one_time_pq_pre_key_store
-            WHERE 
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        devices
-                    WHERE
-                        owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $1 OR
-                                pni = $1
-                        )
-                        AND devices.device_id = $2
-                )
+            DELETE 
+            FROM one_time_pq_pre_key_store
+            WHERE owner = 
+                (SELECT id
+                 FROM devices
+                 WHERE owner = 
+                        (SELECT id
+                         FROM accounts
+                         WHERE aci = $1 
+                            OR pni = $1)
+                   AND devices.device_id = $2)
             "#,
             owner.name(),
             owner.device_id().to_string(),
@@ -710,23 +620,18 @@ impl SignalDatabase for PostgresDatabase {
         for otpk in otpks {
             match sqlx::query!(
                 r#"
-                INSERT INTO
-                    one_time_pq_pre_key_store (owner, key_id, public_key, signature)
-                SELECT
-                    id, $3, $4, $5
-                FROM
-                    devices
-                WHERE
-                    owner = (
-                        SELECT
-                            id
-                        FROM
-                            accounts
-                        WHERE
-                            aci = $1 OR
-                            pni = $1
-                    )
-                    AND devices.device_id = $2
+                INSERT INTO one_time_pq_pre_key_store (owner, key_id, public_key, signature)
+                SELECT id, 
+                       $3, 
+                       $4, 
+                       $5
+                FROM devices
+                WHERE owner = 
+                        (SELECT id
+                         FROM accounts
+                         WHERE aci = $1 
+                            OR pni = $1)
+                  AND devices.device_id = $2
                 "#,
                 owner.name(),
                 owner.device_id().to_string(),
@@ -750,35 +655,24 @@ impl SignalDatabase for PostgresDatabase {
     async fn get_one_time_ec_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadPreKey> {
         sqlx::query!(
             r#"
-            WITH key AS (
-                DELETE FROM
-                    one_time_ec_pre_key_store
-                WHERE id IN (
-                    SELECT
-                        one_time_ec_pre_key_store.id
-                    FROM
-                        one_time_ec_pre_key_store
-                        INNER JOIN devices on devices.id = one_time_ec_pre_key_store.owner
-                    WHERE
-                        devices.owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $1 OR
-                                pni = $1
-                        )
-                        AND devices.device_id = $2
-                    LIMIT 1
-                )
-                RETURNING
-                    key_id, public_key
-            )
-            SELECT
-                key_id, public_key
-            FROM
-                key
+            WITH key AS
+                (DELETE 
+                 FROM one_time_ec_pre_key_store
+                 WHERE id IN 
+                    (SELECT one_time_ec_pre_key_store.id
+                     FROM one_time_ec_pre_key_store
+                     INNER JOIN devices on devices.id = one_time_ec_pre_key_store.owner
+                     WHERE devices.owner =
+                            (SELECT id
+                             FROM accounts
+                             WHERE aci = $1 
+                                OR pni = $1)
+                       AND devices.device_id = $2
+                     LIMIT 1) RETURNING key_id, 
+                                        public_key)
+            SELECT key_id, 
+                   public_key
+            FROM key
             "#,
             owner.name(),
             owner.device_id().to_string()
@@ -795,35 +689,26 @@ impl SignalDatabase for PostgresDatabase {
     async fn get_one_time_pq_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadSignedPreKey> {
         sqlx::query!(
             r#"
-            WITH key AS (
-                DELETE FROM
-                    one_time_pq_pre_key_store
-                WHERE id IN (
-                    SELECT
-                        one_time_pq_pre_key_store.id
-                    FROM
-                        one_time_pq_pre_key_store
-                        INNER JOIN devices on devices.id = one_time_pq_pre_key_store.owner
-                    WHERE
-                        devices.owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $1 OR
-                                pni = $1
-                        )
-                        AND devices.device_id = $2
-                    LIMIT 1
-                )
-                RETURNING
-                    key_id, public_key, signature
-            )
-            SELECT
-                key_id, public_key, signature
-            FROM
-                key
+            WITH key AS 
+            (DELETE 
+             FROM one_time_pq_pre_key_store
+             WHERE id IN
+                (SELECT one_time_pq_pre_key_store.id
+                 FROM one_time_pq_pre_key_store
+                 INNER JOIN devices on devices.id = one_time_pq_pre_key_store.owner
+                 WHERE devices.owner =
+                        (SELECT id
+                         FROM accounts
+                         WHERE aci = $1 
+                            OR pni = $1)
+                   AND devices.device_id = $2
+                 LIMIT 1) RETURNING key_id, 
+                                    public_key, 
+                                    signature)
+            SELECT key_id, 
+                   public_key, 
+                   signature
+            FROM key
             "#,
             owner.name(),
             owner.device_id().to_string()
@@ -841,22 +726,15 @@ impl SignalDatabase for PostgresDatabase {
     async fn count_messages(&self, address: &ProtocolAddress) -> Result<u32> {
         let result = sqlx::query!(
             r#"
-            SELECT
-                COUNT(*)
-            FROM
-                msq_queue
-                INNER JOIN devices on devices.id = msq_queue.receiver
-            WHERE
-                devices.owner = (
-                    SELECT
-                        id
-                    FROM
-                        accounts
-                    WHERE
-                        aci = $1 OR
-                        pni = $1
-                )
-                AND devices.device_id = $2
+            SELECT COUNT(*)
+            FROM msq_queue
+            INNER JOIN devices on devices.id = msq_queue.receiver
+            WHERE devices.owner =
+                    (SELECT id
+                     FROM accounts
+                     WHERE aci = $1 
+                        OR pni = $1)
+              AND devices.device_id = $2
             "#,
             address.name(),
             address.device_id().to_string()
@@ -870,22 +748,15 @@ impl SignalDatabase for PostgresDatabase {
     async fn get_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
         sqlx::query!(
             r#"
-            SELECT
-                msq_queue.msg
-            FROM
-                msq_queue
-                INNER JOIN devices on devices.id = msq_queue.receiver
-            WHERE
-                devices.owner = (
-                    SELECT
-                        id
-                    FROM
-                        accounts
-                    WHERE
-                        aci = $1 OR
-                        pni = $1
-                )
-                AND devices.device_id = $2
+            SELECT msq_queue.msg
+            FROM msq_queue
+            INNER JOIN devices on devices.id = msq_queue.receiver
+            WHERE devices.owner =
+                    (SELECT id
+                     FROM accounts
+                     WHERE aci = $1 
+                        OR pni = $1)
+              AND devices.device_id = $2
             "#,
             address.name(),
             address.device_id().to_string()
@@ -902,24 +773,15 @@ impl SignalDatabase for PostgresDatabase {
     async fn delete_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
         sqlx::query!(
             r#"
-            DELETE FROM
-                msq_queue
-            USING 
-                devices
-            WHERE 
-                devices.id = msq_queue.receiver
-            AND
-                devices.owner = (
-                    SELECT
-                        id
-                    FROM
-                        accounts
-                    WHERE
-                        aci = $1 OR
-                        pni = $1
-                )
-                AND devices.device_id = $2
-                RETURNING msq_queue.msg
+            DELETE 
+            FROM msq_queue USING devices
+            WHERE devices.id = msq_queue.receiver
+              AND devices.owner =
+                    (SELECT id
+                     FROM accounts
+                     WHERE aci = $1 
+                        OR pni = $1)
+              AND devices.device_id = $2 RETURNING msq_queue.msg
             "#,
             address.name(),
             address.device_id().to_string()
@@ -941,25 +803,24 @@ async fn store_aci_signed_pre_key(
 ) -> Result<()> {
     sqlx::query!(
         r#"
-        INSERT INTO
-            aci_signed_pre_key_store (owner, key_id, public_key, signature)
-        SELECT 
-            id, $3, $4, $5
-        FROM 
-            devices
-        WHERE 
-            owner = (
-                SELECT 
-                    id
-                FROM 
-                    accounts
-                WHERE 
-                    aci = $1 OR
-                    pni = $1
-            ) AND 
-            device_id = $2
-        ON CONFLICT (key_id, owner)
-            DO UPDATE SET key_id = $3, public_key = $4, signature = $5;
+        INSERT INTO aci_signed_pre_key_store (owner, key_id, public_key, signature)
+        SELECT id, 
+               $3, 
+               $4, 
+               $5
+        FROM devices
+        WHERE owner =
+                (SELECT id
+                 FROM accounts
+                 WHERE aci = $1 
+                    OR pni = $1) 
+          AND device_id = $2 ON CONFLICT (key_id, 
+                                            owner) DO 
+            
+            UPDATE 
+            SET key_id = $3, 
+                public_key = $4, 
+                signature = $5;
         "#,
         address.name(),
         address.device_id().to_string(),
@@ -980,25 +841,24 @@ async fn store_pni_signed_pre_key(
 ) -> Result<()> {
     sqlx::query!(
         r#"
-        INSERT INTO
-            pni_signed_pre_key_store (owner, key_id, public_key, signature)
-        SELECT 
-            id, $3, $4, $5
-        FROM 
-            devices
-        WHERE 
-            owner = (
-                SELECT 
-                    id
-                FROM 
-                    accounts
-                WHERE 
-                    aci = $1 OR
-                    pni = $1
-            ) AND 
-            device_id = $2
-        ON CONFLICT (key_id, owner)
-            DO UPDATE SET key_id = $3, public_key = $4, signature = $5;
+        INSERT INTO pni_signed_pre_key_store (owner, key_id, public_key, signature)
+        SELECT id, 
+               $3, 
+               $4, 
+               $5
+        FROM devices
+        WHERE owner =
+                (SELECT id
+                 FROM accounts
+                 WHERE aci = $1 
+                    OR pni = $1) 
+          AND device_id = $2 ON CONFLICT (key_id, 
+                                            owner) DO
+
+            UPDATE 
+            SET key_id = $3, 
+                public_key = $4, 
+                signature = $5;
         "#,
         address.name(),
         address.device_id().to_string(),
@@ -1019,25 +879,24 @@ async fn store_pq_aci_signed_pre_key(
 ) -> Result<()> {
     sqlx::query!(
         r#"
-        INSERT INTO
-            aci_pq_last_resort_pre_key_store (owner, key_id, public_key, signature)
-        SELECT 
-            id, $3, $4, $5
-        FROM 
-            devices
-        WHERE 
-            owner = (
-                SELECT 
-                    id
-                FROM 
-                    accounts
-                WHERE 
-                    aci = $1 OR
-                    pni = $1
-            ) AND 
-            device_id = $2
-        ON CONFLICT (key_id, owner)
-            DO UPDATE SET key_id = $3, public_key = $4, signature = $5;
+        INSERT INTO aci_pq_last_resort_pre_key_store (owner, key_id, public_key, signature)
+        SELECT id, 
+               $3, 
+               $4, 
+               $5
+        FROM devices
+        WHERE owner =
+                (SELECT id
+                 FROM accounts
+                 WHERE aci = $1 
+                    OR pni = $1) 
+          AND device_id = $2 ON CONFLICT (key_id, 
+                                            owner) DO
+            
+            UPDATE 
+            SET key_id = $3, 
+                public_key = $4, 
+                signature = $5;
 
         "#,
         address.name(),
@@ -1059,25 +918,24 @@ async fn store_pq_pni_signed_pre_key(
 ) -> Result<()> {
     sqlx::query!(
         r#"
-        INSERT INTO
-            pni_pq_last_resort_pre_key_store (owner, key_id, public_key, signature)
-        SELECT 
-            id, $3, $4, $5
-        FROM 
-            devices
-        WHERE 
-            owner = (
-                SELECT 
-                    id
-                FROM 
-                    accounts
-                WHERE 
-                    aci = $1 OR
-                    pni = $1
-            ) AND 
-            device_id = $2
-        ON CONFLICT (key_id, owner)
-            DO UPDATE SET key_id = $3, public_key = $4, signature = $5;
+        INSERT INTO pni_pq_last_resort_pre_key_store (owner, key_id, public_key, signature)
+        SELECT id, 
+               $3, 
+               $4, 
+               $5
+        FROM devices
+        WHERE owner =
+                (SELECT id
+                 FROM accounts
+                 WHERE aci = $1 
+                    OR pni = $1) 
+          AND device_id = $2 ON CONFLICT (key_id, 
+                                            owner) DO
+            
+            UPDATE 
+            SET key_id = $3, 
+            public_key = $4, 
+            signature = $5;
 
         "#,
         address.name(),
