@@ -38,7 +38,11 @@ where
     pub message_cache: MessageCache<WebSocketConnection<U, T>>,
 }
 
-impl<T: SignalDatabase + Clone, U: WSStream + Debug> Clone for SignalServerState<T, U> {
+impl<T, U> Clone for SignalServerState<T, U>
+where
+    T: SignalDatabase + Clone,
+    U: WSStream + Debug,
+{
     fn clone(&self) -> Self {
         Self {
             db: self.db.clone(),
