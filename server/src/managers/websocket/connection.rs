@@ -1,13 +1,15 @@
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use axum::http::{StatusCode, Uri};
 use axum::Error;
 use common::signal_protobuf::{
     envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
+use core::panic;
 use futures_util::io::Close;
 use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
-use libsignal_core::{DeviceId, ProtocolAddress, ServiceIdKind};
+use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -19,10 +21,14 @@ use crate::account::AuthenticatedDevice;
 use crate::database::SignalDatabase;
 use crate::managers::state::SignalServerState;
 use crate::message_cache::MessageAvailabilityListener;
+use crate::server::handle_put_messages;
 
 use prost::{bytes::Bytes, Message as PMessage};
 
-use super::net_helper::{create_request, current_millis, generate_req_id};
+use super::net_helper::{
+    create_request, create_response, current_millis, generate_req_id, unpack_messages,
+    PathExtractor,
+};
 use super::wsstream::WSStream;
 
 #[derive(Debug)]
@@ -177,8 +183,103 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
         res.is_ok()
     }
 
-    pub async fn on_receive(&mut self, proto_message: WebSocketMessage) {
-        todo!()
+    pub async fn on_receive(&mut self, proto_message: WebSocketMessage) -> Result<(), String> {
+        match proto_message.r#type() {
+            web_socket_message::Type::Unknown => self.close_reason(1007, "Badly formatted").await,
+            web_socket_message::Type::Request => match proto_message.request {
+                Some(req) => self.handle_request(req).await,
+                None => self.close_reason(1007, "Badly formatted").await,
+            },
+            web_socket_message::Type::Response => match proto_message.response {
+                Some(res) => self.handle_response(res).await,
+                None => self.close_reason(1007, "Badly formatted").await,
+            },
+        }
+    }
+
+    async fn handle_request(&mut self, request_msq: WebSocketRequestMessage) -> Result<(), String> {
+        let msq_id = request_msq.id.ok_or("Request id was not present")?;
+        if !request_msq.path().starts_with("/v1/messages") {
+            self.send(Message::Binary(
+                create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
+                    .encode_to_vec(),
+            ))
+            .await;
+            return Err(format!("Incorret path: {}", request_msq.path()));
+        }
+
+        let res = match &self.identity {
+            UserIdentity::ProtocolAddress(protocol_address) => {
+                todo!("We do not support protocal addresses yet!")
+            }
+            UserIdentity::AuthenticatedDevice(authenticated_device) => {
+                handle_put_messages(
+                    &self.state,
+                    authenticated_device,
+                    &ServiceId::parse_from_service_id_string(
+                        PathExtractor::new(
+                            &request_msq
+                                .path()
+                                .parse::<Uri>()
+                                .map_err(|err| err.to_string())?,
+                        )?
+                        .extract::<String>(2)?
+                        .as_str(),
+                    )
+                    .ok_or("Could not parse uri to service id")?,
+                    unpack_messages(request_msq.body.clone())?,
+                )
+                .await
+            }
+        };
+        match res {
+            Ok(res) => self
+                .send(Message::Binary(
+                    create_response(
+                        msq_id,
+                        StatusCode::OK,
+                        vec![],
+                        Some(serde_json::to_string(&res).unwrap().as_bytes().to_vec()),
+                    )?
+                    .encode_to_vec(),
+                ))
+                .await
+                .map_err(|err| err.to_string()),
+            Err(err) => {
+                println!("{:?}", err);
+                self.send(Message::Binary(
+                    create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
+                        .encode_to_vec(),
+                ))
+                .await
+                .map_err(|err| err.to_string())
+            }
+        }
+    }
+
+    async fn handle_response(
+        &mut self,
+        response_msq: WebSocketResponseMessage,
+    ) -> Result<(), String> {
+        self.pending_requests
+            .remove(&response_msq.id.ok_or("Request id was not present")?);
+
+        // TODO: Figure out how to get the ID of the message so the message manager can delete it.
+        // The ID is on the envelope and is called server_guid
+
+        /*self.state
+        .message_manager
+        .delete(
+            &self.protocol_address(),
+            vec![response_msq
+                .message
+                .ok_or("Response message was not present")?],
+        )
+        .await
+        .map(|_| ())
+        .map_err(|err| err.to_string())*/
+
+        Ok(())
     }
 }
 
@@ -227,19 +328,30 @@ pub type ConnectionMap<T, U> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnecti
 
 #[cfg(test)]
 pub(crate) mod test {
+    use core::panic;
     use std::net::SocketAddr;
     use std::str::FromStr;
 
+    use crate::account::{Account, AuthenticatedDevice, Device};
+    use crate::database::SignalDatabase;
     use crate::managers::state::SignalServerState;
-    use crate::managers::websocket::net_helper::{self, unpack_messages};
+    use crate::managers::websocket::net_helper::{
+        self, create_request, create_response, unpack_messages,
+    };
+    use crate::postgres::PostgresDatabase;
     use crate::test_utils::message_cache::teardown;
     use crate::test_utils::websocket::{MockDB, MockSocket};
+    use axum::http::StatusCode;
+    use base64::Engine;
     use common::signal_protobuf::{envelope, Envelope, WebSocketMessage, WebSocketRequestMessage};
-    use common::web_api::SignalMessages;
+    use common::web_api::{AccountAttributes, DeviceCapabilities, SignalMessages};
     use futures_util::stream::SplitStream;
     use futures_util::StreamExt;
-    use libsignal_core::ProtocolAddress;
+    use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
+    use libsignal_protocol::{IdentityKey, PublicKey};
+    use serial_test::serial;
     use sha2::digest::consts::False;
+    use tokio::time::sleep;
     use uuid::Uuid;
 
     use super::{ClientConnection, UserIdentity, WSStream, WebSocketConnection};
@@ -248,6 +360,7 @@ pub(crate) mod test {
 
     use tokio::sync::mpsc::{channel, Receiver, Sender};
 
+    use base64::prelude::{Engine as _, BASE64_STANDARD};
     use prost::{bytes::Bytes, Message as PMessage};
     use std::sync::Arc;
     use std::time::Duration;
@@ -272,13 +385,13 @@ pub(crate) mod test {
         }
     }
 
-    pub fn create_connection(
+    pub async fn create_connection<DB: SignalDatabase>(
         name: &str,
         device_id: u32,
         socket_addr: &str,
-        state: SignalServerState<MockDB, MockSocket>,
+        state: SignalServerState<DB, MockSocket>,
     ) -> (
-        WebSocketConnection<MockSocket, MockDB>,
+        WebSocketConnection<MockSocket, DB>,
         Sender<Result<Message, Error>>,
         Receiver<Message>,
         SplitStream<MockSocket>,
@@ -286,9 +399,47 @@ pub(crate) mod test {
         let (mock, sender, mut receiver) = MockSocket::new();
         let (msender, mreceiver) = mock.split();
         let who = SocketAddr::from_str(socket_addr).unwrap();
-        let paddr = ProtocolAddress::new(name.to_string(), device_id.into());
-        let ws =
-            WebSocketConnection::new(UserIdentity::ProtocolAddress(paddr), who, msender, state);
+        let device = Device::builder()
+            .device_id(0.into())
+            .name("bob_device".to_string())
+            .last_seen(0)
+            .created(0)
+            .auth_token("bob_token".into())
+            .salt("bob_salt".into())
+            .registration_id(1)
+            .pni_registration_id(1)
+            .build();
+        let mut identity_key = [0u8; 33];
+        identity_key[0] = 5;
+        let account = Account::new(
+            Pni::from(Uuid::new_v4()),
+            device.clone(),
+            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
+            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
+            Uuid::new_v4().to_string(),
+            AccountAttributes {
+                name: "name".into(),
+                fetches_messages: true,
+                registration_id: 1,
+                pni_registration_id: 1,
+                capabilities: DeviceCapabilities {
+                    storage: true,
+                    transfer: true,
+                    payment_activation: true,
+                    delete_sync: true,
+                    versioned_expiration_timer: true,
+                },
+                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
+            },
+        );
+        let auth_device = AuthenticatedDevice::new(account, device);
+
+        let ws = WebSocketConnection::new(
+            UserIdentity::AuthenticatedDevice(Box::new(auth_device)),
+            who,
+            msender,
+            state,
+        );
 
         (ws, sender, receiver, mreceiver)
     }
@@ -297,7 +448,7 @@ pub(crate) mod test {
     async fn test_send_and_recv() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (mut client, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4042", state);
+            create_connection("a", 1, "127.0.0.1:4042", state).await;
 
         sender.send(Ok(Message::Text("hello".to_string()))).await;
 
@@ -321,7 +472,7 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_close() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut client, _, _, _) = create_connection("a", 1, "127.0.0.1:4042", state);
+        let (mut client, _, _, _) = create_connection("a", 1, "127.0.0.1:4042", state).await;
 
         assert!(client.is_active());
         client.close().await;
@@ -331,7 +482,8 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_close_reason() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut client, _, mut receiver, _) = create_connection("a", 1, "127.0.0.1:4042", state);
+        let (mut client, _, mut receiver, _) =
+            create_connection("a", 1, "127.0.0.1:4042", state).await;
         assert!(client.is_active());
         client.close_reason(666, "test").await;
         assert!(!client.is_active());
@@ -350,7 +502,7 @@ pub(crate) mod test {
     async fn test_send_message() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (mut client, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4042", state);
+            create_connection("a", 1, "127.0.0.1:4042", state).await;
         let env = mock_envelope();
         client.send_message(env.clone()).await;
 
@@ -374,10 +526,159 @@ pub(crate) mod test {
         assert!(req.body.unwrap() == env.encode_to_vec());
     }
 
-    #[ignore = "Not implemented"]
     #[tokio::test]
-    async fn test_on_receive() {
-        todo!()
+    async fn test_on_receive_request() {
+        let mut state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver, mut mreceiver) =
+            create_connection("a", 1, "127.0.0.1:4042", state).await;
+        let msg = r#"
+        {
+            "messages":[
+                {
+                    "type": 1,
+                    "destinationDeviceId": 3,
+                    "destinationRegistrationId": 22,
+                    "content": "aGVsbG8="
+                }
+            ],
+            "online": false,
+            "urgent": true,
+            "timestamp": 1730217386
+        }
+        "#
+        .as_bytes()
+        .to_vec();
+
+        client
+            .on_receive(create_request(
+                1,
+                "PUT",
+                &format!("/v1/messages/{}", client.protocol_address().name()),
+                vec![],
+                Some(msg),
+            ))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_on_receive_response() {
+        let mut state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver, mut mreceiver) =
+            create_connection("a", 1, "127.0.0.1:4042", state).await;
+        client
+            .on_receive(create_response(1, StatusCode::OK, vec![], None).unwrap())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_alice_and_bob() {
+        let mut state =
+            SignalServerState::<PostgresDatabase, MockSocket>::connect("DATABASE_URL_TEST").await;
+        let (mut alice, alice_sender, mut alice_receiver, mut alice_mreceiver) =
+            create_connection("a", 1, "127.0.0.1:4042", state.clone()).await;
+        let (mut bob, bob_sender, mut bob_receiver, mut bob_mreceiver) =
+            create_connection("a", 1, "127.0.0.1:4042", state.clone()).await;
+
+        match &alice.identity {
+            UserIdentity::ProtocolAddress(protocol_address) => todo!(),
+            UserIdentity::AuthenticatedDevice(authenticated_device) => state
+                .db
+                .add_account(authenticated_device.account())
+                .await
+                .unwrap(),
+        }
+        match &bob.identity {
+            UserIdentity::ProtocolAddress(protocol_address) => todo!(),
+            UserIdentity::AuthenticatedDevice(authenticated_device) => state
+                .db
+                .add_account(authenticated_device.account())
+                .await
+                .unwrap(),
+        }
+
+        let alice_address = alice.protocol_address();
+        let bob_address = bob.protocol_address();
+
+        state.websocket_manager.insert(alice, alice_mreceiver).await;
+        state.websocket_manager.insert(bob, bob_mreceiver).await;
+        let ws_alice = state.websocket_manager.get(&alice_address).await.unwrap();
+        let ws_bob = state.websocket_manager.get(&bob_address).await.unwrap();
+        state
+            .message_manager
+            .add_message_availability_listener(&alice_address, ws_alice)
+            .await;
+        state
+            .message_manager
+            .add_message_availability_listener(&bob_address, ws_bob)
+            .await;
+
+        let sending_msg = r#"
+        {
+            "messages":[
+                {
+                    "type": 1,
+                    "destinationDeviceId": 0,
+                    "destinationRegistrationId": 1,
+                    "content": "aGVsbG8="
+                }
+            ],
+            "online": false,
+            "urgent": true,
+            "timestamp": 1730217386
+        }
+        "#
+        .as_bytes()
+        .to_vec();
+
+        alice_sender
+            .send(Ok(Message::Binary(
+                create_request(
+                    0,
+                    "PUT",
+                    &format!("/v1/messages/{}", bob_address.name()),
+                    vec![],
+                    Some(sending_msg),
+                )
+                .encode_to_vec(),
+            )))
+            .await;
+
+        sleep(Duration::from_millis(1000));
+
+        let res = bob_receiver.recv().await;
+
+        state
+            .db
+            .delete_account(&ServiceId::Aci(
+                Aci::parse_from_service_id_string(alice_address.name()).unwrap(),
+            ))
+            .await
+            .unwrap();
+        state
+            .db
+            .delete_account(&ServiceId::Aci(
+                Aci::parse_from_service_id_string(bob_address.name()).unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        let message = match res {
+            Some(Message::Binary(msg)) => WebSocketMessage::decode(Bytes::from(msg)).unwrap(),
+            _ => panic!("Expected binary message"),
+        };
+
+        assert_eq!(
+            BASE64_STANDARD.encode(
+                Envelope::decode(Bytes::from(message.request.unwrap().body.unwrap()))
+                    .unwrap()
+                    .content
+                    .unwrap()
+            ),
+            "aGVsbG8="
+        );
     }
 
     // this is more of a integration test and should maybe be somewhere else
@@ -389,7 +690,8 @@ pub(crate) mod test {
             1,
             "127.0.0.1:4043",
             state.clone(),
-        );
+        )
+        .await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;

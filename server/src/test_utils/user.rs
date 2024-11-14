@@ -31,16 +31,16 @@ pub fn new_account() -> Account {
     )
 }
 pub fn new_device() -> Device {
-    Device::new(
-        StdRng::from_entropy().gen::<u32>().into(),
-        "device".into(),
-        0,
-        0,
-        "bob_token".into(),
-        "bob_salt".into(),
-        StdRng::from_entropy().gen::<u32>().into(),
-        StdRng::from_entropy().gen::<u32>().into(),
-    )
+    Device::builder()
+        .device_id(StdRng::from_entropy().gen::<u32>().into())
+        .name("device".into())
+        .last_seen(0)
+        .created(0)
+        .auth_token("bob_token".into())
+        .salt("bob_salt".into())
+        .registration_id(StdRng::from_entropy().gen::<u32>().into())
+        .pni_registration_id(StdRng::from_entropy().gen::<u32>().into())
+        .build()
 }
 
 pub fn new_account_attributes() -> AccountAttributes {

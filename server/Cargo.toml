@@ -46,6 +46,7 @@ hyper = { version = "1.5.0", features = ["full"] }
 futures = "0.3.31"
 log = "0.4.22"
 tracing-appender = "0.2.3"
+bon = "3.0.0"
 
 [build-dependencies]
 tonic-build = "0.12.3"

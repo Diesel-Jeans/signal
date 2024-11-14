@@ -245,16 +245,16 @@ impl SignalDatabase for PostgresDatabase {
         .map(|rows| {
             rows.into_iter()
                 .map(|row| {
-                    Device::new(
-                        row.device_id.parse::<u32>().unwrap().into(),
-                        std::str::from_utf8(&row.name).unwrap().to_string(),
-                        0,
-                        0,
-                        row.auth_token,
-                        row.salt,
-                        row.registration_id.parse().unwrap(),
-                        row.pni_registration_id.parse().unwrap(),
-                    )
+                    Device::builder()
+                        .device_id(row.device_id.parse::<u32>().unwrap().into())
+                        .name(std::str::from_utf8(&row.name).unwrap().to_string())
+                        .last_seen(0)
+                        .created(0)
+                        .auth_token(row.auth_token)
+                        .salt(row.salt)
+                        .registration_id(row.registration_id.parse().unwrap())
+                        .pni_registration_id(row.pni_registration_id.parse().unwrap())
+                        .build()
                 })
                 .collect()
         })
@@ -291,16 +291,16 @@ impl SignalDatabase for PostgresDatabase {
         .fetch_one(&self.pool)
         .await
         .map(|row| {
-            Device::new(
-                row.device_id.parse::<u32>().unwrap().into(),
-                std::str::from_utf8(&row.name).unwrap().to_string(),
-                0,
-                0,
-                row.auth_token,
-                row.salt,
-                row.registration_id.parse().unwrap(),
-                row.pni_registration_id.parse().unwrap(),
-            )
+            Device::builder()
+                .device_id(row.device_id.parse::<u32>().unwrap().into())
+                .name(std::str::from_utf8(&row.name).unwrap().to_string())
+                .last_seen(0)
+                .created(0)
+                .auth_token(row.auth_token)
+                .salt(row.salt)
+                .registration_id(row.registration_id.parse().unwrap())
+                .pni_registration_id(row.pni_registration_id.parse().unwrap())
+                .build()
         })
         .map_err(|err| err.into())
     }
