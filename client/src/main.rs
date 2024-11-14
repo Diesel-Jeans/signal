@@ -15,7 +15,7 @@ mod websockets;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::dotenv()?;
-    let client = Client::register("this is NOT my phone number".to_string()).await?;
+    let client = Client::register("name", "this is NOT my phone number".to_string()).await?;
     //let client = Client::login().await?;
     Ok(())
 }

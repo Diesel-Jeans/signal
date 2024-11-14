@@ -4,38 +4,6 @@ use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKi
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
 
-/*
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Account {
-    pub aci: Option<String>,
-    pub pni: Option<String>,
-    pub auth_token: String,
-    pub identity_key: IdentityKey,
-    pub attributes: AccountAttributes,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct AccountAttributes {
-    pub aci_registration_id: i64,
-    pub pni_registration_id: i64,
-}
-
-impl Account {
-    /// Get the service id for this account.
-    ///
-    /// An account has an ACI (Account Identifier), or
-    /// a PNI (Phone Number Identifier) or both.
-    pub fn service_id(&self) -> ServiceId {
-        let id = self
-            .aci
-            .as_ref()
-            .or(self.pni.as_ref())
-            .expect("An account must have an Aci, a Pni or both");
-        ServiceId::parse_from_service_id_string(id).unwrap()
-    }
-}
-*/
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Account {
     pni: Pni,
@@ -126,22 +94,24 @@ impl Account {
 pub struct Device {
     device_id: DeviceId,
     name: String,
-    last_seen: u32,
-    created: u32,
-    auth_token: Vec<u8>,
+    last_seen: u64,
+    created: u64,
+    auth_token: String,
     salt: String,
     registration_id: u32,
+    pni_registration_id: u32,
 }
-
+#[allow(clippy::too_many_arguments)]
 impl Device {
     pub fn new(
         device_id: DeviceId,
         name: String,
-        last_seen: u32,
-        created: u32,
-        auth_token: Vec<u8>,
+        last_seen: u64,
+        created: u64,
+        auth_token: String,
         salt: String,
         registration_id: u32,
+        pni_registration_id: u32,
     ) -> Self {
         Self {
             device_id,
@@ -151,6 +121,7 @@ impl Device {
             auth_token,
             salt,
             registration_id,
+            pni_registration_id,
         }
     }
     pub fn device_id(&self) -> DeviceId {
@@ -159,14 +130,14 @@ impl Device {
     pub fn name(&self) -> &String {
         &self.name
     }
-    pub fn last_seen(&self) -> u32 {
+    pub fn last_seen(&self) -> u64 {
         self.last_seen
     }
-    pub fn created(&self) -> u32 {
+    pub fn created(&self) -> u64 {
         self.created
     }
 
-    pub fn auth_token(&self) -> &[u8] {
+    pub fn auth_token(&self) -> &String {
         &self.auth_token
     }
 
@@ -176,6 +147,10 @@ impl Device {
 
     pub fn registration_id(&self) -> u32 {
         self.registration_id
+    }
+
+    pub fn pni_registration_id(&self) -> u32 {
+        self.pni_registration_id
     }
 }
 

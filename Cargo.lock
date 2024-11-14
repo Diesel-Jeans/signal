@@ -3545,6 +3545,7 @@ dependencies = [
  "futures",
  "futures-util",
  "headers",
+ "hex",
  "hkdf 0.12.4",
  "hyper",
  "libsignal-core",

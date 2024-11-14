@@ -189,8 +189,9 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
 
 #[cfg(test)]
 mod client_presence_manager_test {
+    use crate::test_utils::message_cache::{generate_uuid, teardown};
+
     use super::*;
-    use crate::message_cache::message_cache_tests::{generate_uuid, teardown};
     use serial_test::serial;
 
     pub struct MockWebSocketConnection {
@@ -259,8 +260,9 @@ mod client_presence_manager_test {
             .await
             .evoke_handle_displacement;
 
+        teardown(connection).await;
+
         assert!(is_handle_displacement_invoked);
-        teardown(connection);
     }
 
     #[tokio::test]
@@ -307,9 +309,9 @@ mod client_presence_manager_test {
             .await
             .evoke_handle_displacement;
 
-        assert!(!is_handle_displacement_invoked);
+        teardown(connection).await;
 
-        teardown(connection);
+        assert!(!is_handle_displacement_invoked);
     }
 
     #[tokio::test]
@@ -332,8 +334,9 @@ mod client_presence_manager_test {
             .await
             .unwrap();
 
+        teardown(connection).await;
+
         assert_eq!(removed, 1);
-        teardown(connection);
     }
 
     #[tokio::test]
@@ -355,7 +358,8 @@ mod client_presence_manager_test {
             .await
             .unwrap();
 
+        teardown(connection).await;
+
         assert!(is_present);
-        teardown(connection);
     }
 }

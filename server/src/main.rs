@@ -6,13 +6,16 @@ use tracing_subscriber;
 mod account;
 mod account_authenticator;
 pub mod database;
+mod destination_device_validator;
 mod envelope;
 mod error;
 pub mod managers;
 mod message_cache;
 mod postgres;
 mod query;
+mod response;
 mod server;
+mod test_utils;
 
 #[tokio::main]
 pub async fn main() {
