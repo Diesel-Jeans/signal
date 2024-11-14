@@ -13,14 +13,14 @@ use uuid::Uuid;
 #[derive(Default, Debug, Clone)]
 pub struct AccountManager<T>
 where
-    T: SignalDatabase + Send,
+    T: SignalDatabase,
 {
     db: T,
 }
 
 impl<T> AccountManager<T>
 where
-    T: SignalDatabase + Send,
+    T: SignalDatabase,
 {
     pub fn new(db: T) -> Self {
         Self { db }

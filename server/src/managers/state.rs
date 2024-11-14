@@ -25,11 +25,15 @@ use super::{
 use axum::extract::ws::WebSocket;
 
 #[derive(Debug)]
-pub struct SignalServerState<T: SignalDatabase, U: WSStream + Debug> {
+pub struct SignalServerState<T, U>
+where
+    T: SignalDatabase,
+    U: WSStream + Debug,
+{
     pub db: T,
     pub websocket_manager: WebSocketManager<U, T>,
     pub account_manager: AccountManager<T>,
-    pub key_manager: KeyManager,
+    pub key_manager: KeyManager<T>,
     pub message_manager: MessagesManager<T, WebSocketConnection<U, T>>,
     pub message_cache: MessageCache<WebSocketConnection<U, T>>,
 }
@@ -43,6 +47,21 @@ impl<T: SignalDatabase + Clone, U: WSStream + Debug> Clone for SignalServerState
             key_manager: self.key_manager.clone(),
             message_manager: self.message_manager.clone(),
             message_cache: self.message_cache.clone(),
+        }
+    }
+}
+
+impl SignalServerState<PostgresDatabase, WebSocket> {
+    pub async fn new() -> Self {
+        let db = PostgresDatabase::connect("DATABASE_URL".to_string()).await;
+        let cache = MessageCache::connect();
+        Self {
+            db: db.clone(),
+            websocket_manager: WebSocketManager::new(),
+            account_manager: AccountManager::new(db.clone()),
+            key_manager: KeyManager::new(db.clone()),
+            message_manager: MessagesManager::new(db, cache.clone()),
+            message_cache: cache,
         }
     }
 }
@@ -64,75 +83,9 @@ impl SignalServerState<MockDB, MockSocket> {
             db: db.clone(),
             websocket_manager: WebSocketManager::new(),
             account_manager: AccountManager::new(db.clone()),
-            key_manager: KeyManager::new(),
+            key_manager: KeyManager::new(db.clone()),
             message_manager: MessagesManager::new(db, cache.clone()),
             message_cache: cache,
         }
-    }
-}
-
-impl SignalServerState<PostgresDatabase, WebSocket> {
-    pub async fn new() -> Self {
-        let db = PostgresDatabase::connect("DATABASE_URL".to_string()).await;
-        let cache = MessageCache::connect();
-        Self {
-            db: db.clone(),
-            websocket_manager: WebSocketManager::new(),
-            account_manager: AccountManager::new(db.clone()),
-            key_manager: KeyManager::new(),
-            message_manager: MessagesManager::new(db, cache.clone()),
-            message_cache: cache,
-        }
-    }
-}
-
-impl<T: SignalDatabase, U: WSStream + Debug> SignalServerState<T, U> {
-    pub async fn handle_put_keys(
-        &self,
-        auth_device: &AuthenticatedDevice,
-        bundle: SetKeyRequest,
-        kind: ServiceIdKind,
-    ) -> Result<(), ApiError> {
-        self.key_manager
-            .handle_put_keys(&self.db, auth_device, bundle, kind)
-            .await
-    }
-
-    /// * `target_device_id` - device_id must be either a [Some<DeviceId>] or [None] for all devices
-    pub async fn handle_get_keys<S: SignalDatabase>(
-        &self,
-        auth_device: &AuthenticatedDevice,
-        target_service_id: ServiceId,
-        target_device_id: Option<DeviceId>,
-    ) -> Result<PreKeyResponse, ApiError> {
-        self.key_manager
-            .handle_get_keys(&self.db, auth_device, target_service_id, target_device_id)
-            .await
-    }
-
-    pub async fn handle_post_keycheck<S: SignalDatabase>(
-        &self,
-        service_id: &ServiceId,
-        auth_device: &AuthenticatedDevice,
-        kind: ServiceIdKind,
-        usr_digest: [u8; 32],
-    ) -> Result<bool, ApiError> {
-        self.key_manager
-            .handle_post_keycheck(&self.db, auth_device, kind, usr_digest)
-            .await
-    }
-
-    pub async fn store_key_bundle(
-        &self,
-        data: &DevicePreKeyBundle,
-        address: &ProtocolAddress,
-    ) -> Result<()> {
-        self.account_manager.store_key_bundle(data, address).await
-    }
-
-    pub async fn get_one_time_pre_key_count(&self, service_id: &ServiceId) -> Result<(u32, u32)> {
-        self.key_manager
-            .get_one_time_pre_key_count(&self.db, service_id)
-            .await
     }
 }
