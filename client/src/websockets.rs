@@ -50,6 +50,7 @@ const HOUR: u32 = MINUTE * 60;
 const DAY: u32 = HOUR * 24;
 const WEEK: u32 = DAY * 7;
 const MONTH: u32 = DAY * 30;
+
 // 30 seconds + 5 seconds for closing the socket above.
 const KEEPALIVE_INTERVAL_MS: u32 = 30 * SECOND;
 
