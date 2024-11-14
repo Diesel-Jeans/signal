@@ -280,7 +280,7 @@ impl WebsocketHandler {
                         })))
                         .await;
                 })
-                    .await;
+                .await;
             }
         });
 
@@ -531,15 +531,13 @@ pub(crate) async fn open_ws_connection_to_server_as_client(
 //A bit overengineered for a single certificate, but it should be kept in case more certificates are added
 fn get_certs() -> Result<Vec<Certificate>> {
     let path = "../server/cert/rootCA.crt";
-    Ok(vec![Certificate::from_pem(
-        &fs::read(path)?,
-    )?])
+    Ok(vec![Certificate::from_pem(&fs::read(path)?)?])
 }
 
 async fn set_timeout<F, Fut>(delay_ms: u64, callback: F)
 where
     F: FnOnce() -> Fut,
-    Fut: Future<Output=()> + 'static,
+    Fut: Future<Output = ()> + 'static,
 {
     // Wait for the specified duration
     sleep(Duration::from_millis(delay_ms)).await;
@@ -578,8 +576,8 @@ mod websocket_tests {
             env::var("TEST_USERNAME").unwrap(),
             env::var("TEST_PASSWORD").unwrap(),
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         handler
             .send_text_no_response_expected(format!(
