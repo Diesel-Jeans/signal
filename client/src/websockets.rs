@@ -572,7 +572,6 @@ mod websocket_tests {
         }))
             .await
             .unwrap();
-        // let hand = handler.socket.clone();
 
         handler
             .send_text_no_response_expected(format!(
