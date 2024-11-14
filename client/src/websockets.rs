@@ -20,6 +20,7 @@ use socket2::{Domain, Socket, TcpKeepalive, Type};
 use std::collections::HashMap;
 use std::env;
 use std::fmt::{Display, Formatter};
+use std::fs;
 use std::future::{Future, IntoFuture};
 use std::net::ToSocketAddrs;
 use std::ops::Deref;
@@ -279,7 +280,7 @@ impl WebsocketHandler {
                         })))
                         .await;
                 })
-                .await;
+                    .await;
             }
         });
 
@@ -529,17 +530,16 @@ pub(crate) async fn open_ws_connection_to_server_as_client(
 
 //A bit overengineered for a single certificate, but it should be kept in case more certificates are added
 fn get_certs() -> Result<Vec<Certificate>> {
+    let path = "../server/cert/rootCA.crt";
     Ok(vec![Certificate::from_pem(
-        include_str!("../../server/cert/rootCA.crt")
-            .to_string()
-            .as_bytes(),
+        &fs::read(path)?,
     )?])
 }
 
 async fn set_timeout<F, Fut>(delay_ms: u64, callback: F)
 where
     F: FnOnce() -> Fut,
-    Fut: Future<Output = ()> + 'static,
+    Fut: Future<Output=()> + 'static,
 {
     // Wait for the specified duration
     sleep(Duration::from_millis(delay_ms)).await;
@@ -566,7 +566,7 @@ mod websocket_tests {
     use tokio::io::AsyncReadExt;
 
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore]
+    // #[ignore]
     async fn test_websocket() {
         dotenv::dotenv().ok();
         let mut handler = WebsocketHandler::try_new(
@@ -578,8 +578,8 @@ mod websocket_tests {
             env::var("TEST_USERNAME").unwrap(),
             env::var("TEST_PASSWORD").unwrap(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         handler
             .send_text_no_response_expected(format!(
