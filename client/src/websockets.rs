@@ -35,7 +35,7 @@ use tokio::sync::Mutex;
 use tokio::task::{yield_now, AbortHandle, JoinHandle, Unconstrained};
 use tokio::time::{sleep, timeout};
 use tokio::*;
-use tokio_native_tls::TlsConnector;
+use tokio_native_tls::{TlsConnector, TlsStream};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::{frame, WebSocketConfig};
 use tokio_tungstenite::tungstenite::{http, WebSocket};
@@ -65,12 +65,18 @@ const KEEPALIVE_TIMEOUT_MS: u32 = 30 * SECOND;
 const MAX_MESSAGE_SIZE: u32 = 512 * 1024;
 
 struct StreamHandler {
-    pub stream: WebSocketStream<tokio_native_tls::TlsStream<TcpStream>>,
+    pub stream: WebSocketStream<TlsStream<TcpStream>>,
 }
 
 impl StreamHandler {
-    async fn try_new() -> Result<StreamHandler> {
-        let stream = open_ws_connection_to_server_as_client().await?;
+    async fn try_new(
+        address: String,
+        port: String,
+        username: String,
+        password: String,
+    ) -> Result<StreamHandler> {
+        let stream =
+            open_ws_connection_to_server_as_client(address, port, username, password).await?;
         Ok(StreamHandler { stream })
     }
 }
@@ -89,8 +95,16 @@ pub(crate) struct WebsocketHandler {
 }
 
 impl WebsocketHandler {
-    pub async fn try_new(keepalive_options: Option<KeepAliveOptions>) -> Result<WebsocketHandler> {
-        let socket = Arc::new(Mutex::new(StreamHandler::try_new().await?));
+    pub async fn try_new(
+        keepalive_options: Option<KeepAliveOptions>,
+        address: String,
+        port: String,
+        username: String,
+        password: String,
+    ) -> Result<WebsocketHandler> {
+        let socket = Arc::new(Mutex::new(
+            StreamHandler::try_new(address, port, username, password).await?,
+        ));
         let res: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let out: Arc<Mutex<HashMap<u64, AbortHandle>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -152,7 +166,6 @@ impl WebsocketHandler {
                                 break;
                             }
                         }
-
                         Message::Binary(data) => {
                             if let Ok(wsm) = WebSocketMessage::decode(data.as_slice()) {
                                 //Types of WebSocketMessage: 0 = UNKNOWN, 1 = REQUEST, 2 = RESPONSE
@@ -194,6 +207,7 @@ impl WebsocketHandler {
     }
 
     //ONLY FOR TESTING PURPOSES!!!
+    #[cfg(test)]
     async fn send_text_no_response_expected(&mut self, text: String) -> Result<()> {
         Ok(self
             .socket
@@ -251,13 +265,9 @@ impl WebsocketHandler {
         let promise = spawn(async move {
             if self_clone.has_keepalive {
                 set_timeout(KEEPALIVE_TIMEOUT_MS.into(), || async move {
-                    self_clone
-                        .outgoing_map
-                        .lock()
-                        .await
-                        .remove(&id)
-                        .unwrap()
-                        .abort();
+                    if let Some(handle) = self_clone.outgoing_map.lock().await.remove(&id) {
+                        handle.abort();
+                    }
                     self_clone
                         .socket
                         .lock()
@@ -268,7 +278,6 @@ impl WebsocketHandler {
                             reason: "Timed out".into(),
                         })))
                         .await;
-                    //TODO: Kill the listener process
                 })
                     .await;
             }
@@ -298,7 +307,6 @@ impl WebsocketHandler {
         }
     }
 
-    //TODO: Send TLS close_notify when closing connection
     pub async fn close(&mut self, code: u16, reason: String) -> Result<()> {
         Ok(self
             .socket
@@ -406,8 +414,6 @@ impl KeepaliveHandler {
                 anyhow::bail!(e)
             }
         }
-
-        //self.reset_keepalive();
     }
 
     pub async fn set_timeout(&mut self, timeout: u32) {
@@ -447,26 +453,22 @@ impl KeepaliveHandler {
 
     pub async fn clear_timeout(&mut self) {
         for (key, handle) in self.timer_map.lock().await.iter_mut() {
-            //handle.abort();
+            handle.abort();
             self.timer_map.lock().await.remove(key);
         }
     }
 }
 
-pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocketStream<tokio_native_tls::TlsStream<TcpStream>>> {
-    let address = env::var("SERVER_ADDRESS")?;
-    let https_port = env::var("HTTPS_PORT")?;
-    let username = env::var("TEST_USERNAME")?;
-    let password = env::var("TEST_PASSWORD")?;
-
-    //TODO: Fix authentication
+pub(crate) async fn open_ws_connection_to_server_as_client(
+    address: String,
+    port: String,
+    username: String,
+    password: String,
+) -> Result<WebSocketStream<TlsStream<TcpStream>>> {
     let auth_kv_pair = format!("{}:{}", username, password);
     let auth_value = general_purpose::STANDARD.encode(&auth_kv_pair);
 
-    let ws_url = format!(
-        "wss://{}@{}:{}/v1/websocket",
-        auth_kv_pair, address, https_port
-    );
+    let ws_url = format!("wss://{}@{}:{}/v1/websocket", auth_kv_pair, address, port);
     let mut ws_req = ws_url.clone().into_client_request()?;
     let mhead = ws_req.headers_mut();
     mhead.insert(
@@ -498,7 +500,7 @@ pub(crate) async fn open_ws_connection_to_server_as_client() -> Result<WebSocket
     )?;
 
     // Resolve address and convert to SockAddr
-    let socket_address = format!("{}:{}", address.as_str(), https_port)
+    let socket_address = format!("{}:{}", address.as_str(), port)
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| anyhow::anyhow!("Failed to resolve address"))?;
@@ -564,12 +566,18 @@ mod websocket_tests {
     use tokio::io::AsyncReadExt;
 
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore]
+    // #[ignore]
     async fn test_websocket() {
         dotenv::dotenv().ok();
-        let mut handler = WebsocketHandler::try_new(Some(KeepAliveOptions {
-            path: Some("/v1/keepalive".to_string()),
-        }))
+        let mut handler = WebsocketHandler::try_new(
+            Some(KeepAliveOptions {
+                path: Some("/v1/keepalive".to_string()),
+            }),
+            env::var("SERVER_ADDRESS").unwrap(),
+            env::var("HTTPS_PORT").unwrap(),
+            env::var("TEST_USERNAME").unwrap(),
+            env::var("TEST_PASSWORD").unwrap(),
+        )
             .await
             .unwrap();
 
