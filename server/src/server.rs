@@ -97,19 +97,19 @@ async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
         &message_device_ids,
         &exclude_device_ids,
     )
-        .map_err(|_| ApiError {
-            status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "".to_owned(),
-        })?;
+    .map_err(|_| ApiError {
+        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        message: "".to_owned(),
+    })?;
     DestinationDeviceValidator::validate_registration_id_from_messages(
         &destination,
         &payload.messages,
         destination_identifier.kind() == ServiceIdKind::Pni,
     )
-        .map_err(|_| ApiError {
-            status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "".to_owned(),
-        })?;
+    .map_err(|_| ApiError {
+        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        message: "".to_owned(),
+    })?;
 
     payload.messages.into_iter().map(|message| {
         let mut envelope = message.to_envelope(
@@ -422,8 +422,8 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                 .layer(
                     TraceLayer::new_for_http()
                         .make_span_with(trace::DefaultMakeSpan::new().level(Level::DEBUG)), // .on_request(trace::DefaultOnRequest::new().level(Level::TRACE))
-                    // .on_response(trace::DefaultOnResponse::new().level(Level::TRACE))
-                    // .on_body_chunk(trace::DefaultOnBodyChunk::new()),
+                                                                                            // .on_response(trace::DefaultOnResponse::new().level(Level::TRACE))
+                                                                                            // .on_body_chunk(trace::DefaultOnBodyChunk::new()),
                 )
                 .layer(TraceLayer::new_for_grpc()),
         )

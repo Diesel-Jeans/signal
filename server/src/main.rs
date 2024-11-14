@@ -1,7 +1,5 @@
 #![allow(unused)]
 use chrono::prelude::*;
-use tracing_subscriber;
-
 mod account;
 mod account_authenticator;
 pub mod database;
