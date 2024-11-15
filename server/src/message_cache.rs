@@ -2,15 +2,13 @@
 use crate::test_utils::random_string;
 use anyhow::Result;
 use common::signal_protobuf::Envelope;
-use deadpool_redis::redis::cmd;
-use deadpool_redis::{Config, Connection, Runtime};
-use futures_util::task::SpawnExt;
-use futures_util::StreamExt;
+use deadpool_redis::{redis::cmd, Config, Connection, Runtime};
 use libsignal_core::ProtocolAddress;
-use redis::PubSubCommands;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::sync::Mutex;
 
 const PAGE_SIZE: u32 = 100;
@@ -393,12 +391,12 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
             address.device_id()
         );
         #[cfg(test)]
-        return format!(
+        format!(
             "{}user_queue::{{{}::{}}}",
             self.test_key,
             address.name(),
             address.device_id()
-        );
+        )
     }
 
     pub fn get_persist_in_progress_key(&self, address: &ProtocolAddress) -> String {

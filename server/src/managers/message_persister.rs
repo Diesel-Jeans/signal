@@ -1,17 +1,20 @@
-use crate::account::{Account, Device};
-use crate::database::SignalDatabase;
-use crate::managers::account_manager::AccountManager;
-use crate::managers::messages_manager::MessagesManager;
-use crate::message_cache::{MessageAvailabilityListener, MessageCache};
-use crate::postgres::PostgresDatabase;
-use anyhow::Result;
-use async_std::prelude::FutureExt;
+use crate::{
+    account::{Account, Device},
+    database::SignalDatabase,
+    managers::{account_manager::AccountManager, messages_manager::MessagesManager},
+    message_cache::{MessageAvailabilityListener, MessageCache},
+    postgres::PostgresDatabase,
+};
+use anyhow::{anyhow, Result};
 use common::signal_protobuf::Envelope;
 use libsignal_core::{ProtocolAddress, ServiceId};
-use std::fmt::Debug;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 const QUEUE_BATCH_LIMIT: u8 = 100;
 const MESSAGE_BATCH_LIMIT: u8 = 100;
@@ -108,7 +111,7 @@ where
 
                 let service_id =
                     ServiceId::parse_from_service_id_string(&account_id).ok_or_else(|| {
-                        anyhow::anyhow!("Failed to parse service id from queue: {}", queue_key)
+                        anyhow!("Failed to parse service id from queue: {}", queue_key)
                     })?;
 
                 let account = self.account_manager.get_account(&service_id).await?;
@@ -118,7 +121,7 @@ where
                     .devices()
                     .iter()
                     .find(|device| device.device_id() == device_id.into())
-                    .ok_or_else(|| anyhow::anyhow!("Could not find device in account."))?;
+                    .ok_or_else(|| anyhow!("Could not find device in account."))?;
 
                 self.persist_queue(&account, device).await?;
             }
@@ -161,18 +164,17 @@ where
 #[cfg(test)]
 mod message_persister_tests {
     use super::*;
-    use crate::managers::messages_manager::message_manager_tests::*;
-    use crate::postgres::PostgresDatabase;
-    use crate::test_utils::database::database_connect;
-    use crate::test_utils::message_cache::{
-        generate_envelope, generate_uuid, teardown, MockWebSocketConnection,
+    use crate::{
+        postgres::PostgresDatabase,
+        test_utils::{
+            database::database_connect,
+            message_cache::{generate_envelope, generate_uuid, teardown, MockWebSocketConnection},
+            user::new_account_and_address,
+        },
     };
-    use crate::test_utils::user::new_account;
     use redis::cmd;
-    use serial_test::serial;
     use std::time::Duration;
     use tokio::sync::Mutex;
-    use uuid::Uuid;
 
     fn time_now_secs() -> u64 {
         SystemTime::now()
@@ -288,11 +290,7 @@ mod message_persister_tests {
         let mut protocol_addresses = Vec::new();
 
         for message_time in message_times {
-            let account = new_account();
-            let protocol_address = ProtocolAddress::new(
-                account.aci().service_id_string(),
-                account.devices()[0].device_id(),
-            );
+            let (account, protocol_address) = new_account_and_address();
             accounts.push(account.clone());
             protocol_addresses.push(protocol_address.clone());
 
@@ -367,7 +365,6 @@ mod message_persister_tests {
     }
 
     #[tokio::test]
-
     async fn test_message_persister_late_msg() {
         let (
             handle_persisted_messages_evoked,
@@ -385,7 +382,6 @@ mod message_persister_tests {
     }
 
     #[tokio::test]
-
     async fn test_message_persister_new_msg() {
         let (
             handle_persisted_messages_evoked,
@@ -403,7 +399,6 @@ mod message_persister_tests {
     }
 
     #[tokio::test]
-
     async fn test_message_persister_new_and_late_msg() {
         let message_time = time_now_secs() - 600;
 

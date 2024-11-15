@@ -1,7 +1,6 @@
 pub mod authorization;
 use libsignal_protocol::{
-    DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyRecord, ServiceId,
-    SignedPreKeyRecord,
+    DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyRecord, SignedPreKeyRecord,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;

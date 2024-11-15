@@ -1,9 +1,6 @@
-use anyhow::{bail, Result};
-use std::iter::zip;
-
-use common::web_api::{SignalMessage, SignalMessages};
-
 use crate::account::Account;
+use anyhow::{bail, Result};
+use common::web_api::SignalMessage;
 
 pub struct DestinationDeviceValidator;
 

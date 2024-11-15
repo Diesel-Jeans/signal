@@ -8,11 +8,11 @@ use std::{collections::HashMap, time::SystemTime};
 
 pub async fn encrypt(
     store: &mut InMemSignalProtocolStore,
-    to: &Contact,
+    target: &Contact,
     msg: &[u8],
 ) -> HashMap<u32, Result<CiphertextMessage, SignalProtocolError>> {
     let mut msgs: HashMap<u32, Result<CiphertextMessage, SignalProtocolError>> = HashMap::new();
-    for (id, device) in to.devices.iter() {
+    for (id, device) in target.devices.iter() {
         let res = message_encrypt(
             msg,
             &device.address,

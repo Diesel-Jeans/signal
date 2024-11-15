@@ -1,31 +1,16 @@
-use std::fmt::Debug;
-
 use super::{
+    account_manager::AccountManager,
     client_presence_manager::ClientPresenceManager,
-    websocket::{connection::WebSocketConnection, wsstream::WSStream},
+    key_manager::KeyManager,
+    messages_manager::MessagesManager,
+    websocket::{
+        connection::WebSocketConnection, websocket_manager::WebSocketManager, wsstream::WSStream,
+    },
 };
 #[cfg(test)]
 use crate::test_utils::websocket::{MockDB, MockSocket};
-use crate::{
-    account::{Account, AuthenticatedDevice, Device},
-    database::SignalDatabase,
-    error::ApiError,
-    message_cache::MessageCache,
-    postgres::PostgresDatabase,
-};
-use anyhow::{Ok, Result};
-use common::web_api::{
-    AccountAttributes, DevicePreKeyBundle, PreKeyResponse, SetKeyRequest, UploadPreKey,
-    UploadSignedPreKey,
-};
-use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKind};
-use libsignal_protocol::IdentityKey;
-
-use super::{
-    account_manager::AccountManager, key_manager::KeyManager, messages_manager::MessagesManager,
-    websocket::websocket_manager::WebSocketManager,
-};
-use axum::extract::ws::WebSocket;
+use crate::{database::SignalDatabase, message_cache::MessageCache, postgres::PostgresDatabase};
+use std::fmt::Debug;
 
 #[derive(Debug)]
 pub struct SignalServerState<T, U>

@@ -69,6 +69,7 @@ impl KeyManager<SignedPreKeyRecord, SignedPreKeyId> for InMemoryKeyManager {
         &mut self,
         csprng: &mut R,
     ) -> Result<SignedPreKeyRecord, SignalProtocolError> {
+        let id = self.get_new_key_id(&PreKeyType::Signed).into();
         let signed_pre_key_pair = KeyPair::generate(csprng);
         let signature = self
             .store
@@ -76,9 +77,8 @@ impl KeyManager<SignedPreKeyRecord, SignedPreKeyId> for InMemoryKeyManager {
             .await?
             .private_key()
             .calculate_signature(&signed_pre_key_pair.public_key.serialize(), csprng)?;
-        let id = self.get_new_key_id(&PreKeyType::Signed).into();
-        let record = SignedPreKeyRecord::new(id, time_now(), &signed_pre_key_pair, &signature);
 
+        let record = SignedPreKeyRecord::new(id, time_now(), &signed_pre_key_pair, &signature);
         self.store.save_signed_pre_key(id, &record).await?;
 
         Ok(record)

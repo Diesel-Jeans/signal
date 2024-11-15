@@ -1,5 +1,5 @@
 use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
-use libsignal_protocol::{PrivateKey, PublicKey};
+use libsignal_protocol::PrivateKey;
 use rand::{
     rngs::{OsRng, StdRng},
     Rng, SeedableRng,
