@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use super::websocket::{connection::WebSocketConnection, wsstream::WSStream};
+use super::{client_presence_manager::ClientPresenceManager, websocket::{connection::WebSocketConnection, wsstream::WSStream}};
 #[cfg(test)]
 use crate::test_utils::websocket::{MockDB, MockSocket};
 use crate::{
@@ -35,6 +35,7 @@ where
     pub account_manager: AccountManager<T>,
     pub key_manager: KeyManager<T>,
     pub message_manager: MessagesManager<T, WebSocketConnection<U, T>>,
+    pub client_presence_manager: ClientPresenceManager<WebSocketConnection<U, T>>,
     pub message_cache: MessageCache<WebSocketConnection<U, T>>,
 }
 
@@ -50,6 +51,7 @@ where
             account_manager: self.account_manager.clone(),
             key_manager: self.key_manager.clone(),
             message_manager: self.message_manager.clone(),
+            client_presence_manager: self.client_presence_manager.clone(),
             message_cache: self.message_cache.clone(),
         }
     }
@@ -72,6 +74,7 @@ where
             account_manager: AccountManager::new(db.clone()),
             key_manager: KeyManager::new(db.clone()),
             message_manager: MessagesManager::new(db, cache.clone()),
+            client_presence_manager: ClientPresenceManager::connect(),
             message_cache: cache,
         }
     }
@@ -96,6 +99,7 @@ impl SignalServerState<MockDB, MockSocket> {
             account_manager: AccountManager::new(db.clone()),
             key_manager: KeyManager::new(db.clone()),
             message_manager: MessagesManager::new(db, cache.clone()),
+            client_presence_manager: ClientPresenceManager::connect(),
             message_cache: cache,
         }
     }
