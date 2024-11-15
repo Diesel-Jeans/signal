@@ -53,6 +53,14 @@ use tower_http::{
     cors::CorsLayer,
     trace::{self, TraceLayer},
 };
+use std::fmt::Debug;
+use std::io::BufRead;
+use std::net::SocketAddr;
+use std::os::linux::raw::stat;
+use std::str::FromStr;
+use tonic::service::AxumBody;
+use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::trace;
 use tracing::Level;
 
 pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
@@ -146,18 +154,10 @@ pub async fn handle_keepalive<T: SignalDatabase, U: WSStream + Debug>(
         .client_presence_manager
         .is_locally_present(&authenticated_device.get_protocol_address(ServiceIdKind::Aci))
     {
-        if let Some(connection) = state
-            .websocket_manager
-            .get(&authenticated_device.get_protocol_address(ServiceIdKind::Aci))
-            .await
-        {
-            connection
-                .lock()
-                .await
-                .close_reason(1000, "OK")
-                .await
-                .map_err(|err| err.to_string());
-        }
+        return Err(ApiError {
+            status_code: StatusCode::UNAUTHORIZED,
+            message: "Not present".to_owned(),
+        });
     }
 
     Ok(())

@@ -150,7 +150,7 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         for device_id in device_ids {
             let addr = ProtocolAddress::new(account_uuid.clone(), device_id);
             let presence_key = self.get_presence_key(&addr);
-            if self.is_locally_present(&presence_key)
+            if self.is_locally_present(&addr)
                 && self.displace_presence(&presence_key, false).await?
             {
                 presence_keys.push(presence_key.to_string());
@@ -159,18 +159,12 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         Ok(presence_keys.len() as u8)
     }
 
-    pub fn is_locally_present(&self, address: &ProtocolAddress) -> bool {
+    pub fn is_locally_present(&self, protocol_address: &ProtocolAddress) -> bool {
         self.displacement_listeners
-            .contains_key(&self.get_presence_key(&address))
+            .contains_key(&self.get_presence_key(protocol_address))
     }
 
     async fn disconnect_presence(&mut self, address: &ProtocolAddress) -> Result<u8> {
-        self.disconnect_all_presence(address.name(), vec![address.device_id()])
-            .await
-    }
-
-    #[cfg(test)]
-    pub async fn disconnect_presence_in_test(&mut self, address: &ProtocolAddress) -> Result<u8> {
         self.disconnect_all_presence(address.name(), vec![address.device_id()])
             .await
     }
@@ -191,7 +185,7 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         self.clear_presence(presence_key).await
     }
 
-    pub async fn is_present(&self, address: &ProtocolAddress) -> Result<bool> {
+    async fn is_present(&mut self, address: &ProtocolAddress) -> Result<bool> {
         let mut connection = self.pool.get().await?;
         let is_present = cmd("EXISTS")
             .arg(self.get_presence_key(address))
