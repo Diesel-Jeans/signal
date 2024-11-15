@@ -570,7 +570,7 @@ pub(crate) mod test {
     }
 
     #[tokio::test]
-    
+
     async fn test_alice_and_bob() {
         let mut state =
             SignalServerState::<PostgresDatabase, MockSocket>::connect("DATABASE_URL_TEST").await;
@@ -728,7 +728,11 @@ pub(crate) mod test {
             _ => panic!("Did not receive anything"),
         };
 
-        teardown(&state.message_cache.test_key, state.message_cache.get_connection().await.unwrap()).await;
+        teardown(
+            &state.message_cache.test_key,
+            state.message_cache.get_connection().await.unwrap(),
+        )
+        .await;
 
         assert!(msg.request.is_some());
         assert!(queue.request.is_some());

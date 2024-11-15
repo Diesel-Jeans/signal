@@ -367,7 +367,7 @@ mod message_persister_tests {
     }
 
     #[tokio::test]
-    
+
     async fn test_message_persister_late_msg() {
         let (
             handle_persisted_messages_evoked,
@@ -385,7 +385,7 @@ mod message_persister_tests {
     }
 
     #[tokio::test]
-    
+
     async fn test_message_persister_new_msg() {
         let (
             handle_persisted_messages_evoked,
@@ -403,7 +403,7 @@ mod message_persister_tests {
     }
 
     #[tokio::test]
-    
+
     async fn test_message_persister_new_and_late_msg() {
         let message_time = time_now_secs() - 600;
 

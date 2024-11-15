@@ -9,7 +9,7 @@ pub fn generate_uuid() -> String {
     guid.to_string()
 }
 
-pub async fn teardown(key: &str, mut con: deadpool_redis::Connection){
+pub async fn teardown(key: &str, mut con: deadpool_redis::Connection) {
     let pattern = format!("{}presence::*", key);
     let mut cursor = 0;
 
@@ -19,13 +19,15 @@ pub async fn teardown(key: &str, mut con: deadpool_redis::Connection){
             .arg("MATCH")
             .arg(pattern.clone())
             .query_async(&mut con)
-            .await.expect("Teardown scan failed");
+            .await
+            .expect("Teardown scan failed");
 
         if !keys.is_empty() {
             cmd("DEL")
                 .arg(&keys)
                 .query_async::<u8>(&mut con)
-                .await.expect("Teardown delete failed");
+                .await
+                .expect("Teardown delete failed");
         }
 
         cursor = new_cursor;
@@ -33,7 +35,6 @@ pub async fn teardown(key: &str, mut con: deadpool_redis::Connection){
             break;
         }
     }
-
 }
 
 pub fn generate_envelope(uuid: &str) -> Envelope {
