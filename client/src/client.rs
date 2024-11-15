@@ -7,6 +7,12 @@ use std::error::Error;
 use std::fmt::{self, format, Debug, Display};
 use surf::StatusCode;
 
+use crate::contact_manager::ContactManager;
+use crate::errors::{LoginError, RegistrationError};
+use crate::key_management::key_manager::{InMemoryKeyManager, KeyManager};
+use crate::server::{Server, ServerAPI};
+use crate::storage::{self, DeviceStorage, Storage};
+use common::signal_protobuf::WebSocketResponseMessage;
 use common::web_api::{
     AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse,
     UploadSignedPreKey,
@@ -18,19 +24,11 @@ use libsignal_protocol::{
 use rand::rngs::OsRng;
 use rand::Rng;
 
-use crate::contact_manager::ContactManager;
-use crate::errors::{LoginError, RegistrationError};
-use crate::key_management::key_manager::{InMemoryKeyManager, KeyManager};
-use crate::server::{Server, ServerAPI};
-use crate::storage::{self, DeviceStorage, Storage};
-use crate::websockets::{WebsocketHandler, SendRequestOptions};
-
 pub struct Client {
     aci: Aci,
     pni: Pni,
     contact_manager: ContactManager,
     server_api: ServerAPI,
-    ws: WebsocketHandler,
     key_manager: InMemoryKeyManager,
     storage: DeviceStorage,
 }
@@ -185,8 +183,15 @@ impl Client {
         ))
     }
 
-    pub async fn send_message(&mut self, message: &str, user_id: &str, device_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-        self.server_api.send_msg(message.into(), user_id.into(), device_id.into()).await?;
-        Ok(())
+    pub async fn send_message(
+        &mut self,
+        message: &str,
+        user_id: &str,
+        device_id: u32,
+    ) -> Result<WebSocketResponseMessage, Box<dyn std::error::Error>> {
+        Ok(self
+            .server_api
+            .send_msg(message.into(), user_id.into(), device_id)
+            .await?)
     }
 }

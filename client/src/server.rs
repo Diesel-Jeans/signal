@@ -1,6 +1,9 @@
 use crate::client::VerifiedSession;
 use crate::contact_manager::Contact;
+use crate::websockets::{KeepAliveOptions, SendRequestOptions, WebsocketHandler};
+use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
+use common::signal_protobuf::WebSocketResponseMessage;
 use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{AccountAttributes, RegistrationRequest, UploadSignedPreKey};
 use http::StatusCode;
@@ -14,9 +17,6 @@ use std::{env, fs};
 use surf::http::convert::json;
 use surf::{http, Client, Config, HttpClient, RequestBuilder, Response, Url};
 use tokio_tungstenite::connect_async;
-use crate::websockets::{WebsocketHandler, SendRequestOptions, KeepAliveOptions};
-use anyhow::Result;
-use common::signal_protobuf::WebSocketResponseMessage;
 
 const CLIENT_URI: &str = "/client";
 const MSG_URI: &str = "v1/messages";
@@ -52,11 +52,17 @@ impl Display for ReqType {
 }
 
 pub trait Server {
-    async fn connect(&mut self, username: &str, password: &str, url: &str, port: &str) -> Result<()>;
+    async fn connect(
+        &mut self,
+        username: &str,
+        password: &str,
+        url: &str,
+        port: &str,
+    ) -> Result<()>;
     async fn publish_bundle(
         &self,
         uuid: String, //registration_id: u32,
-        //bundle: &PreKeyBundle,
+                      //bundle: &PreKeyBundle,
     ) -> Result<Response, Box<dyn std::error::Error>>; // should take keys as parameter or struct
     async fn fetch_bundle(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
     async fn register_client(
@@ -75,7 +81,7 @@ pub trait Server {
         msg: String,
         user_id: String,
         device_id: u32,
-    ) -> Result<WebSocketResponseMessage, Box<dyn std::error::Error>>;
+    ) -> Result<WebSocketResponseMessage>;
     async fn update_client(
         &self,
         new_client: &Contact,
@@ -86,9 +92,24 @@ pub trait Server {
 }
 
 impl Server for ServerAPI {
-    async fn connect(&mut self, username: &str, password: &str, url: &str, port: &str) -> Result<()> {
-        let options = KeepAliveOptions { path: Some("/v1/keepalive".to_string()) };
-        let ws = WebsocketHandler::try_new(Some(options), url.into(), port.into(), username.into(), password.into()).await?;
+    async fn connect(
+        &mut self,
+        username: &str,
+        password: &str,
+        url: &str,
+        port: &str,
+    ) -> Result<()> {
+        let options = KeepAliveOptions {
+            path: Some("/v1/keepalive".to_string()),
+        };
+        let ws = WebsocketHandler::try_new(
+            Some(options),
+            url.into(),
+            port.into(),
+            username.into(),
+            password.into(),
+        )
+        .await?;
         self.ws = Some(ws);
 
         println!("connected!");
@@ -110,7 +131,7 @@ impl Server for ServerAPI {
     }
 
     async fn register_client(
-        &mut self,
+        &self,
         phone_number: String,
         password: String,
         registration_request: RegistrationRequest,
@@ -146,12 +167,15 @@ impl Server for ServerAPI {
     ) -> Result<WebSocketResponseMessage> {
         let payload = json!({
             "message": msg
-        });
+        })
+        .to_string()
+        .as_bytes()
+        .to_vec();
         let uri = format!("{}/{}.{}", MSG_URI, user_id, device_id);
-        let options = SendRequestOptions::new("PUT", uri, payload.into());
+        let options = SendRequestOptions::new("PUT", uri, payload);
 
-        if let Some(mut ws) = &self.ws {
-            let result: WebSocketResponseMessage = ws.send_request(options)?;
+        if let Some(ws) = &self.ws {
+            let result = ws.clone().send_request(options).await?;
             Ok(result)
         } else {
             anyhow::bail!("No websocket connection is active")
@@ -225,7 +249,7 @@ impl ServerAPI {
                 .delete(uri)
                 .body(surf::Body::from_json(&payload)?),
         }
-            .await?;
+        .await?;
 
         match res.status() {
             StatusCode::Ok => Ok(res),
@@ -237,7 +261,7 @@ impl ServerAPI {
                     res.body_string().await.unwrap_or("".to_owned())
                 ),
             )
-                .into()),
+            .into()),
         }
     }
 }

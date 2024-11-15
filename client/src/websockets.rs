@@ -280,7 +280,7 @@ impl WebsocketHandler {
                         })))
                         .await;
                 })
-                    .await;
+                .await;
             }
         });
 
@@ -331,8 +331,18 @@ pub struct SendRequestOptions {
     headers: Option<Vec<(String, String)>>,
 }
 impl SendRequestOptions {
-    pub fn new(verb: impl Into<String>, path: impl Into<String>, body: impl Into<Option<Vec<u8>>>) -> Self {
-        SendRequestOptions { verb, path: path.into(), body: body.into(), timeout: None, headers: None }
+    pub fn new(
+        verb: impl Into<String>,
+        path: impl Into<String>,
+        body: impl Into<Option<Vec<u8>>>,
+    ) -> Self {
+        SendRequestOptions {
+            verb: verb.into(),
+            path: path.into(),
+            body: body.into(),
+            timeout: None,
+            headers: None,
+        }
     }
 }
 
@@ -543,7 +553,7 @@ fn get_certs() -> Result<Vec<Certificate>> {
 async fn set_timeout<F, Fut>(delay_ms: u64, callback: F)
 where
     F: FnOnce() -> Fut,
-    Fut: Future<Output=()> + 'static,
+    Fut: Future<Output = ()> + 'static,
 {
     // Wait for the specified duration
     sleep(Duration::from_millis(delay_ms)).await;
@@ -582,8 +592,8 @@ mod websocket_tests {
             env::var("TEST_USERNAME").unwrap(),
             env::var("TEST_PASSWORD").unwrap(),
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         handler
             .send_text_no_response_expected(format!(
