@@ -6,7 +6,7 @@ use anyhow::{anyhow, bail, Result};
 use axum::async_trait;
 use common::{
     signal_protobuf::Envelope,
-    web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
+    web_api::{DeviceCapabilityEnum, DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
 };
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{IdentityKey, PublicKey};
@@ -74,18 +74,16 @@ impl PostgresDatabase {
 #[async_trait]
 impl SignalDatabase for PostgresDatabase {
     async fn add_account(&self, account: &Account) -> Result<()> {
-        let data = bincode::serialize(account.account_attr())?;
         match sqlx::query!(
             r#"
-            INSERT INTO accounts (aci, pni, aci_identity_key, pni_identity_key, phone_number, account_attr)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO accounts (aci, pni, aci_identity_key, pni_identity_key, phone_number)
+            VALUES ($1, $2, $3, $4, $5)
             "#,
             account.aci().service_id_string(),
             account.pni().service_id_string(),
             &*account.aci_identity_key().serialize(),
             &*account.pni_identity_key().serialize(),
             account.phone_number(),
-            data
         )
         .execute(&self.pool)
         .await
@@ -107,8 +105,7 @@ impl SignalDatabase for PostgresDatabase {
                    pni, 
                    aci_identity_key, 
                    pni_identity_key, 
-                   phone_number, 
-                   account_attr
+                   phone_number
             FROM accounts
             WHERE aci = $1 
                OR pni = $1
@@ -119,13 +116,12 @@ impl SignalDatabase for PostgresDatabase {
         .await
         .map(|row| {
             Account::from_db(
-                Pni::parse_from_service_id_string(&row.pni).unwrap(),
                 Aci::parse_from_service_id_string(&row.aci).unwrap(),
+                Pni::parse_from_service_id_string(&row.pni).unwrap(),
                 IdentityKey::new(PublicKey::deserialize(row.aci_identity_key.as_slice()).unwrap()),
                 IdentityKey::new(PublicKey::deserialize(row.pni_identity_key.as_slice()).unwrap()),
                 devices,
                 row.phone_number,
-                bincode::deserialize(&row.account_attr).unwrap(),
             )
         })
         .map_err(|err| err.into())
@@ -211,9 +207,13 @@ impl SignalDatabase for PostgresDatabase {
     }
 
     async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
+        let device_capabilities: Vec<(i32, DeviceCapabilityEnum)> =
+            self.get_all_device_capabilities(service_id).await?;
+
         sqlx::query!(
             r#"
-            SELECT device_id,
+            SELECT id,
+                   device_id,
                    name,
                    auth_token,
                    salt,
@@ -242,6 +242,13 @@ impl SignalDatabase for PostgresDatabase {
                         .salt(row.salt)
                         .registration_id(row.registration_id.parse().unwrap())
                         .pni_registration_id(row.pni_registration_id.parse().unwrap())
+                        .capabilities(
+                            device_capabilities
+                                .iter()
+                                .filter(|device_capability| device_capability.0 == row.id)
+                                .map(|device_capability| device_capability.1.clone())
+                                .collect(),
+                        )
                         .build()
                 })
                 .collect()
@@ -250,6 +257,8 @@ impl SignalDatabase for PostgresDatabase {
     }
 
     async fn get_device(&self, service_id: &ServiceId, device_id: u32) -> Result<Device> {
+        let device_capabilities = self.get_device_capabilities(device_id).await?;
+
         sqlx::query!(
             r#"
             SELECT device_id,
@@ -281,6 +290,7 @@ impl SignalDatabase for PostgresDatabase {
                 .salt(row.salt)
                 .registration_id(row.registration_id.parse().unwrap())
                 .pni_registration_id(row.pni_registration_id.parse().unwrap())
+                .capabilities(device_capabilities)
                 .build()
         })
         .map_err(|err| err.into())
@@ -300,6 +310,85 @@ impl SignalDatabase for PostgresDatabase {
             "#,
             service_id.service_id_string(),
             device_id.to_string()
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| err.into())
+    }
+
+    async fn get_device_capabilities(&self, device_id: u32) -> Result<Vec<DeviceCapabilityEnum>> {
+        sqlx::query!(
+            r#"
+            SELECT
+                capability_type
+            FROM
+                device_capabilities
+            WHERE
+                owner = $1
+            "#,
+            device_id as i32
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| DeviceCapabilityEnum::from(row.capability_type))
+                .collect()
+        })
+        .map_err(|err| err.into())
+    }
+
+    async fn get_all_device_capabilities(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<(i32, DeviceCapabilityEnum)>> {
+        sqlx::query!(
+            r#"
+            SELECT
+                owner,
+                capability_type
+            FROM
+                device_capabilities
+            WHERE
+                owner = (
+                    SELECT
+                        id
+                    FROM
+                        devices
+                    WHERE
+                        owner = (
+                            SELECT
+                                id
+                            FROM
+                                accounts
+                            WHERE
+                                aci = $1 OR
+                                pni = $1
+                        )
+                )
+            "#,
+            service_id.service_id_string()
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| (row.owner, DeviceCapabilityEnum::from(row.capability_type)))
+                .collect()
+        })
+        .map_err(|err| err.into())
+    }
+
+    async fn add_used_device_link_token(&self, device_link_token: String) -> Result<()> {
+        sqlx::query!(
+            r#"
+            INSERT INTO
+                used_device_link_tokens (device_link_token)
+            VALUES
+                ($1)
+            "#,
+            device_link_token,
         )
         .execute(&self.pool)
         .await
@@ -955,10 +1044,7 @@ mod db_tests {
     use anyhow::Result;
     use common::{
         signal_protobuf::Envelope,
-        web_api::{
-            AccountAttributes, DeviceCapabilities, DevicePreKeyBundle, UploadPreKey,
-            UploadSignedPreKey,
-        },
+        web_api::{AccountAttributes, DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
     };
     use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
     use libsignal_protocol::{IdentityKey, PublicKey};

@@ -10,6 +10,7 @@ use serde::{
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize,
 };
+use serde_with::{base64::Base64, serde_as};
 use std::{fmt, num::ParseIntError, str::FromStr};
 use uuid::Uuid;
 
@@ -17,39 +18,118 @@ use crate::pre_key;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct DeviceCapabilities {
-    pub storage: bool,
-    pub transfer: bool,
-    pub payment_activation: bool,
-    pub delete_sync: bool,
-    pub versioned_expiration_timer: bool,
+pub enum AccountCapabilityMode {
+    PrimaryDevice,
+    AnyDevice,
+    AllDevices,
 }
 
-impl DeviceCapabilities {
-    pub fn new(
-        storage: bool,
-        transfer: bool,
-        payment_activation: bool,
-        delete_sync: bool,
-        versioned_expiration_timer: bool,
-    ) -> Self {
-        Self {
-            storage,
-            transfer,
-            payment_activation,
-            delete_sync,
-            versioned_expiration_timer,
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase", tag = "capability_type")]
+pub enum DeviceCapabilityEnum {
+    Storage,
+    Transfer,
+    DeleteSync,
+    VersionedExpirationTimer,
+    StorageServiceRecordKeyRotation,
+}
+
+impl DeviceCapabilityEnum {
+    pub const VALUES: [Self; 5] = [
+        Self::Storage,
+        Self::Transfer,
+        Self::DeleteSync,
+        Self::VersionedExpirationTimer,
+        Self::VersionedExpirationTimer,
+    ];
+
+    pub fn value(&self) -> DeviceCapability {
+        match *self {
+            DeviceCapabilityEnum::Storage => DeviceCapability {
+                name: "storage".to_owned(),
+                account_capability_mode: AccountCapabilityMode::AnyDevice,
+                prevent_downgrade: false,
+                include_in_profile: false,
+            },
+            DeviceCapabilityEnum::Transfer => DeviceCapability {
+                name: "transfer".to_owned(),
+                account_capability_mode: AccountCapabilityMode::PrimaryDevice,
+                prevent_downgrade: false,
+                include_in_profile: false,
+            },
+            DeviceCapabilityEnum::DeleteSync => DeviceCapability {
+                name: "deleteSync".to_owned(),
+                account_capability_mode: AccountCapabilityMode::AllDevices,
+                prevent_downgrade: true,
+                include_in_profile: true,
+            },
+            DeviceCapabilityEnum::VersionedExpirationTimer => DeviceCapability {
+                name: "versionedExpirationTimer".to_owned(),
+                account_capability_mode: AccountCapabilityMode::AllDevices,
+                prevent_downgrade: true,
+                include_in_profile: true,
+            },
+            DeviceCapabilityEnum::StorageServiceRecordKeyRotation => DeviceCapability {
+                name: "ssre2".to_owned(),
+                account_capability_mode: AccountCapabilityMode::AllDevices,
+                prevent_downgrade: true,
+                include_in_profile: true,
+            },
         }
     }
 }
 
-impl Default for DeviceCapabilities {
-    fn default() -> Self {
-        // Default settings for Signal Desktop.
-        Self::new(true, false, false, true, true)
+impl From<i32> for DeviceCapabilityEnum {
+    fn from(value: i32) -> Self {
+        match value {
+            0 => DeviceCapabilityEnum::Storage,
+            1 => DeviceCapabilityEnum::Transfer,
+            2 => DeviceCapabilityEnum::DeleteSync,
+            3 => DeviceCapabilityEnum::VersionedExpirationTimer,
+            4 => DeviceCapabilityEnum::StorageServiceRecordKeyRotation,
+            _ => todo!()
+        }
     }
 }
 
+impl From<DeviceCapabilityEnum> for i32 {
+    fn from(value: DeviceCapabilityEnum) -> Self {
+        match value {
+            DeviceCapabilityEnum::Storage => 0,
+            DeviceCapabilityEnum::Transfer => 1,
+            DeviceCapabilityEnum::DeleteSync => 2,
+            DeviceCapabilityEnum::VersionedExpirationTimer => 3,
+            DeviceCapabilityEnum::StorageServiceRecordKeyRotation => 4,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceCapability {
+    pub name: String,
+    pub account_capability_mode: AccountCapabilityMode,
+    pub prevent_downgrade: bool,
+    pub include_in_profile: bool,
+}
+
+impl DeviceCapability {
+    pub fn new(
+        name: String,
+        account_capability_mode: AccountCapabilityMode,
+        prevent_downgrade: bool,
+        include_in_profile: bool,
+    ) -> Self {
+        Self {
+            name,
+            account_capability_mode,
+            prevent_downgrade,
+            include_in_profile,
+        }
+    }
+}
+
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountAttributes {
@@ -57,7 +137,8 @@ pub struct AccountAttributes {
     pub fetches_messages: bool,
     pub registration_id: u32,
     pub pni_registration_id: u32,
-    pub capabilities: DeviceCapabilities,
+    pub capabilities: Vec<DeviceCapabilityEnum>,
+    #[serde_as(as = "Base64")]
     pub unidentified_access_key: Box<[u8]>,
 }
 
@@ -67,7 +148,7 @@ impl AccountAttributes {
         fetches_messages: bool,
         registration_id: u32,
         pni_registration_id: u32,
-        capabilities: DeviceCapabilities,
+        capabilities: Vec<DeviceCapabilityEnum>,
         unidentified_access_key: Box<[u8]>,
     ) -> Self {
         Self {
@@ -214,13 +295,33 @@ pub struct AccountIdentityResponse {
     pub storage_capable: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkDeviceRequest {
+    pub verification_code: String,
+    pub account_attributes: AccountAttributes,
+    pub device_activation_request: DeviceActivationRequest,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceActivationRequest {
+    pub aci_signed_pre_key: UploadSignedPreKey,
+    pub pni_signed_pre_key: UploadSignedPreKey,
+    pub aci_pq_last_resort_pre_key: UploadSignedPreKey,
+    pub pni_pq_last_resort_pre_key: UploadSignedPreKey,
+}
+
 /// Used to upload any type of prekey along with a signature that is used
 /// to verify the authenticity of the prekey.
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadSignedPreKey {
     pub key_id: u32,
+    #[serde_as(as = "Base64")]
     pub public_key: Box<[u8]>, // TODO: Make this a PublicKey and implement Serialize
+    #[serde_as(as = "Base64")]
     pub signature: Box<[u8]>,  // TODO: Make this a PublicKey and implement Serialize
 }
 

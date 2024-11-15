@@ -154,7 +154,7 @@ pub mod message_manager_tests {
     use crate::test_utils::message_cache::{teardown, MockWebSocketConnection};
     use crate::test_utils::user::{new_account, new_device};
     use anyhow::Result;
-    use common::web_api::{AccountAttributes, DeviceCapabilities};
+    use common::web_api::AccountAttributes;
     use deadpool_redis::redis::cmd;
     use libsignal_core::{Pni, ProtocolAddress, ServiceId};
     use libsignal_protocol::{IdentityKey, PublicKey};

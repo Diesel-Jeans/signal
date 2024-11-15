@@ -3,7 +3,6 @@ use chrono::prelude::*;
 mod account;
 mod account_authenticator;
 pub mod database;
-mod destination_device_validator;
 mod envelope;
 mod error;
 pub mod managers;
@@ -13,6 +12,7 @@ mod query;
 mod response;
 mod server;
 mod test_utils;
+mod validators;
 
 #[tokio::main]
 pub async fn main() {

@@ -282,7 +282,7 @@ where
 #[cfg(test)]
 mod key_manager_tests {
     use account::{Account, Device};
-    use common::web_api::{AccountAttributes, DeviceCapabilities};
+    use common::web_api::AccountAttributes;
     use libsignal_core::{Aci, Pni};
     use libsignal_protocol::{IdentityKey, KeyPair, PublicKey};
     use rand::rngs::OsRng;
@@ -305,7 +305,6 @@ mod key_manager_tests {
             identity_key,
             identity_key,
             Uuid::new_v4().into(),
-            new_account_attributes(),
         )
     }
 

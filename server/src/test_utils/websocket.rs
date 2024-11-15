@@ -7,7 +7,7 @@ use axum::extract::ws::Message;
 use axum::Error;
 use common::pre_key::PreKeyType;
 use common::signal_protobuf::Envelope;
-use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
+use common::web_api::{DeviceCapabilityEnum, DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
 use futures_util::stream::Stream;
 use futures_util::Sink;
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
@@ -65,6 +65,21 @@ impl SignalDatabase for MockDB {
     }
 
     async fn delete_account(&self, service_id: &ServiceId) -> Result<()> {
+        todo!()
+    }
+
+    async fn get_device_capabilities(&self, device_id: u32) -> Result<Vec<DeviceCapabilityEnum>> {
+        todo!()
+    }
+
+    async fn get_all_device_capabilities(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<(i32, DeviceCapabilityEnum)>> {
+        todo!()
+    }
+
+    async fn add_used_device_link_token(&self, device_link_token: String) -> Result<()> {
         todo!()
     }
 

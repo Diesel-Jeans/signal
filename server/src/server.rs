@@ -7,7 +7,8 @@ use crate::managers::state::SignalServerState;
 use crate::managers::websocket::connection::{UserIdentity, WebSocketConnection};
 use crate::managers::websocket::wsstream::WSStream;
 use crate::postgres::PostgresDatabase;
-use crate::response::SendMessageResponse;
+use crate::response::{LinkDeviceResponse, LinkDeviceToken, SendMessageResponse};
+use crate::validators::pre_key_signature_validator::PreKeySignatureValidator;
 use anyhow::Result;
 use axum::extract::{connect_info::ConnectInfo, FromRequest, Host, Path, State};
 use axum::handler::HandlerWithoutStateExt;
@@ -16,20 +17,31 @@ use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Redirect};
 use axum::routing::{any, delete, get, post, put};
 use axum::{debug_handler, BoxError, Json, Router};
+use base64::prelude::{Engine as _, BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD};
+use common::signal_protobuf::{envelope, Envelope};
 use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{
-    DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SignalMessages,
+    DeviceCapabilityEnum, DevicePreKeyBundle, LinkDeviceRequest, RegistrationRequest,
+    RegistrationResponse, SetKeyRequest, SignalMessages, UploadKeys,
 };
 use futures_util::StreamExt;
+use futures_util::TryFutureExt;
+use headers::authorization::Basic;
+use headers::Authorization;
+use hmac::{Hmac, Mac};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
+use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::env;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tower_http::cors::CorsLayer;
+use uuid::{timestamp, Uuid};
 
-use crate::destination_device_validator::DestinationDeviceValidator;
 use crate::managers::message_persister::MessagePersister;
 use crate::message_cache::MessageAvailabilityListener;
+use crate::message_cache::MessageCache;
+use crate::validators::destination_device_validator::DestinationDeviceValidator;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::{
     body::{self, Bytes, *},
@@ -75,7 +87,7 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
     } else {
         state
             .account_manager
-            .get_account(&destination_identifier)
+            .get_account(destination_identifier)
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::NOT_FOUND,
@@ -162,6 +174,7 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
         .salt(hash.salt())
         .registration_id(registration.account_attributes().registration_id)
         .pni_registration_id(registration.account_attributes().pni_registration_id)
+        .capabilities(registration.account_attributes().capabilities.clone())
         .build();
 
     let device_pre_key_bundle = DevicePreKeyBundle {
@@ -175,7 +188,6 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
         .account_manager
         .create_account(
             phone_number.to_owned(),
-            registration.account_attributes().to_owned(),
             registration.aci_identity_key().to_owned(),
             registration.pni_identity_key().to_owned(),
             device.clone(),
@@ -202,6 +214,231 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
         username_hash: None,
         storage_capable: true,
     })
+}
+
+async fn handle_get_link_device_token<T: SignalDatabase, U: WSStream + Debug>(
+    state: SignalServerState<T, U>,
+    authenticated_device: AuthenticatedDevice,
+) -> Result<LinkDeviceToken, ApiError> {
+    if authenticated_device.device().device_id() != 1.into() {
+        return Err(ApiError {
+            status_code: StatusCode::UNAUTHORIZED,
+            message: "".to_owned(),
+        });
+    }
+
+    let claims = format!(
+        "{}.{}",
+        authenticated_device.account().aci().service_id_string(),
+        time_now()?
+    );
+
+    let link_device_secret =
+        std::env::var("LINK_DEVICE_SECRET").expect("Unable to read LINK_DEVICE_SECRET .env var");
+    let mut mac = Hmac::<Sha256>::new_from_slice(link_device_secret.as_bytes())
+        .expect("HMAC can take key of any size");
+    mac.update(claims.as_bytes());
+    let signature = mac.finalize().into_bytes();
+    let link_device_token = format!("{}:{}", claims, BASE64_URL_SAFE.encode(signature));
+
+    let mut hasher = Sha256::new();
+    hasher.update(link_device_token.as_bytes());
+    let digest = hasher.finalize();
+    let token_identifier = BASE64_URL_SAFE_NO_PAD.encode(digest);
+
+    Ok(LinkDeviceToken {
+        verification_code: link_device_token,
+        token_identifier,
+    })
+}
+
+async fn handle_post_link_device<T: SignalDatabase, U: WSStream + Debug>(
+    state: SignalServerState<T, U>,
+    auth_header: Basic,
+    link_device_request: LinkDeviceRequest,
+) -> Result<LinkDeviceResponse, ApiError> {
+    let (claims, b64_signature) = link_device_request
+        .verification_code
+        .split_once(':')
+        .ok_or(ApiError {
+            status_code: StatusCode::FORBIDDEN,
+            message: "".to_owned(),
+        })?;
+
+    let link_device_secret =
+        std::env::var("LINK_DEVICE_SECRET").expect("Unable to read LINK_DEVICE_SECRET .env var");
+    let mut mac = Hmac::<Sha256>::new_from_slice(link_device_secret.as_bytes())
+        .expect("HMAC can take key of any size");
+    mac.update(claims.as_bytes());
+    let expected_signature = mac.finalize().into_bytes();
+    let signature = BASE64_URL_SAFE
+        .decode(b64_signature)
+        .map_err(|_| ApiError {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "".to_owned(),
+        })?;
+    if expected_signature.as_slice() != signature {
+        return Err(ApiError {
+            status_code: StatusCode::FORBIDDEN,
+            message: "".to_owned(),
+        });
+    }
+
+    let (aci_str, timestamp_str) = claims.split_once('.').ok_or(ApiError {
+        status_code: StatusCode::FORBIDDEN,
+        message: "".to_owned(),
+    })?;
+    let aci = ServiceId::parse_from_service_id_string(aci_str).ok_or(ApiError {
+        status_code: StatusCode::FORBIDDEN,
+        message: "".to_owned(),
+    })?;
+    let timestamp = timestamp_str.parse().map_err(|_| ApiError {
+        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        message: "".to_owned(),
+    })?;
+    let time_then = Duration::from_millis(timestamp);
+    let time_now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+    let elapsed_time = time_now - time_then;
+    if elapsed_time.as_secs() > 600 {
+        return Err(ApiError {
+            status_code: StatusCode::FORBIDDEN,
+            message: "".to_owned(),
+        });
+    }
+
+    let account = state
+        .account_manager
+        .get_account(&aci)
+        .await
+        .map_err(|_| ApiError {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "".to_owned(),
+        })?;
+
+    let account_attributes = link_device_request.account_attributes;
+    let device_activation_request = link_device_request.device_activation_request;
+
+    let all_keys_valid = PreKeySignatureValidator::validate_pre_key_signatures(
+        &account.aci_identity_key(),
+        &[
+            device_activation_request.aci_signed_pre_key,
+            device_activation_request.aci_pq_last_resort_pre_key,
+        ],
+    ) && PreKeySignatureValidator::validate_pre_key_signatures(
+        &account.pni_identity_key(),
+        &[
+            device_activation_request.pni_signed_pre_key,
+            device_activation_request.pni_pq_last_resort_pre_key,
+        ],
+    );
+
+    if !all_keys_valid {
+        return Err(ApiError {
+            status_code: StatusCode::UNPROCESSABLE_ENTITY,
+            message: "".to_owned(),
+        });
+    }
+
+    if !DeviceCapabilityEnum::VALUES
+        .iter()
+        .filter(|capability| {
+            capability.value().prevent_downgrade && account.has_capability(capability)
+        })
+        .all(|required_capability| {
+            account_attributes
+                .capabilities
+                .contains(required_capability)
+        })
+    {
+        return Err(ApiError {
+            status_code: StatusCode::CONFLICT,
+            message: "".to_owned(),
+        });
+    }
+
+    state
+        .db
+        .add_used_device_link_token(link_device_request.verification_code)
+        .await
+        .map_err(|err| ApiError {
+            message: "".to_owned(),
+            status_code: StatusCode::FORBIDDEN,
+        })?;
+
+    let new_device_id = account.get_next_device_id();
+    let hash = SaltedTokenHash::generate_for(auth_header.password())?;
+    let device = Device::builder()
+        .device_id(new_device_id.into())
+        .name(account_attributes.name)
+        .last_seen(time_now.as_millis())
+        .created(time_now.as_millis())
+        .auth_token(hash.hash())
+        .salt(hash.salt())
+        .registration_id(account_attributes.registration_id)
+        .pni_registration_id(account_attributes.pni_registration_id)
+        .capabilities(account_attributes.capabilities)
+        .build();
+    state
+        .account_manager
+        .add_device(&aci, &device)
+        .await
+        .map_err(|err| ApiError {
+            message: "".to_owned(),
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        })?;
+
+    Ok(LinkDeviceResponse {
+        aci: account.aci().service_id_string(),
+        pni: account.pni().service_id_string(),
+        device_id: new_device_id,
+    })
+}
+
+async fn handle_delete_account<T: SignalDatabase, U: WSStream + Debug>(
+    state: SignalServerState<T, U>,
+    authenticated_device: AuthenticatedDevice,
+) -> Result<(), ApiError> {
+    state
+        .account_manager
+        .delete_account(&authenticated_device.account().aci().into())
+        .await
+        .map_err(|err| ApiError {
+            message: "".to_owned(),
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        })
+}
+
+async fn handle_delete_device<T: SignalDatabase, U: WSStream + Debug>(
+    state: SignalServerState<T, U>,
+    device_id: u32,
+    authenticated_device: AuthenticatedDevice,
+) -> Result<(), ApiError> {
+    if authenticated_device.device().device_id() != 1.into()
+        && authenticated_device.device().device_id() != device_id.into()
+    {
+        return Err(ApiError {
+            status_code: StatusCode::UNAUTHORIZED,
+            message: "".to_owned(),
+        });
+    }
+
+    if device_id == 1 {
+        return Err(ApiError {
+            status_code: StatusCode::FORBIDDEN,
+            message: "".to_owned(),
+        });
+    }
+
+    state
+        .account_manager
+        .delete_device(&authenticated_device.account().aci().into(), device_id)
+        .await
+        .map_err(|_| ApiError {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "".to_owned(),
+        })
 }
 
 // redirect from http to https. this is temporary
@@ -345,24 +582,38 @@ async fn put_keys_endpoint(State(state): State<SignalServerState<PostgresDatabas
 #[debug_handler]
 async fn delete_account_endpoint(
     State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
-) {
-    // TODO: Call `handle_delete_account`
+    authenticated_device: AuthenticatedDevice,
+) -> Result<(), ApiError> {
+    handle_delete_account(state, authenticated_device).await
 }
 
 /// Handler for the DELETE v1/devices/{device_id} endpoint.
 #[debug_handler]
 async fn delete_device_endpoint(
     State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
-) {
-    // TODO: Call `handle_delete_device`
+    Path(device_id): Path<u32>,
+    authenticated_device: AuthenticatedDevice,
+) -> Result<(), ApiError> {
+    handle_delete_device(state, device_id, authenticated_device).await
+}
+
+/// Handler for the GET v1/devices/provisioning/code endpoint.
+#[debug_handler]
+async fn get_link_device_token(
+    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+    authenticated_device: AuthenticatedDevice,
+) -> Result<LinkDeviceToken, ApiError> {
+    handle_get_link_device_token(state, authenticated_device).await
 }
 
 /// Handler for the POST v1/devices/link endpoint.
 #[debug_handler]
 async fn post_link_device_endpoint(
     State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
-) {
-    // TODO: Call `handle_post_link_device`
+    TypedHeader(Authorization(basic)): TypedHeader<Authorization<Basic>>,
+    Json(link_device_request): Json<LinkDeviceRequest>,
+) -> Result<LinkDeviceResponse, ApiError> {
+    handle_post_link_device(state, basic, link_device_request).await
 }
 
 // Websocket upgrade handler '/v1/websocket'
@@ -446,6 +697,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v2/keys/check", post(post_keycheck_endpoint))
         .route("/v2/keys", put(put_keys_endpoint))
         .route("/v1/accounts/me", delete(delete_account_endpoint))
+        .route("/v1/devices/provisioning/code", get(get_link_device_token))
         .route("/v1/devices/link", post(post_link_device_endpoint))
         .route("/v1/devices/:device_id", delete(delete_device_endpoint))
         .route("/v1/websocket", any(create_websocket_endpoint))
@@ -485,19 +737,19 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn time_now() -> Result<u64, ApiError> {
+fn time_now() -> Result<u128, ApiError> {
     Ok(SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
             message: "".into(),
         })?
-        .as_secs())
+        .as_millis())
 }
 
 #[cfg(test)]
 mod server_tests {
-    use common::web_api::{AccountAttributes, DeviceCapabilities};
+    use common::web_api::AccountAttributes;
 
     #[ignore = "Not implemented"]
     #[tokio::test]
