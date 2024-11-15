@@ -382,9 +382,7 @@ async fn create_websocket_endpoint(
             );
             let addr = ws.protocol_address();
             wmgr.insert(ws, receiver).await;
-            let ws = if let Some(x) = wmgr.get(&addr).await {
-                x
-            } else {
+            let Some(ws) = wmgr.get(&addr).await else {
                 println!("ws.on_upgrade: WebSocket does not exist in WebSocketManager");
                 return;
             };
