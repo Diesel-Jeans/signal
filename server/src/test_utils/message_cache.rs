@@ -10,7 +10,7 @@ pub fn generate_uuid() -> String {
 }
 
 pub async fn teardown(key: &str, mut con: deadpool_redis::Connection) {
-    let pattern = format!("{}presence::*", key);
+    let pattern = format!("{}*", key);
     let mut cursor = 0;
 
     loop {
