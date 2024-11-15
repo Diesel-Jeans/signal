@@ -1,6 +1,4 @@
 pub mod authorization;
-use crate::signal_protobuf::Envelope;
-use anyhow::{anyhow, bail, Error};
 use libsignal_protocol::{
     DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyRecord, ServiceId,
     SignedPreKeyRecord,
@@ -13,8 +11,6 @@ use serde::{
 use serde_with::{base64::Base64, serde_as};
 use std::{fmt, num::ParseIntError, str::FromStr};
 use uuid::Uuid;
-
-use crate::pre_key;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -171,8 +167,7 @@ mod id_key {
         S: Serializer,
     {
         // Convert IdentityKey to bytes and serialize them
-        let key_bytes = key.serialize();
-        serializer.serialize_bytes(&key_bytes)
+        serializer.serialize_bytes(&key.serialize())
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<IdentityKey, D::Error>

@@ -1,8 +1,10 @@
 use crate::contact_manager::{Contact, Device};
-use libsignal_protocol::*;
+use libsignal_protocol::{
+    message_decrypt, message_encrypt, CiphertextMessage, InMemSignalProtocolStore,
+    SignalProtocolError,
+};
 use rand::{CryptoRng, Rng};
-use std::collections::HashMap;
-use std::time::SystemTime;
+use std::{collections::HashMap, time::SystemTime};
 
 pub async fn encrypt(
     store: &mut InMemSignalProtocolStore,
@@ -20,14 +22,7 @@ pub async fn encrypt(
         )
         .await;
 
-        match res {
-            Ok(x) => {
-                msgs.insert(*id, Ok(x));
-            }
-            Err(y) => {
-                msgs.insert(*id, Err(y));
-            }
-        }
+        msgs.insert(*id, res);
     }
     msgs
 }
@@ -53,13 +48,16 @@ pub async fn decrypt<R: Rng + CryptoRng>(
 
 #[cfg(test)]
 pub(crate) mod test {
-    use crate::contact_manager::{Contact, ContactManager, Device};
-    use crate::encryption::{decrypt, encrypt};
-    use crate::key_management::bundle::KeyBundleContent;
-    use libsignal_protocol::*;
-    use rand::rngs::OsRng;
-    use rand::{CryptoRng, Rng};
-    use std::sync::{Arc, Mutex};
+    use super::*;
+    use crate::{
+        contact_manager::ContactManager,
+        encryption::{decrypt, encrypt},
+    };
+    use libsignal_protocol::{
+        kem, process_prekey_bundle, GenericSignedPreKey, KeyPair, KyberPreKeyRecord, PreKeyBundle,
+        PreKeyRecord, ProtocolStore, SignedPreKeyRecord, Timestamp,
+    };
+    use rand::{rngs::OsRng, CryptoRng, Rng};
     use std::time::SystemTime;
     use uuid::Uuid;
 

@@ -89,7 +89,7 @@ impl SignalDatabase for PostgresDatabase {
         .await
         {
             Ok(_) => {
-                self.add_device(&ServiceId::Aci(account.aci()), &account.devices()[0])
+                self.add_device(&account.aci().into(), &account.devices()[0])
                     .await
             }
             Err(err) => bail!(err),
@@ -256,7 +256,7 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn get_device(&self, service_id: &ServiceId, device_id: u32) -> Result<Device> {
+    async fn get_device(&self, address: &ProtocolAddress) -> Result<Device> {
         let device_capabilities = self.get_device_capabilities(device_id).await?;
 
         sqlx::query!(
@@ -275,8 +275,8 @@ impl SignalDatabase for PostgresDatabase {
                         OR pni = $1)
               AND device_id = $2
             "#,
-            service_id.service_id_string(),
-            device_id.to_string()
+            address.name(),
+            address.device_id().to_string()
         )
         .fetch_one(&self.pool)
         .await
@@ -296,7 +296,7 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()> {
+    async fn delete_device(&self, address: &ProtocolAddress) -> Result<()> {
         sqlx::query!(
             r#"
             DELETE 
@@ -308,8 +308,87 @@ impl SignalDatabase for PostgresDatabase {
                         OR pni = $1)
              AND device_id = $2
             "#,
-            service_id.service_id_string(),
-            device_id.to_string()
+            address.name(),
+            address.device_id().to_string()
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| err.into())
+    }
+
+    async fn get_device_capabilities(&self, device_id: u32) -> Result<Vec<DeviceCapabilityEnum>> {
+        sqlx::query!(
+            r#"
+            SELECT
+                capability_type
+            FROM
+                device_capabilities
+            WHERE
+                owner = $1
+            "#,
+            device_id as i32
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| DeviceCapabilityEnum::from(row.capability_type))
+                .collect()
+        })
+        .map_err(|err| err.into())
+    }
+
+    async fn get_all_device_capabilities(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<(i32, DeviceCapabilityEnum)>> {
+        sqlx::query!(
+            r#"
+            SELECT
+                owner,
+                capability_type
+            FROM
+                device_capabilities
+            WHERE
+                owner = (
+                    SELECT
+                        id
+                    FROM
+                        devices
+                    WHERE
+                        owner = (
+                            SELECT
+                                id
+                            FROM
+                                accounts
+                            WHERE
+                                aci = $1 OR
+                                pni = $1
+                        )
+                )
+            "#,
+            service_id.service_id_string()
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| (row.owner, DeviceCapabilityEnum::from(row.capability_type)))
+                .collect()
+        })
+        .map_err(|err| err.into())
+    }
+
+    async fn add_used_device_link_token(&self, device_link_token: String) -> Result<()> {
+        sqlx::query!(
+            r#"
+            INSERT INTO
+                used_device_link_tokens (device_link_token)
+            VALUES
+                ($1)
+            "#,
+            device_link_token,
         )
         .execute(&self.pool)
         .await
@@ -1050,6 +1129,7 @@ mod db_tests {
     use libsignal_protocol::{IdentityKey, PublicKey};
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use std::sync::Mutex;
+    use tonic::IntoRequest;
     use uuid::Uuid;
 
     use crate::{
@@ -1070,14 +1150,9 @@ mod db_tests {
         let account = new_account();
 
         db.add_account(&account).await.unwrap();
-        let retrieved_account = db
-            .get_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        let retrieved_account = db.get_account(&account.aci().into()).await.unwrap();
 
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(account, retrieved_account);
     }
@@ -1089,11 +1164,11 @@ mod db_tests {
         let new_aci = Aci::from(Uuid::new_v4());
 
         db.add_account(&account).await.unwrap();
-        db.update_account_aci(&ServiceId::Aci(account.aci()), new_aci)
+        db.update_account_aci(&account.aci().into(), new_aci)
             .await
             .unwrap();
-        let retrieved_account = db.get_account(&ServiceId::Aci(new_aci)).await.unwrap();
-        db.delete_account(&ServiceId::Aci(retrieved_account.aci()))
+        let retrieved_account = db.get_account(&new_aci.into()).await.unwrap();
+        db.delete_account(&retrieved_account.aci().into())
             .await
             .unwrap();
 
@@ -1108,11 +1183,11 @@ mod db_tests {
         let new_pni = Pni::from(Uuid::new_v4());
 
         db.add_account(&account).await.unwrap();
-        db.update_account_pni(&ServiceId::Pni(account.pni()), new_pni)
+        db.update_account_pni(&account.pni().into(), new_pni)
             .await
             .unwrap();
-        let retrieved_account = db.get_account(&ServiceId::Pni(new_pni)).await.unwrap();
-        db.delete_account(&ServiceId::Pni(retrieved_account.pni()))
+        let retrieved_account = db.get_account(&new_pni.into()).await.unwrap();
+        db.delete_account(&retrieved_account.pni().into())
             .await
             .unwrap();
 
@@ -1126,10 +1201,8 @@ mod db_tests {
         let account = new_account();
 
         db.add_account(&account).await.unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
-        db.get_account(&ServiceId::Aci(account.aci()))
+        db.delete_account(&account.aci().into()).await.unwrap();
+        db.get_account(&account.aci().into())
             .await
             .expect_err("The account should have been deleted");
     }
@@ -1142,7 +1215,7 @@ mod db_tests {
         db.add_account(&account).await.unwrap();
 
         let secondary_device = new_device();
-        db.add_device(&ServiceId::Aci(account.aci()), &secondary_device)
+        db.add_device(&account.aci().into(), &secondary_device)
             .await
             .expect(&format!(
                 "Should be other device_id: {}, {}",
@@ -1151,15 +1224,13 @@ mod db_tests {
             ));
 
         let retrieved_device = db
-            .get_device(
-                &ServiceId::Aci(account.aci()),
-                secondary_device.device_id().into(),
-            )
+            .get_device(&ProtocolAddress::new(
+                account.aci().service_id_string(),
+                secondary_device.device_id(),
+            ))
             .await
             .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap(); // secondary_device is also deleted due to cascading
+        db.delete_account(&account.aci().into()).await.unwrap(); // secondary_device is also deleted due to cascading
 
         assert_eq!(secondary_device, retrieved_device);
     }
@@ -1167,25 +1238,20 @@ mod db_tests {
     #[tokio::test]
     async fn test_get_all_devices() {
         let db = database_connect().await;
-        let device = new_device();
         let mut account = new_account();
+        let device = new_device();
 
         db.add_account(&account).await.unwrap();
-        db.add_device(&ServiceId::Aci(account.aci()), &device)
+        db.add_device(&account.aci().into(), &device)
             .await
             .expect(&format!(
                 "Should be other device_id: {}, {}",
                 account.devices()[0].device_id(),
                 device.device_id()
             ));
-        let retrieved_devices = db
-            .get_all_devices(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
-        account.add_device(device);
+        account.add_device(device).unwrap();
+        let retrieved_devices = db.get_all_devices(&account.aci().into()).await.unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(account.devices(), retrieved_devices);
     }
@@ -1197,15 +1263,19 @@ mod db_tests {
         let device = account.devices()[0].clone();
 
         db.add_account(&account).await.unwrap();
-        db.delete_device(&ServiceId::Aci(account.aci()), device.device_id().into())
-            .await
-            .unwrap();
-        db.get_device(&ServiceId::Aci(account.aci()), device.device_id().into())
-            .await
-            .expect_err("This devices should have been deleted");
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        db.delete_device(&ProtocolAddress::new(
+            account.aci().service_id_string(),
+            device.device_id(),
+        ))
+        .await
+        .unwrap();
+        db.get_device(&ProtocolAddress::new(
+            account.aci().service_id_string(),
+            device.device_id(),
+        ))
+        .await
+        .expect_err("This devices should have been deleted");
+        db.delete_account(&account.aci().into()).await.unwrap();
     }
 
     #[tokio::test]
@@ -1223,9 +1293,7 @@ mod db_tests {
             .await
             .unwrap();
         let retrieved_msg = db.pop_msg_queue(&address).await.unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(retrieved_msg.len(), 1);
         assert_eq!(msg, retrieved_msg[0]);
@@ -1241,17 +1309,11 @@ mod db_tests {
 
         db.add_account(&account).await.unwrap();
         db.store_aci_signed_pre_key(&key, &address).await.unwrap();
-        let retrieved_key = get_aci_signed_pre_key(
-            &db,
-            key.key_id,
-            &ServiceId::Aci(account.aci()),
-            device_id.into(),
-        )
-        .await
-        .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        let retrieved_key =
+            get_aci_signed_pre_key(&db, key.key_id, &account.aci().into(), device_id.into())
+                .await
+                .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(key, retrieved_key);
     }
@@ -1268,17 +1330,11 @@ mod db_tests {
         db.store_aci_signed_pre_key(&key, &address).await.unwrap();
         key.public_key = Box::new([5, 6, 7, 8]);
         db.store_aci_signed_pre_key(&key, &address).await.unwrap();
-        let retrieved_key = get_aci_signed_pre_key(
-            &db,
-            key.key_id,
-            &ServiceId::Aci(account.aci()),
-            device_id.into(),
-        )
-        .await
-        .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        let retrieved_key =
+            get_aci_signed_pre_key(&db, key.key_id, &account.aci().into(), device_id.into())
+                .await
+                .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(key, retrieved_key);
     }
@@ -1293,17 +1349,11 @@ mod db_tests {
 
         db.add_account(&account).await.unwrap();
         db.store_pni_signed_pre_key(&key, &address).await.unwrap();
-        let retrieved_key = get_pni_signed_pre_key(
-            &db,
-            key.key_id,
-            &ServiceId::Aci(account.aci()),
-            device_id.into(),
-        )
-        .await
-        .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        let retrieved_key =
+            get_pni_signed_pre_key(&db, key.key_id, &account.aci().into(), device_id.into())
+                .await
+                .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(key, retrieved_key);
     }
@@ -1320,17 +1370,11 @@ mod db_tests {
         db.store_pni_signed_pre_key(&key, &address).await.unwrap();
         key.public_key = Box::new([5, 6, 7, 8]);
         db.store_pni_signed_pre_key(&key, &address).await.unwrap();
-        let retrieved_key = get_pni_signed_pre_key(
-            &db,
-            key.key_id,
-            &ServiceId::Aci(account.aci()),
-            device_id.into(),
-        )
-        .await
-        .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        let retrieved_key =
+            get_pni_signed_pre_key(&db, key.key_id, &account.aci().into(), device_id.into())
+                .await
+                .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(key, retrieved_key);
     }
@@ -1347,17 +1391,11 @@ mod db_tests {
         db.store_pq_aci_signed_pre_key(&key, &address)
             .await
             .unwrap();
-        let retrieved_key = get_pq_aci_signed_pre_key(
-            &db,
-            key.key_id,
-            &ServiceId::Aci(account.aci()),
-            device_id.into(),
-        )
-        .await
-        .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        let retrieved_key =
+            get_pq_aci_signed_pre_key(&db, key.key_id, &account.aci().into(), device_id.into())
+                .await
+                .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(key, retrieved_key);
     }
@@ -1378,17 +1416,11 @@ mod db_tests {
         db.store_pq_aci_signed_pre_key(&key, &address)
             .await
             .unwrap();
-        let retrieved_key = get_pq_aci_signed_pre_key(
-            &db,
-            key.key_id,
-            &ServiceId::Aci(account.aci()),
-            device_id.into(),
-        )
-        .await
-        .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        let retrieved_key =
+            get_pq_aci_signed_pre_key(&db, key.key_id, &account.aci().into(), device_id.into())
+                .await
+                .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(key, retrieved_key);
     }
@@ -1405,17 +1437,11 @@ mod db_tests {
         db.store_pq_pni_signed_pre_key(&key, &address)
             .await
             .unwrap();
-        let retrieved_key = get_pq_pni_signed_pre_key(
-            &db,
-            key.key_id,
-            &ServiceId::Aci(account.aci()),
-            device_id.into(),
-        )
-        .await
-        .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        let retrieved_key =
+            get_pq_pni_signed_pre_key(&db, key.key_id, &account.aci().into(), device_id.into())
+                .await
+                .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(key, retrieved_key);
     }
@@ -1436,17 +1462,11 @@ mod db_tests {
         db.store_pq_pni_signed_pre_key(&key, &address)
             .await
             .unwrap();
-        let retrieved_key = get_pq_pni_signed_pre_key(
-            &db,
-            key.key_id,
-            &ServiceId::Aci(account.aci()),
-            device_id.into(),
-        )
-        .await
-        .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        let retrieved_key =
+            get_pq_pni_signed_pre_key(&db, key.key_id, &account.aci().into(), device_id.into())
+                .await
+                .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(key, retrieved_key);
     }
@@ -1462,9 +1482,7 @@ mod db_tests {
         db.add_account(&account).await.unwrap();
         db.store_key_bundle(&key_bundle, &address).await.unwrap();
         let retrieved_key_bundle = db.get_key_bundle(&address).await.unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(key_bundle, retrieved_key_bundle);
     }
@@ -1482,12 +1500,10 @@ mod db_tests {
             .await
             .unwrap();
         let count = db
-            .get_one_time_ec_pre_key_count(&ServiceId::Aci(account.aci()))
+            .get_one_time_ec_pre_key_count(&account.aci().into())
             .await
             .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(count, otpks.len() as u32);
     }
@@ -1510,12 +1526,10 @@ mod db_tests {
             .await
             .unwrap();
         let count = db
-            .get_one_time_pq_pre_key_count(&ServiceId::Aci(account.aci()))
+            .get_one_time_pq_pre_key_count(&account.aci().into())
             .await
             .unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(count, otpks.len() as u32);
     }
@@ -1533,9 +1547,7 @@ mod db_tests {
             .await
             .unwrap();
         let retrieved_key = db.get_one_time_ec_pre_key(&address).await.unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(otpks, vec![retrieved_key])
     }
@@ -1553,9 +1565,7 @@ mod db_tests {
             .await
             .unwrap();
         let retrieved_key = db.get_one_time_pq_pre_key(&address).await.unwrap();
-        db.delete_account(&ServiceId::Aci(account.aci()))
-            .await
-            .unwrap();
+        db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(otpks, vec![retrieved_key])
     }

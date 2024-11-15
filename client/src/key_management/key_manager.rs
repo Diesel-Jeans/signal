@@ -63,8 +63,8 @@ impl KeyManager<SignedPreKeyRecord, SignedPreKeyId> for InMemoryKeyManager {
         self.store
             .save_signed_pre_key(key.id().expect("Can always get ID"), key)
             .await
-            .map(|_| ())
     }
+
     async fn generate<R: Rng + CryptoRng>(
         &mut self,
         csprng: &mut R,
@@ -77,8 +77,7 @@ impl KeyManager<SignedPreKeyRecord, SignedPreKeyId> for InMemoryKeyManager {
             .private_key()
             .calculate_signature(&signed_pre_key_pair.public_key.serialize(), csprng)?;
         let id = self.get_new_key_id(&PreKeyType::Signed).into();
-        let timestamp = time_now();
-        let record = SignedPreKeyRecord::new(id, timestamp, &signed_pre_key_pair, &signature);
+        let record = SignedPreKeyRecord::new(id, time_now(), &signed_pre_key_pair, &signature);
 
         self.store.save_signed_pre_key(id, &record).await?;
 
