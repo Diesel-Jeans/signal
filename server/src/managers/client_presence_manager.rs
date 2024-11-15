@@ -48,7 +48,9 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         let _ = dotenv::dotenv();
         let redis_url = std::env::var("REDIS_URL").expect("Unable to read REDIS_URL .env var");
         let mut redis_config = Config::from_url(redis_url);
-        let redis_pool: deadpool_redis::Pool = redis_config.create_pool(Some(Runtime::Tokio1)).expect("Could not create pool");
+        let redis_pool: deadpool_redis::Pool = redis_config
+            .create_pool(Some(Runtime::Tokio1))
+            .expect("Could not create pool");
 
         #[cfg(not(test))]
         return Self {
@@ -190,7 +192,7 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         self.clear_presence(presence_key).await
     }
 
-    async fn is_present(&mut self, address: &ProtocolAddress,) -> Result<bool> {
+    async fn is_present(&mut self, address: &ProtocolAddress) -> Result<bool> {
         let mut connection = self.pool.get().await?;
         let is_present = cmd("EXISTS")
             .arg(self.get_presence_key(address))
@@ -199,13 +201,15 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         Ok(is_present)
     }
 
-    fn get_presence_key(&mut self, address: &ProtocolAddress,) -> String {
+    fn get_presence_key(&mut self, address: &ProtocolAddress) -> String {
         #[cfg(not(test))]
         return format!("presence::{{{}::{}}}", address.name(), address.device_id());
         #[cfg(test)]
         format!(
             "{}presence::{{{}::{}}}",
-            self.test_key, address.name(), address.device_id()
+            self.test_key,
+            address.name(),
+            address.device_id()
         )
     }
 
@@ -254,14 +258,8 @@ mod client_presence_manager_test {
         let device_id = DeviceId::from(2);
         let addr = ProtocolAddress::new(account_id, device_id);
 
-        manager
-            .set_present(&addr, websocket.clone())
-            .await
-            .unwrap();
-        manager
-            .set_present(&addr, websocket.clone())
-            .await
-            .unwrap();
+        manager.set_present(&addr, websocket.clone()).await.unwrap();
+        manager.set_present(&addr, websocket.clone()).await.unwrap();
 
         let presence_keys = cmd("SMEMBERS")
             .arg(manager.get_set_key())
@@ -270,10 +268,7 @@ mod client_presence_manager_test {
             .unwrap();
 
         for presence_key in presence_keys {
-            assert_eq!(
-                presence_key,
-                manager.get_presence_key(&addr)
-            );
+            assert_eq!(presence_key, manager.get_presence_key(&addr));
         }
         let presence_key = manager.get_presence_key(&addr);
         let is_handle_displacement_invoked = manager
@@ -301,9 +296,7 @@ mod client_presence_manager_test {
         let device_id = DeviceId::from(2);
         let addr = ProtocolAddress::new(account_id, device_id);
 
-        manager
-            .set_present(&addr, websocket)
-            .await;
+        manager.set_present(&addr, websocket).await;
 
         let presence_keys = cmd("SMEMBERS")
             .arg(manager.get_set_key())
@@ -312,10 +305,7 @@ mod client_presence_manager_test {
             .unwrap();
 
         for presence_key in presence_keys {
-            assert_eq!(
-                presence_key,
-                manager.get_presence_key(&addr)
-            );
+            assert_eq!(presence_key, manager.get_presence_key(&addr));
         }
 
         let presence_key = manager.get_presence_key(&addr);
@@ -345,9 +335,7 @@ mod client_presence_manager_test {
         let device_id = DeviceId::from(1);
         let addr = ProtocolAddress::new(account_id, device_id);
 
-        manager
-            .set_present(&addr, websocket)
-            .await;
+        manager.set_present(&addr, websocket).await;
 
         let removed = manager
             .disconnect_all_presence(addr.name(), vec![device_id])
@@ -370,14 +358,9 @@ mod client_presence_manager_test {
         let device_id = DeviceId::from(1);
         let addr = ProtocolAddress::new(account_id.clone(), device_id.into());
 
-        manager
-            .set_present(&addr, websocket)
-            .await;
+        manager.set_present(&addr, websocket).await;
 
-        let is_present = manager
-            .is_present(&addr)
-            .await
-            .unwrap();
+        let is_present = manager.is_present(&addr).await.unwrap();
 
         teardown(&manager.test_key, connection).await;
 

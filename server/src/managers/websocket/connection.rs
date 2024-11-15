@@ -19,9 +19,9 @@ use tokio::sync::Mutex;
 
 use crate::account::AuthenticatedDevice;
 use crate::database::SignalDatabase;
+use crate::managers::client_presence_manager::DisplacedPresenceListener;
 use crate::managers::state::SignalServerState;
 use crate::message_cache::MessageAvailabilityListener;
-use crate::managers::client_presence_manager::DisplacedPresenceListener;
 use crate::server::handle_put_messages;
 
 use prost::{bytes::Bytes, Message as PMessage};
@@ -310,10 +310,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl <T, U> DisplacedPresenceListener for WebSocketConnection<T, U> 
+impl<T, U> DisplacedPresenceListener for WebSocketConnection<T, U>
 where
     T: WSStream + Debug + 'static,
-    U: SignalDatabase
+    U: SignalDatabase,
 {
     async fn handle_displacement(&mut self, connected_elsewhere: bool) {
         let fut = if connected_elsewhere {

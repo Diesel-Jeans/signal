@@ -1,6 +1,9 @@
 use std::fmt::Debug;
 
-use super::{client_presence_manager::ClientPresenceManager, websocket::{connection::WebSocketConnection, wsstream::WSStream}};
+use super::{
+    client_presence_manager::ClientPresenceManager,
+    websocket::{connection::WebSocketConnection, wsstream::WSStream},
+};
 #[cfg(test)]
 use crate::test_utils::websocket::{MockDB, MockSocket};
 use crate::{
