@@ -380,7 +380,16 @@ async fn create_websocket_endpoint(
                 sender,
                 state.clone(),
             );
+            let addr = ws.protocol_address();
             wmgr.insert(ws, receiver).await;
+            let ws = if let Some(x) = wmgr.get(&addr).await {
+                x
+            } else {
+                println!("ws.on_upgrade: WebSocket does not exist in WebSocketManager");
+                return;
+            };
+            ws.lock().await.send_messages(false);
+            state.message_manager.add_message_availability_listener(&addr, ws).await;
         }
     })
 }
