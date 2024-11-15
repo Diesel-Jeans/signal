@@ -23,12 +23,14 @@ use crate::errors::{LoginError, RegistrationError};
 use crate::key_management::key_manager::{InMemoryKeyManager, KeyManager};
 use crate::server::{Server, ServerAPI};
 use crate::storage::{self, DeviceStorage, Storage};
+use crate::websockets::{WebsocketHandler, SendRequestOptions};
 
 pub struct Client {
     aci: Aci,
     pni: Pni,
     contact_manager: ContactManager,
     server_api: ServerAPI,
+    ws: WebsocketHandler,
     key_manager: InMemoryKeyManager,
     storage: DeviceStorage,
 }
@@ -183,7 +185,8 @@ impl Client {
         ))
     }
 
-    pub async fn send_message(&self, message: &str) -> Result<(), Box<dyn std::error::Error>> {
-        todo!()
+    pub async fn send_message(&mut self, message: &str, user_id: &str, device_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        self.server_api.send_msg(message.into(), user_id.into(), device_id.into()).await?;
+        Ok(())
     }
 }

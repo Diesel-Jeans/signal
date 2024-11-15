@@ -14,6 +14,9 @@ use std::{env, fs};
 use surf::http::convert::json;
 use surf::{http, Client, Config, HttpClient, RequestBuilder, Response, Url};
 use tokio_tungstenite::connect_async;
+use crate::websockets::{WebsocketHandler, SendRequestOptions, KeepAliveOptions};
+use anyhow::Result;
+use common::signal_protobuf::WebSocketResponseMessage;
 
 const CLIENT_URI: &str = "/client";
 const MSG_URI: &str = "v1/messages";
@@ -23,6 +26,7 @@ const BUNDLE_URI: &str = "/bundle";
 
 pub struct ServerAPI {
     client: Client,
+    ws: Option<WebsocketHandler>,
 }
 
 enum ReqType {
@@ -48,11 +52,11 @@ impl Display for ReqType {
 }
 
 pub trait Server {
-    async fn connect();
+    async fn connect(&mut self, username: &str, password: &str, url: &str, port: &str) -> Result<()>;
     async fn publish_bundle(
         &self,
         uuid: String, //registration_id: u32,
-                      //bundle: &PreKeyBundle,
+        //bundle: &PreKeyBundle,
     ) -> Result<Response, Box<dyn std::error::Error>>; // should take keys as parameter or struct
     async fn fetch_bundle(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
     async fn register_client(
@@ -71,7 +75,7 @@ pub trait Server {
         msg: String,
         user_id: String,
         device_id: u32,
-    ) -> Result<Response, Box<dyn std::error::Error>>;
+    ) -> Result<WebSocketResponseMessage, Box<dyn std::error::Error>>;
     async fn update_client(
         &self,
         new_client: &Contact,
@@ -82,11 +86,13 @@ pub trait Server {
 }
 
 impl Server for ServerAPI {
-    async fn connect() {
-        let server_url = "ws://127.0.0.1:4444";
-        let (ws, _) = connect_async(server_url).await.expect("Failed to connect");
+    async fn connect(&mut self, username: &str, password: &str, url: &str, port: &str) -> Result<()> {
+        let options = KeepAliveOptions { path: Some("/v1/keepalive".to_string()) };
+        let ws = WebsocketHandler::try_new(Some(options), url.into(), port.into(), username.into(), password.into()).await?;
+        self.ws = Some(ws);
 
         println!("connected!");
+        Ok(())
     }
     async fn publish_bundle(
         &self,
@@ -104,7 +110,7 @@ impl Server for ServerAPI {
     }
 
     async fn register_client(
-        &self,
+        &mut self,
         phone_number: String,
         password: String,
         registration_request: RegistrationRequest,
@@ -137,13 +143,19 @@ impl Server for ServerAPI {
         msg: String,
         user_id: String,
         device_id: u32,
-    ) -> Result<Response, Box<dyn std::error::Error>> {
+    ) -> Result<WebSocketResponseMessage> {
         let payload = json!({
             "message": msg
         });
         let uri = format!("{}/{}.{}", MSG_URI, user_id, device_id);
+        let options = SendRequestOptions::new("PUT", uri, payload.into());
 
-        self.make_request(ReqType::Put(payload), uri).await
+        if let Some(mut ws) = &self.ws {
+            let result: WebSocketResponseMessage = ws.send_request(options)?;
+            Ok(result)
+        } else {
+            anyhow::bail!("No websocket connection is active")
+        }
     }
 
     async fn update_client(
@@ -194,7 +206,7 @@ impl Server for ServerAPI {
             .set_base_url(Url::parse(&address).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
-        ServerAPI { client }
+        ServerAPI { client, ws: None }
     }
 }
 impl ServerAPI {
@@ -213,7 +225,7 @@ impl ServerAPI {
                 .delete(uri)
                 .body(surf::Body::from_json(&payload)?),
         }
-        .await?;
+            .await?;
 
         match res.status() {
             StatusCode::Ok => Ok(res),
@@ -225,7 +237,7 @@ impl ServerAPI {
                     res.body_string().await.unwrap_or("".to_owned())
                 ),
             )
-            .into()),
+                .into()),
         }
     }
 }
