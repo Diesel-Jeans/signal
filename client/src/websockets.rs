@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use base64::{engine::general_purpose, Engine as _};
 use common::signal_protobuf::{
     WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
@@ -159,34 +159,33 @@ impl WebsocketHandler {
                             }
                         }
                         Message::Binary(data) => {
-                            if let Ok(wsm) = WebSocketMessage::decode(data.as_slice()) {
-                                //Types of WebSocketMessage: 0 = UNKNOWN, 1 = REQUEST, 2 = RESPONSE
-                                match wsm.r#type {
-                                    Some(1) => {
-                                        let request = wsm.request.expect("Got a request type without an attached request");
-                                        if let Err(e) = request_tx.send(request) { //Requests will be handled by the receive channel
-                                            break;
-                                        }
-                                    }
-                                    Some(2) => {
-                                        //Expect is fine here, as it is system breaking to get a type mismatch
-                                        let wsrm = wsm.response.expect(
-                                            "Got a WebSocketMessageResponse type without a response",
-                                        );
-                                        let id = match wsrm.id {
-                                            Some(id) => id,
-                                            _ => break,
-                                        };
-                                        incoming.lock().await.insert(id, wsrm);
-                                        if let Some(hand) = outgoing.lock().await.get(&id) {
-                                            hand.abort();
-                                            outgoing.lock().await.remove(&id);
-                                        }
-                                    }
-                                    _ => todo!(),
-                                }
-                            } else {
+                            let Ok(wsm) = WebSocketMessage::decode(data.as_slice()) else {
                                 continue;
+                            };
+                            //Types of WebSocketMessage: 0 = UNKNOWN, 1 = REQUEST, 2 = RESPONSE
+                            match wsm.r#type {
+                                Some(1) => {
+                                    let request = wsm
+                                        .request
+                                        .expect("Got a request type without an attached request");
+                                    if let Err(e) = request_tx.send(request) {
+                                        //Requests will be handled by the receive channel
+                                        break;
+                                    }
+                                }
+                                Some(2) => {
+                                    //Expect is fine here, as it is system breaking to get a type mismatch
+                                    let wsrm = wsm.response.expect(
+                                        "Got a WebSocketMessageResponse type without a response",
+                                    );
+                                    let Some(id) = wsrm.id else { break };
+                                    incoming.lock().await.insert(id, wsrm);
+                                    if let Some(hand) = outgoing.lock().await.get(&id) {
+                                        hand.abort();
+                                        outgoing.lock().await.remove(&id);
+                                    }
+                                }
+                                _ => todo!(),
                             }
                         }
                         _ => continue,
@@ -215,16 +214,13 @@ impl WebsocketHandler {
         options: SendRequestOptions,
     ) -> Result<(WebSocketResponseMessage)> {
         let mut id;
-
-        //In a smaller scope to free the lock as fast as possible
-        {
-            let mut lock = self.outgoing_id.lock().await;
-            id = *lock;
-            *lock += 1;
-        }
+        let mut lock = self.outgoing_id.lock().await;
+        id = *lock;
+        *lock += 1;
+        drop(lock);
 
         if self.outgoing_map.lock().await.contains_key(&id) {
-            anyhow::bail!("Duplicate outgoing request")
+            bail!("Duplicate outgoing request")
         }
 
         let mut header_vec: Vec<String> = Vec::new();
@@ -284,18 +280,17 @@ impl WebsocketHandler {
         promise.await;
 
         if let Some(incoming) = self.incoming_response.lock().await.get(&id) {
-            let status = match incoming.status {
-                Some(status) => status,
-                _ => panic!(),
+            let Some(status) = incoming.status else {
+                panic!()
             };
 
-            if (200..300).contains(&status) {
+            if (200..=299).contains(&status) {
                 Ok(incoming.clone())
             } else {
-                anyhow::bail!("Got a bad response")
+                bail!("Got a bad response")
             }
         } else {
-            anyhow::bail!("Incoming response missing")
+            bail!("Incoming response missing")
         }
     }
 
@@ -404,10 +399,10 @@ impl KeepaliveHandler {
                     .lock()
                     .await
                     .close(3001, format!("keepalive response with {} code", status));
-                anyhow::bail!("keepalive response with {} code", status);
+                bail!("keepalive response with {} code", status);
             }
         } else {
-            anyhow::bail!("keepalive response without code");
+            bail!("keepalive response without code");
         }
 
         Ok(true)
@@ -422,16 +417,10 @@ impl KeepaliveHandler {
                     self.last_alive_at.lock().await.elapsed().as_millis()
                 ),
             );
-            anyhow::bail!("Connection is stale")
+            bail!("Connection is stale")
         }
 
-        let is_alive = self.clone().keepalive_super_send().await;
-        match is_alive {
-            Ok(b) => Ok(b),
-            Err(e) => {
-                anyhow::bail!(e)
-            }
-        }
+        self.clone().keepalive_super_send().await
     }
 
     pub async fn set_timeout(&mut self, timeout: u32) {
@@ -449,18 +438,12 @@ impl KeepaliveHandler {
         let handle = spawn(async move {
             loop {
                 let now = Instant::now();
-                loop {
-                    if now.elapsed().as_millis() > timeout.into() {
-                        break;
-                    } else {
-                        yield_now();
-                    }
+                while now.elapsed().as_millis() <= timeout.into() {
+                    yield_now();
                 }
                 match handler.lock().await.keepalive_send().await {
-                    Ok(true) => {}
-                    _ => {
-                        break;
-                    }
+                    Ok(true) => (),
+                    _ => break,
                 }
             }
         });
@@ -566,19 +549,7 @@ where
 #[cfg(test)]
 mod websocket_tests {
     use super::*;
-    use async_std::prelude::FutureExt as pFutureExt;
-    use axum::response::IntoResponseParts;
-    use futures_util::future::ok;
-    use futures_util::stream::FusedStream;
-    use futures_util::{FutureExt, StreamExt};
-    use futures_util::{Sink, TryStream, TryStreamExt};
-    use std::future::IntoFuture;
-    use std::ops::Deref;
-    use std::task::{Context, Poll};
-    use std::thread;
-    use std::thread::{sleep, yield_now};
-    use std::time::{Duration, UNIX_EPOCH};
-    use tokio::io::AsyncReadExt;
+    use std::{thread::sleep, time::Duration};
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]

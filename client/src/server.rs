@@ -180,10 +180,9 @@ impl Server for ServerAPI {
         let uri = format!("{}/{}.{}", MSG_URI, user_id, device_id);
         let options = SendRequestOptions::new("PUT", uri, payload);
 
-        if let Some(ws) = &self.ws {
-            Ok(ws.clone().send_request(options).await?)
-        } else {
-            anyhow::bail!("No websocket connection is active")
+        match &self.ws {
+            Some(ws) => Ok(ws.clone().send_request(options).await?),
+            None => Err(anyhow::anyhow!("No websocket connection is active")),
         }
     }
 
@@ -271,10 +270,9 @@ impl ServerAPI {
     }
 
     async fn get_incoming_messages(&mut self) -> Result<Vec<WebSocketRequestMessage>> {
-        if let Some(ws) = &self.ws {
-            Ok(ws.clone().get_messages().await)
-        } else {
-            anyhow::bail!("No websocket connection is active")
+        match &self.ws {
+            Some(ws) => Ok(ws.clone().get_messages().await),
+            None => Err(anyhow::anyhow!("No websocket connection is active")),
         }
     }
 }

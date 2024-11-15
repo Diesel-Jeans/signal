@@ -1,10 +1,7 @@
-use crate::{
-    account::{Account, AuthenticatedDevice, Device},
-    postgres::PostgresDatabase,
-};
+use crate::account::{Account, AuthenticatedDevice, Device};
 use common::web_api::{AccountAttributes, DeviceCapabilities};
 use libsignal_core::{Pni, ProtocolAddress};
-use libsignal_protocol::{IdentityKey, KeyPair, PublicKey};
+use libsignal_protocol::{IdentityKey, KeyPair};
 use rand::{
     rngs::{OsRng, StdRng},
     Rng, SeedableRng,
@@ -12,11 +9,23 @@ use rand::{
 use uuid::Uuid;
 
 pub fn new_authenticated_device() -> AuthenticatedDevice {
-    let acc = new_account();
-    let device = acc.devices()[0].clone();
+    let (acc, device) = new_account_and_device();
     AuthenticatedDevice::new(acc, device)
 }
-
+pub fn new_account_and_device_and_address() -> (Account, Device, ProtocolAddress) {
+    let (acc, device) = new_account_and_device();
+    let address = ProtocolAddress::new(acc.aci().service_id_string(), device.device_id());
+    (acc, device, address)
+}
+pub fn new_account_and_address() -> (Account, ProtocolAddress) {
+    let (acc, _, address) = new_account_and_device_and_address();
+    (acc, address)
+}
+pub fn new_account_and_device() -> (Account, Device) {
+    let acc = new_account();
+    let device = acc.devices()[0].clone();
+    (acc, device)
+}
 pub fn new_account() -> Account {
     let mut csprng = OsRng;
     let identity_key = KeyPair::generate(&mut csprng);

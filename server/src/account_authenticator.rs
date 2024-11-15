@@ -1,27 +1,23 @@
-use core::panic;
-use std::fmt::Debug;
-
-use axum::{
-    async_trait,
-    extract::{FromRequestParts, State},
-    http::{request::Parts, StatusCode},
-    Error,
-};
-use axum_extra::{
-    headers::{authorization::Basic, Authorization},
-    typed_header::TypedHeaderRejectionReason,
-    TypedHeader,
-};
-use libsignal_core::{DeviceId, ServiceId};
-use rand::{rngs::OsRng, RngCore};
-use sha2::{Digest, Sha256};
-
 use crate::{
     account::{Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
     error::ApiError,
     managers::{state::SignalServerState, websocket::wsstream::WSStream},
 };
+use axum::{
+    async_trait,
+    extract::FromRequestParts,
+    http::{request::Parts, StatusCode},
+};
+use axum_extra::{
+    headers::{authorization::Basic, Authorization},
+    typed_header::TypedHeaderRejectionReason,
+    TypedHeader,
+};
+use libsignal_core::ServiceId;
+use rand::{rngs::OsRng, RngCore};
+use sha2::Sha256;
+use std::fmt::Debug;
 
 const SALT_SIZE: usize = 16;
 const AUTH_TOKEN_HKDF_INFO: &[u8] = "authtoken".as_bytes();

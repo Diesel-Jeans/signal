@@ -1,7 +1,7 @@
 use crate::postgres::PostgresDatabase;
 use anyhow::Result;
 use common::web_api::UploadSignedPreKey;
-use libsignal_core::ServiceId;
+use libsignal_core::{ProtocolAddress, ServiceId};
 
 pub async fn database_connect() -> PostgresDatabase {
     PostgresDatabase::connect("DATABASE_URL_TEST".to_string()).await
@@ -10,8 +10,7 @@ pub async fn database_connect() -> PostgresDatabase {
 pub async fn get_ec_pni_signed_pre_key(
     db: &PostgresDatabase,
     key_id: u32,
-    service_id: &ServiceId,
-    device_id: u32,
+    address: &ProtocolAddress,
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
@@ -31,8 +30,8 @@ pub async fn get_ec_pni_signed_pre_key(
                        AND device_id = $3)
             "#,
         key_id.to_string(),
-        service_id.service_id_string(),
-        device_id.to_string()
+        address.name(),
+        address.device_id().to_string()
     )
     .fetch_one(db.pool())
     .await
@@ -47,8 +46,7 @@ pub async fn get_ec_pni_signed_pre_key(
 pub async fn get_aci_signed_pre_key(
     db: &PostgresDatabase,
     key_id: u32,
-    service_id: &ServiceId,
-    device_id: u32,
+    address: &ProtocolAddress,
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
@@ -68,8 +66,8 @@ pub async fn get_aci_signed_pre_key(
                        AND device_id = $3)
             "#,
         key_id.to_string(),
-        service_id.service_id_string(),
-        device_id.to_string()
+        address.name(),
+        address.device_id().to_string()
     )
     .fetch_one(db.pool())
     .await
@@ -84,8 +82,7 @@ pub async fn get_aci_signed_pre_key(
 pub async fn get_pni_signed_pre_key(
     db: &PostgresDatabase,
     key_id: u32,
-    service_id: &ServiceId,
-    device_id: u32,
+    address: &ProtocolAddress,
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
@@ -105,8 +102,8 @@ pub async fn get_pni_signed_pre_key(
                        AND device_id = $3)
             "#,
         key_id.to_string(),
-        service_id.service_id_string(),
-        device_id.to_string()
+        address.name(),
+        address.device_id().to_string()
     )
     .fetch_one(db.pool())
     .await
@@ -121,8 +118,7 @@ pub async fn get_pni_signed_pre_key(
 pub async fn get_pq_aci_signed_pre_key(
     db: &PostgresDatabase,
     key_id: u32,
-    service_id: &ServiceId,
-    device_id: u32,
+    address: &ProtocolAddress,
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
@@ -142,8 +138,8 @@ pub async fn get_pq_aci_signed_pre_key(
                        AND device_id = $3)
             "#,
         key_id.to_string(),
-        service_id.service_id_string(),
-        device_id.to_string()
+        address.name(),
+        address.device_id().to_string()
     )
     .fetch_one(db.pool())
     .await
@@ -157,8 +153,7 @@ pub async fn get_pq_aci_signed_pre_key(
 pub async fn get_pq_pni_signed_pre_key(
     db: &PostgresDatabase,
     key_id: u32,
-    service_id: &ServiceId,
-    device_id: u32,
+    address: &ProtocolAddress,
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
@@ -178,8 +173,8 @@ pub async fn get_pq_pni_signed_pre_key(
                        AND device_id = $3)
             "#,
         key_id.to_string(),
-        service_id.service_id_string(),
-        device_id.to_string()
+        address.name(),
+        address.device_id().to_string()
     )
     .fetch_one(db.pool())
     .await
@@ -194,8 +189,7 @@ pub async fn get_pq_pni_signed_pre_key(
 pub async fn get_pq_last_resort_pre_key(
     db: &PostgresDatabase,
     key_id: u32,
-    service_id: &ServiceId,
-    device_id: u32,
+    address: &ProtocolAddress,
 ) -> Result<UploadSignedPreKey> {
     sqlx::query!(
         r#"
@@ -215,8 +209,8 @@ pub async fn get_pq_last_resort_pre_key(
                        AND device_id = $3)
             "#,
         key_id.to_string(),
-        service_id.service_id_string(),
-        device_id.to_string()
+        address.name(),
+        address.device_id().to_string()
     )
     .fetch_one(db.pool())
     .await

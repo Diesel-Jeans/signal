@@ -1,13 +1,11 @@
 use crate::{
     account::{Account, Device},
     database::SignalDatabase,
-    postgres::PostgresDatabase,
 };
-use anyhow::{bail, Result};
+use anyhow::Result;
 use common::web_api::{AccountAttributes, DevicePreKeyBundle};
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::IdentityKey;
-use sqlx::database;
 use uuid::Uuid;
 
 #[derive(Default, Debug, Clone)]
