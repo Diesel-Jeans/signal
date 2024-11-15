@@ -389,7 +389,10 @@ async fn create_websocket_endpoint(
                 return;
             };
             ws.lock().await.send_messages(false);
-            state.message_manager.add_message_availability_listener(&addr, ws).await;
+            state
+                .message_manager
+                .add_message_availability_listener(&addr, ws)
+                .await;
         }
     })
 }
