@@ -22,7 +22,7 @@ use crate::database::SignalDatabase;
 use crate::managers::client_presence_manager::DisplacedPresenceListener;
 use crate::managers::state::SignalServerState;
 use crate::message_cache::MessageAvailabilityListener;
-use crate::server::handle_put_messages;
+use crate::server::{handle_keepalive, handle_put_messages};
 
 use prost::{bytes::Bytes, Message as PMessage};
 
@@ -197,13 +197,34 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
 
     async fn handle_request(&mut self, request_msq: WebSocketRequestMessage) -> Result<(), String> {
         let msq_id = request_msq.id.ok_or("Request id was not present")?;
-        if !request_msq.path().starts_with("/v1/messages") {
+        if (!request_msq.path().starts_with("/v1/messages")
+            || !request_msq.path().starts_with("/v1/keepalive"))
+        {
             self.send(Message::Binary(
                 create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
                     .encode_to_vec(),
             ))
             .await;
             return Err(format!("Incorret path: {}", request_msq.path()));
+        }
+
+        if request_msq.path().starts_with("/v1/keepalive") {
+            let user = match &self.identity {
+                UserIdentity::ProtocolAddress(pa) => {
+                    todo!()
+                }
+                UserIdentity::AuthenticatedDevice(auth_device) => auth_device,
+            };
+
+            return match handle_keepalive(&self.state, user).await {
+                Ok(()) => self
+                    .send(Message::Binary(
+                        create_response(msq_id, StatusCode::OK, vec![], None)?.encode_to_vec(),
+                    ))
+                    .await
+                    .map_err(|err| err.to_string()),
+                _ => self.close_reason(1000, "OK").await, //This is extremely wrong and stupid, but it is what happens on line 54 in KeepAliveController.java
+            };
         }
 
         let res = match &self.identity {

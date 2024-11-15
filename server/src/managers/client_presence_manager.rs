@@ -152,9 +152,9 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         let mut presence_keys: Vec<String> = Vec::new();
         let account_uuid = account_uuid.to_string();
         for device_id in device_ids {
-            let addr = ProtocolAddress::new(account_uuid.clone(), device_id.into());
+            let addr = ProtocolAddress::new(account_uuid.clone(), device_id);
             let presence_key = self.get_presence_key(&addr);
-            if (self.is_locally_present(&presence_key)) {
+            if (self.is_locally_present(&addr)) {
                 self.displace_presence(&presence_key, false);
             }
             presence_keys.push(presence_key.to_string());
@@ -167,8 +167,9 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         Ok(deleted_keys)
     }
 
-    fn is_locally_present(&self, presence_key: &str) -> bool {
-        self.displacement_listeners.contains_key(presence_key)
+    pub fn is_locally_present(&self, protocol_address: &ProtocolAddress) -> bool {
+        self.displacement_listeners
+            .contains_key(&self.get_presence_key(protocol_address))
     }
 
     async fn disconnect_presence(&mut self, address: &ProtocolAddress) -> Result<u8> {
@@ -201,7 +202,7 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         Ok(is_present)
     }
 
-    fn get_presence_key(&mut self, address: &ProtocolAddress) -> String {
+    fn get_presence_key(&self, address: &ProtocolAddress) -> String {
         #[cfg(not(test))]
         return format!("presence::{{{}::{}}}", address.name(), address.device_id());
         #[cfg(test)]

@@ -43,6 +43,7 @@ use axum_server::tls_rustls::RustlsConfig;
 use std::fmt::Debug;
 use std::io::BufRead;
 use std::net::SocketAddr;
+use std::os::linux::raw::stat;
 use std::str::FromStr;
 use tonic::service::AxumBody;
 use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
@@ -75,7 +76,7 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
     } else {
         state
             .account_manager
-            .get_account(&destination_identifier)
+            .get_account(destination_identifier)
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::NOT_FOUND,
@@ -136,6 +137,24 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
 
     let needs_sync = !is_sync_message && authenticated_device.account().devices().len() > 1;
     Ok(SendMessageResponse { needs_sync })
+}
+
+pub async fn handle_keepalive<T: SignalDatabase, U: WSStream + Debug>(
+    state: &SignalServerState<T, U>,
+    authenticated_device: &AuthenticatedDevice,
+) -> Result<(), ApiError> {
+    //Check if present in presencemanager. If not present, close connection for device. Else return 200 Ok
+    if !state
+        .client_presence_manager
+        .is_locally_present(&authenticated_device.get_protocol_address(ServiceIdKind::Aci))
+    {
+        return Err(ApiError {
+            status_code: StatusCode::UNAUTHORIZED,
+            message: "Not present".to_owned(),
+        });
+    }
+
+    Ok(())
 }
 
 async fn handle_get_messages<T: SignalDatabase, U: WSStream + Debug>(
@@ -406,6 +425,14 @@ async fn create_websocket_endpoint(
     })
 }
 
+#[debug_handler]
+pub async fn get_keepalive(
+    State(mut state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+    authenticated_device: AuthenticatedDevice,
+) -> impl IntoResponse {
+    handle_keepalive(&state, &authenticated_device).await
+}
+
 /// To add a new endpoint:
 ///  * create an async router function: `<method>_<endpoint_name>_endpoint`.
 ///  * create an async handler function: `handle_<method>_<endpoint_name>`
@@ -450,6 +477,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/devices/link", post(post_link_device_endpoint))
         .route("/v1/devices/:device_id", delete(delete_device_endpoint))
         .route("/v1/websocket", any(create_websocket_endpoint))
+        .route("/v1/keepalive", get(get_keepalive))
         .with_state(state)
         .layer(
             ServiceBuilder::new()
