@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::test_utils::random_string;
 use anyhow::Result;
 use common::signal_protobuf::Envelope;
 use deadpool_redis::redis::cmd;
@@ -26,6 +28,8 @@ type ListenerMap<T> = Arc<Mutex<HashMap<String, Arc<Mutex<T>>>>>;
 pub struct MessageCache<T: MessageAvailabilityListener> {
     pool: deadpool_redis::Pool,
     listeners: ListenerMap<T>,
+    #[cfg(test)]
+    pub test_key: String,
 }
 
 impl<T> Clone for MessageCache<T>
@@ -33,9 +37,16 @@ where
     T: MessageAvailabilityListener,
 {
     fn clone(&self) -> Self {
+        #[cfg(not(test))]
+        return Self {
+            pool: self.pool.clone(),
+            listeners: self.listeners.clone(),
+        };
+        #[cfg(test)]
         Self {
             pool: self.pool.clone(),
             listeners: self.listeners.clone(),
+            test_key: self.test_key.clone(),
         }
     }
 }
@@ -48,9 +59,16 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         let redis_pool: deadpool_redis::Pool = redis_config
             .create_pool(Some(Runtime::Tokio1))
             .expect("Failed to create connection pool");
+        #[cfg(not(test))]
+        return Self {
+            pool: redis_pool,
+            listeners: Arc::new(Mutex::new(HashMap::new())),
+        };
+        #[cfg(test)]
         Self {
             pool: redis_pool,
             listeners: Arc::new(Mutex::new(HashMap::new())),
+            test_key: random_string(8),
         }
     }
 
@@ -368,31 +386,58 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
     }
 
     pub fn get_message_queue_key(&self, address: &ProtocolAddress) -> String {
-        format!(
-            "user_messages::{{{}::{}}}",
+        #[cfg(not(test))]
+        return format!(
+            "user_queue::{{{}::{}}}",
             address.name(),
             address.device_id()
-        )
+        );
+        #[cfg(test)]
+        return format!(
+            "{}user_queue::{{{}::{}}}",
+            self.test_key,
+            address.name(),
+            address.device_id()
+        );
     }
 
     pub fn get_persist_in_progress_key(&self, address: &ProtocolAddress) -> String {
-        format!(
+        #[cfg(not(test))]
+        return format!(
             "user_queue_persisting::{{{}::{}}}",
+            address.name(),
+            address.device_id()
+        );
+        #[cfg(test)]
+        format!(
+            "{}user_queue_persisting::{{{}::{}}}",
+            self.test_key,
             address.name(),
             address.device_id()
         )
     }
 
     fn get_message_queue_metadata_key(&self, address: &ProtocolAddress) -> String {
+        #[cfg(not(test))]
+        return format!(
+            "user_queue_metadata::{{{}::{}}}",
+            address.name(),
+            address.device_id()
+        );
+        #[cfg(test)]
         format!(
-            "user_messages_count::{{{}::{}}}",
+            "{}user_queue_metadata::{{{}::{}}}",
+            self.test_key,
             address.name(),
             address.device_id()
         )
     }
 
     pub fn get_queue_index_key(&self) -> String {
-        "user_queue_index_key".to_string() // Should be changed if we use Redis Cluster
+        #[cfg(not(test))]
+        return "user_queue_index_key".to_string(); // Should be changed if we use Redis Cluster
+        #[cfg(test)]
+        format!("{}user_queue_index_key", self.test_key) // Should be changed if we use Redis Cluster
     }
 
     pub fn get_account_and_device_id_from_queue_key(&self, queue_key: &str) -> (String, String) {
@@ -429,7 +474,7 @@ pub mod message_cache_tests {
     use uuid::Uuid;
 
     #[tokio::test]
-    #[serial]
+
     async fn test_message_availability_listener_new_messages() {
         let mut message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
         let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
@@ -451,7 +496,7 @@ pub mod message_cache_tests {
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_insert() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
         let mut connection = message_cache.pool.get().await.unwrap();
@@ -473,7 +518,7 @@ pub mod message_cache_tests {
             .await
             .unwrap();
 
-        teardown(connection).await;
+        teardown(&message_cache.test_key, connection).await;
 
         assert_eq!(
             envelope,
@@ -482,7 +527,7 @@ pub mod message_cache_tests {
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_insert_same_id() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
@@ -513,7 +558,7 @@ pub mod message_cache_tests {
             .await
             .unwrap();
 
-        teardown(connection).await;
+        teardown(&message_cache.test_key, connection).await;
 
         assert_eq!(
             envelope1,
@@ -524,7 +569,7 @@ pub mod message_cache_tests {
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_insert_different_ids() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
 
@@ -565,7 +610,7 @@ pub mod message_cache_tests {
             .await
             .unwrap();
 
-        teardown(connection).await;
+        teardown(&message_cache.test_key, connection).await;
 
         // they are inserted as two different messages
         assert_ne!(message_id, message_id_2);
@@ -577,7 +622,7 @@ pub mod message_cache_tests {
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_remove() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
         let mut connection = message_cache.pool.get().await.unwrap();
@@ -595,14 +640,14 @@ pub mod message_cache_tests {
             .await
             .unwrap();
 
-        teardown(connection).await;
+        teardown(&message_cache.test_key, connection).await;
 
         assert_eq!(removed_messages.len(), 1);
         assert_eq!(removed_messages[0], envelope);
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_get_all_messages() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
         let mut connection = message_cache.pool.get().await.unwrap();
@@ -624,7 +669,7 @@ pub mod message_cache_tests {
         //getting those messages
         let mut messages = message_cache.get_all_messages(&address).await.unwrap();
 
-        teardown(connection).await;
+        teardown(&message_cache.test_key, connection).await;
 
         assert_eq!(messages.len(), 10);
 
@@ -634,7 +679,7 @@ pub mod message_cache_tests {
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_has_messages() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
         let mut connection = message_cache.pool.get().await.unwrap();
@@ -652,14 +697,14 @@ pub mod message_cache_tests {
 
         let has_messages = message_cache.has_messages(&address).await.unwrap();
 
-        teardown(connection).await;
+        teardown(&message_cache.test_key, connection).await;
 
         assert!(!does_not_has_messages);
         assert!(has_messages);
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_get_messages_to_persist() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
         let mut connection = message_cache.pool.get().await.unwrap();
@@ -678,7 +723,7 @@ pub mod message_cache_tests {
             .await
             .unwrap();
 
-        teardown(connection).await;
+        teardown(&message_cache.test_key, connection).await;
 
         assert_eq!(envelopes.len(), 1);
     }

@@ -179,7 +179,7 @@ pub mod message_manager_tests {
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_may_have_cached_persisted_messages() {
         let msg_manager = init_manager().await.unwrap();
 
@@ -196,13 +196,17 @@ pub mod message_manager_tests {
             .unwrap();
 
         // Teardown cache
-        teardown(msg_manager.message_cache.get_connection().await.unwrap()).await;
+        teardown(
+            &msg_manager.message_cache.test_key,
+            msg_manager.message_cache.get_connection().await.unwrap(),
+        )
+        .await;
 
         assert_eq!(may_have_messages, (true, "cached"));
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_may_have_persisted_persisted_messages() {
         let msg_manager = init_manager().await.unwrap();
 
@@ -236,7 +240,7 @@ pub mod message_manager_tests {
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_may_have_both_cached_and_db_persisted_messages() {
         let msg_manager = init_manager().await.unwrap();
 
@@ -269,13 +273,17 @@ pub mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(msg_manager.message_cache.get_connection().await.unwrap()).await;
+        teardown(
+            &msg_manager.message_cache.test_key,
+            msg_manager.message_cache.get_connection().await.unwrap(),
+        )
+        .await;
 
         assert_eq!(may_have_messages, (true, "both"));
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_count_messages() {
         let msg_manager = init_manager().await.unwrap();
 
@@ -306,7 +314,7 @@ pub mod message_manager_tests {
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_get_messages_for_device() {
         let msg_manager = init_manager().await.unwrap();
 
@@ -341,13 +349,17 @@ pub mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(msg_manager.message_cache.get_connection().await.unwrap()).await;
+        teardown(
+            &msg_manager.message_cache.test_key,
+            msg_manager.message_cache.get_connection().await.unwrap(),
+        )
+        .await;
 
         assert_eq!(messages_for_device_cache_and_db.len(), 4);
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_get_cache_only_messages_for_device() {
         let msg_manager = init_manager().await.unwrap();
 
@@ -385,14 +397,18 @@ pub mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(msg_manager.message_cache.get_connection().await.unwrap()).await;
+        teardown(
+            &msg_manager.message_cache.test_key,
+            msg_manager.message_cache.get_connection().await.unwrap(),
+        )
+        .await;
 
         assert_eq!(messages_for_device_cache_only.len(), 1);
         assert_eq!(messages_for_device_db_and_cache.len(), 2);
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_delete_messages() {
         let msg_manager = init_manager().await.unwrap();
 
@@ -437,14 +453,18 @@ pub mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(msg_manager.message_cache.get_connection().await.unwrap()).await;
+        teardown(
+            &msg_manager.message_cache.test_key,
+            msg_manager.message_cache.get_connection().await.unwrap(),
+        )
+        .await;
 
         assert_eq!(messages_for_device_db_and_cache.len(), 3);
         assert_eq!(deleted_messages.len(), 3);
     }
 
     #[tokio::test]
-    #[serial]
+
     async fn test_persist_messages() {
         let msg_manager = init_manager().await.unwrap();
 
@@ -481,7 +501,11 @@ pub mod message_manager_tests {
             .await
             .unwrap();
 
-        teardown(msg_manager.message_cache.get_connection().await.unwrap()).await;
+        teardown(
+            &msg_manager.message_cache.test_key,
+            msg_manager.message_cache.get_connection().await.unwrap(),
+        )
+        .await;
 
         assert_eq!(messages_in_cache.len(), 2);
         assert_eq!(messages_in_db.len(), 0);

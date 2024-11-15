@@ -9,8 +9,32 @@ pub fn generate_uuid() -> String {
     guid.to_string()
 }
 
-pub async fn teardown(mut con: deadpool_redis::Connection) {
-    cmd("FLUSHALL").query_async::<()>(&mut con).await.unwrap();
+pub async fn teardown(key: &str, mut con: deadpool_redis::Connection) {
+    let pattern = format!("{}*", key);
+    let mut cursor = 0;
+
+    loop {
+        let (new_cursor, keys): (u64, Vec<String>) = cmd("SCAN")
+            .arg(cursor)
+            .arg("MATCH")
+            .arg(pattern.clone())
+            .query_async(&mut con)
+            .await
+            .expect("Teardown scan failed");
+
+        if !keys.is_empty() {
+            cmd("DEL")
+                .arg(&keys)
+                .query_async::<u8>(&mut con)
+                .await
+                .expect("Teardown delete failed");
+        }
+
+        cursor = new_cursor;
+        if cursor == 0 {
+            break;
+        }
+    }
 }
 
 pub fn generate_envelope(uuid: &str) -> Envelope {
