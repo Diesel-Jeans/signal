@@ -76,10 +76,9 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
     }
 
     pub async fn send_message(&mut self, mut message: Envelope) -> Result<(), String> {
-        let msg = match self.create_message(message) {
-            Ok(x) => x,
-            Err(_) => return Err("Time went backwards".to_string()),
-        };
+        let msg = self
+            .create_message(message)
+            .map_err(|_| "Time went backwards".to_string())?;
         match self.send(Message::Binary(msg.encode_to_vec())).await {
             Ok(_) => Ok(()),
             Err(x) => Err(format!("{}", x)),
@@ -87,16 +86,14 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
     }
 
     pub async fn send_messages(&mut self, cached_only: bool) -> bool {
-        let msg_mgr = &self.state.message_manager;
-
-        let addr = self.protocol_address();
-        let res = msg_mgr.get_messages_for_device(&addr, cached_only).await;
-        let envelopes = match res {
-            Ok(x) => x,
-            Err(_) => {
-                println!("Failed to fetch messages");
-                return false;
-            }
+        let Ok(envelopes) = self
+            .state
+            .message_manager
+            .get_messages_for_device(&self.protocol_address(), cached_only)
+            .await
+        else {
+            println!("Failed to fetch messages");
+            return false;
         };
 
         for envelope in envelopes {
@@ -652,16 +649,20 @@ pub(crate) mod test {
 
         state
             .db
-            .delete_account(&ServiceId::Aci(
-                Aci::parse_from_service_id_string(alice_address.name()).unwrap(),
-            ))
+            .delete_account(
+                &Aci::parse_from_service_id_string(alice_address.name())
+                    .unwrap()
+                    .into(),
+            )
             .await
             .unwrap();
         state
             .db
-            .delete_account(&ServiceId::Aci(
-                Aci::parse_from_service_id_string(bob_address.name()).unwrap(),
-            ))
+            .delete_account(
+                &Aci::parse_from_service_id_string(bob_address.name())
+                    .unwrap()
+                    .into(),
+            )
             .await
             .unwrap();
 

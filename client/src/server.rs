@@ -1,21 +1,27 @@
-use crate::client::VerifiedSession;
-use crate::contact_manager::Contact;
-use crate::websockets::{KeepAliveOptions, SendRequestOptions, WebsocketHandler};
+use crate::{
+    client::VerifiedSession,
+    contact_manager::Contact,
+    websockets::{KeepAliveOptions, SendRequestOptions, WebsocketHandler},
+};
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
-use common::signal_protobuf::{WebSocketRequestMessage, WebSocketResponseMessage};
-use common::web_api::authorization::BasicAuthorizationHeader;
-use common::web_api::{AccountAttributes, RegistrationRequest, UploadSignedPreKey};
-use http::StatusCode;
+use common::{
+    signal_protobuf::{WebSocketRequestMessage, WebSocketResponseMessage},
+    web_api::{
+        authorization::BasicAuthorizationHeader, AccountAttributes, RegistrationRequest,
+        UploadSignedPreKey,
+    },
+};
 use http_client::h1::H1Client;
-use libsignal_protocol::IdentityKey;
-use std::fmt::Display;
-use std::io::{BufReader, Error, ErrorKind, Read};
-use std::sync::Arc;
-use std::time::Duration;
-use std::{env, fs};
-use surf::http::convert::json;
-use surf::{http, Client, Config, HttpClient, RequestBuilder, Response, Url};
+use std::{
+    env,
+    fmt::Display,
+    fs,
+    io::{Error, ErrorKind},
+    sync::Arc,
+    time::Duration,
+};
+use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
 use tokio_tungstenite::connect_async;
 
 const CLIENT_URI: &str = "/client";

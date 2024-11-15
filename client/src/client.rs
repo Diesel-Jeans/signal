@@ -1,28 +1,26 @@
-use crate::contact_manager::ContactManager;
-use crate::errors::{LoginError, RegistrationError};
-use crate::key_management::key_manager::{InMemoryKeyManager, KeyManager};
-use crate::server::{Server, ServerAPI};
-use crate::storage::{self, DeviceStorage, Storage};
 use anyhow::Result;
-use base64::prelude::BASE64_STANDARD;
-use base64::Engine;
-use common::signal_protobuf::WebSocketResponseMessage;
-use common::web_api::{
-    AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse,
-    UploadSignedPreKey,
+use base64::{prelude::BASE64_STANDARD, Engine as _};
+use common::{
+    signal_protobuf::WebSocketResponseMessage,
+    web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse},
 };
 use core::str;
 use libsignal_core::{Aci, Pni};
 use libsignal_protocol::{
-    IdentityKey, IdentityKeyPair, InMemSignalProtocolStore, KeyPair, KyberPreKeyRecord, PublicKey,
+    IdentityKey, IdentityKeyPair, InMemSignalProtocolStore, KeyPair, KyberPreKeyRecord,
     SignedPreKeyRecord,
 };
-use rand::rngs::OsRng;
-use rand::Rng;
-use std::default;
+use rand::{rngs::OsRng, Rng};
 use std::error::Error;
-use std::fmt::{self, format, Debug, Display};
 use surf::StatusCode;
+
+use crate::{
+    contact_manager::ContactManager,
+    errors::{LoginError, RegistrationError},
+    key_management::key_manager::{InMemoryKeyManager, KeyManager},
+    server::{Server, ServerAPI},
+    storage::{DeviceStorage, Storage},
+};
 
 pub struct Client {
     aci: Aci,

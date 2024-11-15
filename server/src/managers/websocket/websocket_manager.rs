@@ -117,16 +117,13 @@ where
 
         tokio::spawn(async move {
             while let Some(res) = receiver.next().await {
-                let msg = match res {
-                    Ok(y) => y,
-                    Err(x) => {
-                        println!("WebSocketManager recv ERROR: {}", x);
-                        connection.lock().await.close().await;
-                        break;
-                    }
+                if let Err(x) = res {
+                    println!("WebSocketManager recv ERROR: {}", x);
+                    connection.lock().await.close().await;
+                    break;
                 };
 
-                match msg {
+                match res.unwrap() {
                     Message::Binary(b) => {
                         let msg = match WebSocketMessage::decode(Bytes::from(b)) {
                             Ok(x) => x,
