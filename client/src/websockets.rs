@@ -308,6 +308,16 @@ impl WebsocketHandler {
         }
     }
 
+    pub async fn get_messages(&mut self) -> Vec<WebSocketRequestMessage> {
+        let mut msg_vec: Vec<WebSocketRequestMessage> = Vec::new();
+
+        while let Ok(msg) = self.ws_request_channel.lock().await.try_recv() {
+            msg_vec.push(msg);
+        }
+
+        msg_vec
+    }
+
     pub async fn close(&mut self, code: u16, reason: String) -> Result<()> {
         Ok(self
             .socket

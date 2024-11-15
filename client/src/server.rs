@@ -3,7 +3,7 @@ use crate::contact_manager::Contact;
 use crate::websockets::{KeepAliveOptions, SendRequestOptions, WebsocketHandler};
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
-use common::signal_protobuf::WebSocketResponseMessage;
+use common::signal_protobuf::{WebSocketRequestMessage, WebSocketResponseMessage};
 use common::web_api::authorization::BasicAuthorizationHeader;
 use common::web_api::{AccountAttributes, RegistrationRequest, UploadSignedPreKey};
 use http::StatusCode;
@@ -262,6 +262,14 @@ impl ServerAPI {
                 ),
             )
             .into()),
+        }
+    }
+
+    async fn get_incoming_messages(&mut self) -> Result<Vec<WebSocketRequestMessage>> {
+        if let Some(ws) = &self.ws {
+            Ok(ws.clone().get_messages().await)
+        } else {
+            anyhow::bail!("No websocket connection is active")
         }
     }
 }
