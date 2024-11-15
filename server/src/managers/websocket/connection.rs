@@ -223,7 +223,13 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
                     ))
                     .await
                     .map_err(|err| err.to_string()),
-                _ => self.close_reason(1000, "OK").await, //This is extremely wrong and stupid, but it is what happens on line 54 in KeepAliveController.java
+                _ => self
+                    .send(Message::Binary(
+                        create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
+                            .encode_to_vec(),
+                    ))
+                    .await
+                    .map_err(|err| err.to_string()), //This is extremely wrong and stupid, but it is what happens on line 54 in KeepAliveController.java
             };
         }
 

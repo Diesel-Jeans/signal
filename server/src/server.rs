@@ -148,10 +148,13 @@ pub async fn handle_keepalive<T: SignalDatabase, U: WSStream + Debug>(
         .client_presence_manager
         .is_locally_present(&authenticated_device.get_protocol_address(ServiceIdKind::Aci))
     {
-        return Err(ApiError {
-            status_code: StatusCode::UNAUTHORIZED,
-            message: "Not present".to_owned(),
-        });
+        if let Some(connection) = state
+            .websocket_manager
+            .get(&authenticated_device.get_protocol_address(ServiceIdKind::Aci))
+            .await
+        {
+            connection.lock().await.close_reason(1000, "OK").await;
+        }
     }
 
     Ok(())
