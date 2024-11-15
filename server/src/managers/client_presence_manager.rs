@@ -3,9 +3,13 @@ use deadpool_redis::{Config, Runtime};
 use libsignal_core::DeviceId;
 use redis::cmd;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+#[cfg(test)]
+use crate::test_utils::random_string;
 
 const PRESENCE_EXPIRATION_SECONDS: u16 = 660;
 
@@ -23,6 +27,8 @@ pub struct ClientPresenceManager<T: DisplacedPresenceListener> {
     displacement_listeners: HashMap<String, Arc<Mutex<T>>>,
     pool: deadpool_redis::Pool,
     manager_id: String,
+    #[cfg(test)]
+    pub test_key: String,
 }
 
 impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
@@ -31,12 +37,23 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         let redis_url = std::env::var("REDIS_URL").expect("Unable to read REDIS_URL .env var");
         let mut redis_config = Config::from_url(redis_url);
         let redis_pool: deadpool_redis::Pool = redis_config.create_pool(Some(Runtime::Tokio1))?;
+        
+        #[cfg(not (test))]
+        return Ok(ClientPresenceManager {
+            displacement_listeners: HashMap::new(),
+            pool: redis_pool,
+            manager_id: Uuid::new_v4().to_string(),
+        });
 
+        #[cfg(test)]
         Ok(ClientPresenceManager {
             displacement_listeners: HashMap::new(),
             pool: redis_pool,
             manager_id: Uuid::new_v4().to_string(),
+            test_key: random_string(8)
         })
+
+        
     }
 
     async fn set_present(
@@ -46,7 +63,7 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         displacement_listener: Arc<Mutex<T>>,
     ) -> Result<()> {
         let presence_key =
-            ClientPresenceManager::<T>::get_presence_key(account_uuid, device_id.into());
+            self.get_presence_key(account_uuid, device_id.into());
 
         if self.displacement_listeners.contains_key(&presence_key) {
             self.displace_presence(&presence_key, true).await;
@@ -75,9 +92,8 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         Ok(())
     }
 
-    async fn renew_presence(&self, account_uuid: &str, device_id: DeviceId) -> Result<()> {
-        let presence_key =
-            ClientPresenceManager::<T>::get_presence_key(account_uuid, device_id.into());
+    async fn renew_presence(&mut self, account_uuid: &str, device_id: DeviceId) -> Result<()> {
+        let presence_key = self.get_presence_key(account_uuid, device_id.into());
         let mut connection = self.pool.get().await?;
 
         // If there is no presence key connected to the manager, we cannot renew it.
@@ -127,7 +143,7 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
 
         for device_id in device_ids {
             let presence_key =
-                ClientPresenceManager::<T>::get_presence_key(account_uuid, device_id.into());
+                self.get_presence_key(account_uuid, device_id.into());
             if (self.is_locally_present(&presence_key)) {
                 self.displace_presence(&presence_key, false);
             }
@@ -169,7 +185,7 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
     async fn is_present(&mut self, account_id: &str, device_id: DeviceId) -> Result<bool> {
         let mut connection = self.pool.get().await?;
         let is_present = cmd("EXISTS")
-            .arg(ClientPresenceManager::<T>::get_presence_key(
+            .arg(self.get_presence_key(
                 account_id,
                 device_id.into(),
             ))
@@ -178,12 +194,18 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         Ok(is_present)
     }
 
-    fn get_presence_key(account_uuid: &str, device_id: u32) -> String {
-        format!("presence::{{{}::{}}}", account_uuid, device_id)
+    fn get_presence_key(&mut self, account_uuid: &str, device_id: u32) -> String {
+        #[cfg(not (test))]
+        return format!("presence::{{{}::{}}}", account_uuid, device_id);
+        #[cfg(test)]
+        format!("{}presence::{{{}::{}}}", self.test_key, account_uuid, device_id)
     }
 
     fn get_set_key(&mut self) -> String {
-        format!("presence::clients::{}", self.manager_id)
+        #[cfg(not (test))]
+        return format!("presence::clients::{}", self.manager_id);
+        #[cfg(test)]
+        format!("{}presence::clients::{}", self.test_key, self.manager_id)
     }
 }
 
@@ -214,7 +236,7 @@ mod client_presence_manager_test {
     }
 
     #[tokio::test]
-    #[serial]
+    
     async fn test_handle_displacement() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
             ClientPresenceManager::connect().unwrap();
@@ -241,32 +263,33 @@ mod client_presence_manager_test {
         for presence_key in presence_keys {
             assert_eq!(
                 presence_key,
-                ClientPresenceManager::<MockWebSocketConnection>::get_presence_key(
+                manager.get_presence_key(
                     account_id.as_str(),
                     device_id.into()
                 )
             );
         }
+        let presence_key = manager.get_presence_key(
+            &account_id,
+            device_id.into(),
+        );
         let is_handle_displacement_invoked = manager
             .displacement_listeners
             .get(
-                &ClientPresenceManager::<MockWebSocketConnection>::get_presence_key(
-                    &account_id,
-                    device_id.into(),
-                ),
+                &presence_key,
             )
             .unwrap()
             .lock()
             .await
             .evoke_handle_displacement;
 
-        teardown(connection).await;
+        teardown(&manager.test_key, connection).await;
 
         assert!(is_handle_displacement_invoked);
     }
 
     #[tokio::test]
-    #[serial]
+    
     async fn test_set_present() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
             ClientPresenceManager::connect().unwrap();
@@ -289,33 +312,35 @@ mod client_presence_manager_test {
         for presence_key in presence_keys {
             assert_eq!(
                 presence_key,
-                ClientPresenceManager::<MockWebSocketConnection>::get_presence_key(
+                manager.get_presence_key(
                     account_id.as_str(),
                     device_id.into()
                 )
             );
         }
 
+        let presence_key = manager.get_presence_key(
+            &account_id,
+            device_id.into(),
+        );
+
         let is_handle_displacement_invoked = manager
             .displacement_listeners
             .get(
-                &ClientPresenceManager::<MockWebSocketConnection>::get_presence_key(
-                    &account_id,
-                    device_id.into(),
-                ),
+               &presence_key,
             )
             .unwrap()
             .lock()
             .await
             .evoke_handle_displacement;
 
-        teardown(connection).await;
+        teardown(&manager.test_key, connection).await;
 
         assert!(!is_handle_displacement_invoked);
     }
 
     #[tokio::test]
-    #[serial]
+    
     async fn test_disconnect_all_presence() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
             ClientPresenceManager::connect().unwrap();
@@ -334,13 +359,13 @@ mod client_presence_manager_test {
             .await
             .unwrap();
 
-        teardown(connection).await;
+        teardown(&manager.test_key, connection).await;
 
         assert_eq!(removed, 1);
     }
 
     #[tokio::test]
-    #[serial]
+    
     async fn test_is_present() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
             ClientPresenceManager::connect().unwrap();
@@ -358,7 +383,7 @@ mod client_presence_manager_test {
             .await
             .unwrap();
 
-        teardown(connection).await;
+        teardown(&manager.test_key, connection).await;
 
         assert!(is_present);
     }

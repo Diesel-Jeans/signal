@@ -351,7 +351,7 @@ mod message_persister_tests {
         let no_queue_persist_keys_in_cache =
             no_queue_persist_keys_in_cache(&cache, &protocol_addresses).await;
 
-        teardown(cache.get_connection().await.unwrap()).await;
+        teardown(&cache.test_key, cache.get_connection().await.unwrap()).await;
 
         for account in accounts {
             db.delete_account(&ServiceId::Aci(account.aci()))
@@ -372,7 +372,7 @@ mod message_persister_tests {
     }
 
     #[tokio::test]
-    #[serial]
+    
     async fn test_message_persister_late_msg() {
         let message_time = SystemTime::now() // 11 minutes old
             .duration_since(UNIX_EPOCH)
@@ -396,7 +396,7 @@ mod message_persister_tests {
     }
 
     #[tokio::test]
-    #[serial]
+    
     async fn test_message_persister_new_msg() {
         let message_time = SystemTime::now() // 5 minutes old
             .duration_since(UNIX_EPOCH)
@@ -420,7 +420,7 @@ mod message_persister_tests {
     }
 
     #[tokio::test]
-    #[serial]
+    
     async fn test_message_persister_new_and_late_msg() {
         let message_time = SystemTime::now() // 10 minutes old
             .duration_since(UNIX_EPOCH)
