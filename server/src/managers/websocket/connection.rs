@@ -19,6 +19,7 @@ use tokio::sync::Mutex;
 
 use crate::account::AuthenticatedDevice;
 use crate::database::SignalDatabase;
+use crate::managers::client_presence_manager::DisplacedPresenceListener;
 use crate::managers::state::SignalServerState;
 use crate::message_cache::MessageAvailabilityListener;
 use crate::server::handle_put_messages;
@@ -305,6 +306,24 @@ where
             return false;
         }
         return self.send_queue_empty().await;
+    }
+}
+
+#[async_trait::async_trait]
+impl<T, U> DisplacedPresenceListener for WebSocketConnection<T, U>
+where
+    T: WSStream + Debug + 'static,
+    U: SignalDatabase,
+{
+    async fn handle_displacement(&mut self, connected_elsewhere: bool) {
+        let fut = if connected_elsewhere {
+            self.close_reason(4409, "Connected elsewhere")
+        } else {
+            self.close_reason(1000, "OK")
+        };
+        if let Err(x) = fut.await {
+            println!("Displacement Close Error: {}", x);
+        };
     }
 }
 

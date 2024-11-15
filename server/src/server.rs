@@ -399,8 +399,9 @@ async fn create_websocket_endpoint(
             ws.lock().await.send_messages(false);
             state
                 .message_manager
-                .add_message_availability_listener(&addr, ws)
+                .add_message_availability_listener(&addr, ws.clone())
                 .await;
+            state.client_presence_manager.set_present(&addr, ws).await;
         }
     })
 }

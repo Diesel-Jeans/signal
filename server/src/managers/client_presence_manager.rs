@@ -1,6 +1,6 @@
 use anyhow::Result;
 use deadpool_redis::{Config, Runtime};
-use libsignal_core::DeviceId;
+use libsignal_core::{DeviceId, ProtocolAddress};
 use redis::cmd;
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -18,11 +18,11 @@ const PRESENCE_EXPIRATION_SECONDS: u16 = 660;
  * client opened a newer connection to the Signal service.
  */
 #[async_trait::async_trait]
-pub trait DisplacedPresenceListener {
+pub trait DisplacedPresenceListener: Send + 'static {
     async fn handle_displacement(&mut self, connected_elsewhere: bool);
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ClientPresenceManager<T: DisplacedPresenceListener> {
     displacement_listeners: HashMap<String, Arc<Mutex<T>>>,
     pool: deadpool_redis::Pool,
@@ -31,36 +31,49 @@ pub struct ClientPresenceManager<T: DisplacedPresenceListener> {
     pub test_key: String,
 }
 
+impl<T: DisplacedPresenceListener> Clone for ClientPresenceManager<T> {
+    fn clone(&self) -> Self {
+        Self {
+            displacement_listeners: self.displacement_listeners.clone(),
+            pool: self.pool.clone(),
+            manager_id: self.manager_id.clone(),
+            #[cfg(test)]
+            test_key: self.test_key.clone(),
+        }
+    }
+}
+
 impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
-    pub fn connect() -> Result<ClientPresenceManager<T>> {
+    pub fn connect() -> Self {
         let _ = dotenv::dotenv();
         let redis_url = std::env::var("REDIS_URL").expect("Unable to read REDIS_URL .env var");
         let mut redis_config = Config::from_url(redis_url);
-        let redis_pool: deadpool_redis::Pool = redis_config.create_pool(Some(Runtime::Tokio1))?;
+        let redis_pool: deadpool_redis::Pool = redis_config
+            .create_pool(Some(Runtime::Tokio1))
+            .expect("Could not create pool");
 
         #[cfg(not(test))]
-        return Ok(ClientPresenceManager {
+        return Self {
             displacement_listeners: HashMap::new(),
             pool: redis_pool,
             manager_id: Uuid::new_v4().to_string(),
-        });
+        };
 
         #[cfg(test)]
-        Ok(ClientPresenceManager {
+        Self {
             displacement_listeners: HashMap::new(),
             pool: redis_pool,
             manager_id: Uuid::new_v4().to_string(),
             test_key: random_string(8),
-        })
+        }
     }
 
-    async fn set_present(
+    pub async fn set_present(
         &mut self,
-        account_uuid: &str,
-        device_id: DeviceId,
+        address: &ProtocolAddress,
         displacement_listener: Arc<Mutex<T>>,
     ) -> Result<()> {
-        let presence_key = self.get_presence_key(account_uuid, device_id.into());
+        let presence_key = self.get_presence_key(address);
 
         if self.displacement_listeners.contains_key(&presence_key) {
             self.displace_presence(&presence_key, true).await;
@@ -89,8 +102,8 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         Ok(())
     }
 
-    async fn renew_presence(&mut self, account_uuid: &str, device_id: DeviceId) -> Result<()> {
-        let presence_key = self.get_presence_key(account_uuid, device_id.into());
+    async fn renew_presence(&mut self, address: &ProtocolAddress) -> Result<()> {
+        let presence_key = self.get_presence_key(address);
         let mut connection = self.pool.get().await?;
 
         // If there is no presence key connected to the manager, we cannot renew it.
@@ -137,9 +150,10 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
     ) -> Result<u8> {
         let mut connection = self.pool.get().await?;
         let mut presence_keys: Vec<String> = Vec::new();
-
+        let account_uuid = account_uuid.to_string();
         for device_id in device_ids {
-            let presence_key = self.get_presence_key(account_uuid, device_id.into());
+            let addr = ProtocolAddress::new(account_uuid.clone(), device_id.into());
+            let presence_key = self.get_presence_key(&addr);
             if (self.is_locally_present(&presence_key)) {
                 self.displace_presence(&presence_key, false);
             }
@@ -157,8 +171,8 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         self.displacement_listeners.contains_key(presence_key)
     }
 
-    async fn disconnect_presence(&mut self, account_uuid: &str, device_id: DeviceId) -> Result<u8> {
-        self.disconnect_all_presence(account_uuid, vec![device_id])
+    async fn disconnect_presence(&mut self, address: &ProtocolAddress) -> Result<u8> {
+        self.disconnect_all_presence(address.name(), vec![address.device_id()])
             .await
     }
 
@@ -178,22 +192,24 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         self.clear_presence(presence_key).await
     }
 
-    async fn is_present(&mut self, account_id: &str, device_id: DeviceId) -> Result<bool> {
+    async fn is_present(&mut self, address: &ProtocolAddress) -> Result<bool> {
         let mut connection = self.pool.get().await?;
         let is_present = cmd("EXISTS")
-            .arg(self.get_presence_key(account_id, device_id.into()))
+            .arg(self.get_presence_key(address))
             .query_async::<bool>(&mut connection)
             .await?;
         Ok(is_present)
     }
 
-    fn get_presence_key(&mut self, account_uuid: &str, device_id: u32) -> String {
+    fn get_presence_key(&mut self, address: &ProtocolAddress) -> String {
         #[cfg(not(test))]
-        return format!("presence::{{{}::{}}}", account_uuid, device_id);
+        return format!("presence::{{{}::{}}}", address.name(), address.device_id());
         #[cfg(test)]
         format!(
             "{}presence::{{{}::{}}}",
-            self.test_key, account_uuid, device_id
+            self.test_key,
+            address.name(),
+            address.device_id()
         )
     }
 
@@ -235,20 +251,15 @@ mod client_presence_manager_test {
 
     async fn test_handle_displacement() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
-            ClientPresenceManager::connect().unwrap();
+            ClientPresenceManager::connect();
         let mut connection = manager.pool.get().await.unwrap();
         let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
         let account_id = generate_uuid();
         let device_id = DeviceId::from(2);
+        let addr = ProtocolAddress::new(account_id, device_id);
 
-        manager
-            .set_present(account_id.as_str(), device_id, websocket.clone())
-            .await
-            .unwrap();
-        manager
-            .set_present(account_id.as_str(), device_id, websocket.clone())
-            .await
-            .unwrap();
+        manager.set_present(&addr, websocket.clone()).await.unwrap();
+        manager.set_present(&addr, websocket.clone()).await.unwrap();
 
         let presence_keys = cmd("SMEMBERS")
             .arg(manager.get_set_key())
@@ -257,12 +268,9 @@ mod client_presence_manager_test {
             .unwrap();
 
         for presence_key in presence_keys {
-            assert_eq!(
-                presence_key,
-                manager.get_presence_key(account_id.as_str(), device_id.into())
-            );
+            assert_eq!(presence_key, manager.get_presence_key(&addr));
         }
-        let presence_key = manager.get_presence_key(&account_id, device_id.into());
+        let presence_key = manager.get_presence_key(&addr);
         let is_handle_displacement_invoked = manager
             .displacement_listeners
             .get(&presence_key)
@@ -280,16 +288,15 @@ mod client_presence_manager_test {
 
     async fn test_set_present() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
-            ClientPresenceManager::connect().unwrap();
+            ClientPresenceManager::connect();
         let mut connection = manager.pool.get().await.unwrap();
         let bool = false;
         let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
         let account_id = generate_uuid();
         let device_id = DeviceId::from(2);
+        let addr = ProtocolAddress::new(account_id, device_id);
 
-        manager
-            .set_present(account_id.as_str(), device_id, websocket)
-            .await;
+        manager.set_present(&addr, websocket).await;
 
         let presence_keys = cmd("SMEMBERS")
             .arg(manager.get_set_key())
@@ -298,13 +305,10 @@ mod client_presence_manager_test {
             .unwrap();
 
         for presence_key in presence_keys {
-            assert_eq!(
-                presence_key,
-                manager.get_presence_key(account_id.as_str(), device_id.into())
-            );
+            assert_eq!(presence_key, manager.get_presence_key(&addr));
         }
 
-        let presence_key = manager.get_presence_key(&account_id, device_id.into());
+        let presence_key = manager.get_presence_key(&addr);
 
         let is_handle_displacement_invoked = manager
             .displacement_listeners
@@ -323,19 +327,18 @@ mod client_presence_manager_test {
 
     async fn test_disconnect_all_presence() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
-            ClientPresenceManager::connect().unwrap();
+            ClientPresenceManager::connect();
         let mut connection = manager.pool.get().await.unwrap();
 
         let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
         let account_id = Uuid::new_v4().to_string();
         let device_id = DeviceId::from(1);
+        let addr = ProtocolAddress::new(account_id, device_id);
 
-        manager
-            .set_present(account_id.as_str(), device_id, websocket)
-            .await;
+        manager.set_present(&addr, websocket).await;
 
         let removed = manager
-            .disconnect_all_presence(account_id.as_str(), vec![device_id])
+            .disconnect_all_presence(addr.name(), vec![device_id])
             .await
             .unwrap();
 
@@ -348,20 +351,16 @@ mod client_presence_manager_test {
 
     async fn test_is_present() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
-            ClientPresenceManager::connect().unwrap();
+            ClientPresenceManager::connect();
         let mut connection = manager.pool.get().await.unwrap();
         let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
         let account_id = Uuid::new_v4().to_string();
         let device_id = DeviceId::from(1);
+        let addr = ProtocolAddress::new(account_id.clone(), device_id.into());
 
-        manager
-            .set_present(account_id.as_str(), device_id, websocket)
-            .await;
+        manager.set_present(&addr, websocket).await;
 
-        let is_present = manager
-            .is_present(account_id.as_str(), device_id)
-            .await
-            .unwrap();
+        let is_present = manager.is_present(&addr).await.unwrap();
 
         teardown(&manager.test_key, connection).await;
 
