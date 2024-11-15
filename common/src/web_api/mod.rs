@@ -83,7 +83,7 @@ impl From<i32> for DeviceCapabilityEnum {
             2 => DeviceCapabilityEnum::DeleteSync,
             3 => DeviceCapabilityEnum::VersionedExpirationTimer,
             4 => DeviceCapabilityEnum::StorageServiceRecordKeyRotation,
-            _ => todo!()
+            _ => todo!(),
         }
     }
 }
@@ -317,7 +317,7 @@ pub struct UploadSignedPreKey {
     #[serde_as(as = "Base64")]
     pub public_key: Box<[u8]>, // TODO: Make this a PublicKey and implement Serialize
     #[serde_as(as = "Base64")]
-    pub signature: Box<[u8]>,  // TODO: Make this a PublicKey and implement Serialize
+    pub signature: Box<[u8]>, // TODO: Make this a PublicKey and implement Serialize
 }
 
 impl From<SignedPreKeyRecord> for UploadSignedPreKey {
