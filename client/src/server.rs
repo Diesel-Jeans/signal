@@ -1,18 +1,27 @@
-use crate::client::VerifiedSession;
-use crate::contact_manager::Contact;
+use crate::{
+    client::VerifiedSession,
+    contact_manager::Contact,
+    websockets::{KeepAliveOptions, SendRequestOptions, WebsocketHandler},
+};
+use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
-use common::web_api::authorization::BasicAuthorizationHeader;
-use common::web_api::{AccountAttributes, RegistrationRequest, UploadSignedPreKey};
-use http::StatusCode;
+use common::{
+    signal_protobuf::{WebSocketRequestMessage, WebSocketResponseMessage},
+    web_api::{
+        authorization::BasicAuthorizationHeader, AccountAttributes, RegistrationRequest,
+        UploadSignedPreKey,
+    },
+};
 use http_client::h1::H1Client;
-use libsignal_protocol::IdentityKey;
-use std::fmt::Display;
-use std::io::{BufReader, Error, ErrorKind, Read};
-use std::sync::Arc;
-use std::time::Duration;
-use std::{env, fs};
-use surf::http::convert::json;
-use surf::{http, Client, Config, HttpClient, RequestBuilder, Response, Url};
+use std::{
+    env,
+    fmt::Display,
+    fs,
+    io::{Error, ErrorKind},
+    sync::Arc,
+    time::Duration,
+};
+use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
 use tokio_tungstenite::connect_async;
 
 const CLIENT_URI: &str = "/client";
@@ -23,6 +32,7 @@ const BUNDLE_URI: &str = "/bundle";
 
 pub struct ServerAPI {
     client: Client,
+    ws: Option<WebsocketHandler>,
 }
 
 enum ReqType {
@@ -48,7 +58,13 @@ impl Display for ReqType {
 }
 
 pub trait Server {
-    async fn connect();
+    async fn connect(
+        &mut self,
+        username: &str,
+        password: &str,
+        url: &str,
+        port: &str,
+    ) -> Result<()>;
     async fn publish_bundle(
         &self,
         uuid: String, //registration_id: u32,
@@ -71,7 +87,7 @@ pub trait Server {
         msg: String,
         user_id: String,
         device_id: u32,
-    ) -> Result<Response, Box<dyn std::error::Error>>;
+    ) -> Result<WebSocketResponseMessage>;
     async fn update_client(
         &self,
         new_client: &Contact,
@@ -82,11 +98,28 @@ pub trait Server {
 }
 
 impl Server for ServerAPI {
-    async fn connect() {
-        let server_url = "ws://127.0.0.1:4444";
-        let (ws, _) = connect_async(server_url).await.expect("Failed to connect");
+    async fn connect(
+        &mut self,
+        username: &str,
+        password: &str,
+        url: &str,
+        port: &str,
+    ) -> Result<()> {
+        let options = KeepAliveOptions {
+            path: Some("/v1/keepalive".to_string()),
+        };
+        let ws = WebsocketHandler::try_new(
+            Some(options),
+            url.into(),
+            port.into(),
+            username.into(),
+            password.into(),
+        )
+        .await?;
+        self.ws = Some(ws);
 
         println!("connected!");
+        Ok(())
     }
     async fn publish_bundle(
         &self,
@@ -137,13 +170,21 @@ impl Server for ServerAPI {
         msg: String,
         user_id: String,
         device_id: u32,
-    ) -> Result<Response, Box<dyn std::error::Error>> {
+    ) -> Result<WebSocketResponseMessage> {
         let payload = json!({
             "message": msg
-        });
+        })
+        .to_string()
+        .as_bytes()
+        .to_vec();
         let uri = format!("{}/{}.{}", MSG_URI, user_id, device_id);
+        let options = SendRequestOptions::new("PUT", uri, payload);
 
-        self.make_request(ReqType::Put(payload), uri).await
+        if let Some(ws) = &self.ws {
+            Ok(ws.clone().send_request(options).await?)
+        } else {
+            anyhow::bail!("No websocket connection is active")
+        }
     }
 
     async fn update_client(
@@ -194,7 +235,7 @@ impl Server for ServerAPI {
             .set_base_url(Url::parse(&address).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
-        ServerAPI { client }
+        ServerAPI { client, ws: None }
     }
 }
 impl ServerAPI {
@@ -226,6 +267,14 @@ impl ServerAPI {
                 ),
             )
             .into()),
+        }
+    }
+
+    async fn get_incoming_messages(&mut self) -> Result<Vec<WebSocketRequestMessage>> {
+        if let Some(ws) = &self.ws {
+            Ok(ws.clone().get_messages().await)
+        } else {
+            anyhow::bail!("No websocket connection is active")
         }
     }
 }

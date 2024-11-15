@@ -104,10 +104,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
                 .query_async::<String>(&mut connection)
                 .await?;
 
-            match num.parse() {
-                Ok(num) => return Ok(num),
-                Err(_) => return Ok(0),
-            }
+            return Ok(num.parse().expect("Could not parse redis id"));
         }
 
         let message_id = cmd("HINCRBY")
@@ -265,8 +262,8 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
         if (messages.is_empty()) {
             return Ok(Vec::new());
         }
-        let mut envelopes = Vec::new();
 
+        let mut envelopes = Vec::new();
         // messages is a [envelope1, msg_id1, envelope2, msg_id2, ...]
         for i in (0..messages.len()).step_by(2) {
             envelopes.push(bincode::deserialize(&messages[i])?);
@@ -468,9 +465,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 #[cfg(test)]
 pub mod message_cache_tests {
     use crate::test_utils::{
-        message_cache::{
-            generate_random_envelope, generate_uuid, teardown, MockWebSocketConnection,
-        },
+        message_cache::{generate_envelope, generate_uuid, teardown, MockWebSocketConnection},
         user::new_protocol_address,
     };
 
@@ -486,7 +481,7 @@ pub mod message_cache_tests {
         let uuid = generate_uuid();
         let address = new_protocol_address();
 
-        let mut envelope = generate_random_envelope("Hello this is a test of insert()", &uuid);
+        let mut envelope = generate_envelope(&uuid);
 
         message_cache
             .add_message_availability_listener(&address, websocket.clone())
@@ -508,8 +503,7 @@ pub mod message_cache_tests {
         let address = new_protocol_address();
         let message_guid = generate_uuid();
 
-        let mut envelope =
-            generate_random_envelope("Hello this is a test of insert()", &message_guid);
+        let mut envelope = generate_envelope(&message_guid);
 
         let message_id = message_cache
             .insert(&address, &mut envelope, &message_guid)
@@ -542,8 +536,8 @@ pub mod message_cache_tests {
         let address = new_protocol_address();
 
         let message_guid = generate_uuid();
-        let mut envelope1 = generate_random_envelope("This is a message", &message_guid);
-        let mut envelope2 = generate_random_envelope("This is another message", &message_guid);
+        let mut envelope1 = generate_envelope(&message_guid);
+        let mut envelope2 = generate_envelope(&message_guid);
 
         let message_id = message_cache
             .insert(&address, &mut envelope1, &message_guid)
@@ -585,8 +579,8 @@ pub mod message_cache_tests {
 
         let message_guid1 = generate_uuid();
         let message_guid2 = generate_uuid();
-        let mut envelope1 = generate_random_envelope("First Message", &message_guid1);
-        let mut envelope2 = generate_random_envelope("Second Message", &message_guid2);
+        let mut envelope1 = generate_envelope(&message_guid1);
+        let mut envelope2 = generate_envelope(&message_guid2);
 
         // inserting messages
         let message_id = message_cache
@@ -634,7 +628,7 @@ pub mod message_cache_tests {
         let mut connection = message_cache.pool.get().await.unwrap();
         let address = new_protocol_address();
         let message_guid = generate_uuid();
-        let mut envelope = generate_random_envelope("This is a test of remove()", &message_guid);
+        let mut envelope = generate_envelope(&message_guid);
 
         let message_id = message_cache
             .insert(&address, &mut envelope, &message_guid)
@@ -662,8 +656,7 @@ pub mod message_cache_tests {
 
         for i in 0..10 {
             let message_guid = generate_uuid();
-            let mut envelope =
-                generate_random_envelope(&format!("This is message nr. {}", i + 1), &message_guid);
+            let mut envelope = generate_envelope(&message_guid);
 
             message_cache
                 .insert(&address, &mut envelope, &message_guid)
@@ -693,8 +686,7 @@ pub mod message_cache_tests {
         let address = new_protocol_address();
         let message_guid = generate_uuid();
 
-        let mut envelope =
-            generate_random_envelope("Hello this is a test of has_messages()", &message_guid);
+        let mut envelope = generate_envelope(&message_guid);
 
         let does_not_has_messages = message_cache.has_messages(&address).await.unwrap();
 
@@ -719,7 +711,7 @@ pub mod message_cache_tests {
         let address = new_protocol_address();
         let message_guid = generate_uuid();
 
-        let mut envelope = generate_random_envelope("Hello this is a test", &message_guid);
+        let mut envelope = generate_envelope(&message_guid);
 
         message_cache
             .insert(&address, &mut envelope, &message_guid)

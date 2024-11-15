@@ -25,16 +25,24 @@ use super::{
 use axum::extract::ws::WebSocket;
 
 #[derive(Debug)]
-pub struct SignalServerState<T: SignalDatabase, U: WSStream + Debug> {
+pub struct SignalServerState<T, U>
+where
+    T: SignalDatabase,
+    U: WSStream + Debug,
+{
     pub db: T,
     pub websocket_manager: WebSocketManager<U, T>,
-    pub account_manager: AccountManager,
-    pub key_manager: KeyManager,
+    pub account_manager: AccountManager<T>,
+    pub key_manager: KeyManager<T>,
     pub message_manager: MessagesManager<T, WebSocketConnection<U, T>>,
     pub message_cache: MessageCache<WebSocketConnection<U, T>>,
 }
 
-impl<T: SignalDatabase + Clone, U: WSStream + Debug> Clone for SignalServerState<T, U> {
+impl<T, U> Clone for SignalServerState<T, U>
+where
+    T: SignalDatabase + Clone,
+    U: WSStream + Debug,
+{
     fn clone(&self) -> Self {
         Self {
             db: self.db.clone(),
@@ -43,6 +51,28 @@ impl<T: SignalDatabase + Clone, U: WSStream + Debug> Clone for SignalServerState
             key_manager: self.key_manager.clone(),
             message_manager: self.message_manager.clone(),
             message_cache: self.message_cache.clone(),
+        }
+    }
+}
+
+impl<U> SignalServerState<PostgresDatabase, U>
+where
+    U: WSStream + Debug,
+{
+    pub async fn new() -> Self {
+        SignalServerState::connect("DATABASE_URL").await
+    }
+
+    pub async fn connect(connection_str: &str) -> Self {
+        let db = PostgresDatabase::connect(connection_str.to_string()).await;
+        let cache = MessageCache::connect();
+        Self {
+            db: db.clone(),
+            websocket_manager: WebSocketManager::new(),
+            account_manager: AccountManager::new(db.clone()),
+            key_manager: KeyManager::new(db.clone()),
+            message_manager: MessagesManager::new(db, cache.clone()),
+            message_cache: cache,
         }
     }
 }
@@ -63,159 +93,10 @@ impl SignalServerState<MockDB, MockSocket> {
         Self {
             db: db.clone(),
             websocket_manager: WebSocketManager::new(),
-            account_manager: AccountManager::new(),
-            key_manager: KeyManager::new(),
+            account_manager: AccountManager::new(db.clone()),
+            key_manager: KeyManager::new(db.clone()),
             message_manager: MessagesManager::new(db, cache.clone()),
             message_cache: cache,
         }
-    }
-}
-
-impl<U: WSStream + Debug> SignalServerState<PostgresDatabase, U> {
-    pub async fn new() -> Self {
-        SignalServerState::connect("DATABASE_URL").await
-    }
-
-    pub async fn connect(connection_str: &str) -> Self {
-        let db = PostgresDatabase::connect(connection_str.to_string()).await;
-        let cache = MessageCache::connect();
-        Self {
-            db: db.clone(),
-            websocket_manager: WebSocketManager::new(),
-            account_manager: AccountManager::new(),
-            key_manager: KeyManager::new(),
-            message_manager: MessagesManager::new(db, cache.clone()),
-            message_cache: cache,
-        }
-    }
-}
-
-impl<T: SignalDatabase, U: WSStream + Debug> SignalServerState<T, U> {
-    pub async fn create_account(
-        &self,
-        phone_number: String,
-        account_attributes: AccountAttributes,
-        aci_identity_key: IdentityKey,
-        pni_identity_key: IdentityKey,
-        primary_device: Device,
-        key_bundle: DevicePreKeyBundle,
-    ) -> Result<Account> {
-        let device_id = primary_device.device_id();
-        let account = self
-            .account_manager
-            .create_account(
-                &self.db,
-                phone_number,
-                account_attributes,
-                aci_identity_key,
-                pni_identity_key,
-                primary_device,
-            )
-            .await?;
-
-        self.store_key_bundle(
-            &key_bundle,
-            &ProtocolAddress::new(account.pni().service_id_string(), device_id),
-        )
-        .await?;
-
-        Ok(account)
-    }
-
-    pub async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
-        self.account_manager.get_account(&self.db, service_id).await
-    }
-
-    pub async fn update_account_aci(&self, service_id: &ServiceId, new_aci: Aci) -> Result<()> {
-        self.account_manager
-            .update_account_aci(&self.db, service_id, new_aci)
-            .await
-    }
-
-    pub async fn update_account_pni(&self, service_id: &ServiceId, new_pni: Pni) -> Result<()> {
-        self.account_manager
-            .update_account_pni(&self.db, service_id, new_pni)
-            .await
-    }
-
-    pub async fn delete_account(&self, service_id: &ServiceId) -> Result<()> {
-        self.account_manager
-            .delete_account(&self.db, service_id)
-            .await
-    }
-
-    pub async fn add_device(&self, service_id: &ServiceId, device: &Device) -> Result<()> {
-        self.account_manager
-            .add_device(&self.db, service_id, device)
-            .await
-    }
-
-    pub async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
-        self.account_manager
-            .get_all_devices(&self.db, service_id)
-            .await
-    }
-
-    pub async fn get_device(&self, service_id: &ServiceId, device_id: u32) -> Result<Device> {
-        self.account_manager
-            .get_device(&self.db, service_id, device_id)
-            .await
-    }
-
-    pub async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()> {
-        self.account_manager
-            .delete_device(&self.db, service_id, device_id)
-            .await
-    }
-
-    pub async fn handle_put_keys(
-        &self,
-        auth_device: &AuthenticatedDevice,
-        bundle: SetKeyRequest,
-        kind: ServiceIdKind,
-    ) -> Result<(), ApiError> {
-        self.key_manager
-            .handle_put_keys(&self.db, auth_device, bundle, kind)
-            .await
-    }
-
-    /// * `target_device_id` - device_id must be either a [Some<DeviceId>] or [None] for all devices
-    pub async fn handle_get_keys<S: SignalDatabase>(
-        &self,
-        auth_device: &AuthenticatedDevice,
-        target_service_id: ServiceId,
-        target_device_id: Option<DeviceId>,
-    ) -> Result<PreKeyResponse, ApiError> {
-        self.key_manager
-            .handle_get_keys(&self.db, auth_device, target_service_id, target_device_id)
-            .await
-    }
-
-    pub async fn handle_post_keycheck<S: SignalDatabase>(
-        &self,
-        service_id: &ServiceId,
-        auth_device: &AuthenticatedDevice,
-        kind: ServiceIdKind,
-        usr_digest: [u8; 32],
-    ) -> Result<bool, ApiError> {
-        self.key_manager
-            .handle_post_keycheck(&self.db, auth_device, kind, usr_digest)
-            .await
-    }
-
-    pub async fn store_key_bundle(
-        &self,
-        data: &DevicePreKeyBundle,
-        address: &ProtocolAddress,
-    ) -> Result<()> {
-        self.account_manager
-            .store_key_bundle(&self.db, data, address)
-            .await
-    }
-
-    pub async fn get_one_time_pre_key_count(&self, service_id: &ServiceId) -> Result<(u32, u32)> {
-        self.key_manager
-            .get_one_time_pre_key_count(&self.db, service_id)
-            .await
     }
 }

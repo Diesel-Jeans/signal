@@ -1,5 +1,5 @@
 use crate::key_management::bundle::KeyBundleContent;
-use libsignal_protocol::*;
+use libsignal_protocol::ProtocolAddress;
 use std::collections::HashMap;
 
 pub struct Device {
@@ -79,9 +79,10 @@ impl ContactManager {
         uuid: &String,
         devices: Vec<(u32, KeyBundleContent)>,
     ) -> Result<(), String> {
-        self.get_contact_mut(uuid).map(|x| {
+        self.get_contact_mut(uuid).map(|contact| {
             for (id, bundle) in devices {
-                x.devices
+                contact
+                    .devices
                     .insert(id, Device::new(uuid.to_string(), id, bundle));
             }
         })
@@ -90,8 +91,10 @@ impl ContactManager {
 
 #[cfg(test)]
 mod test {
-    use crate::contact_manager::{Contact, ContactManager, Device};
-    use crate::encryption::test::{create_pre_key_bundle, store};
+    use crate::{
+        contact_manager::ContactManager,
+        encryption::test::{create_pre_key_bundle, store},
+    };
     use rand::rngs::OsRng;
     use uuid::Uuid;
 

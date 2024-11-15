@@ -1,22 +1,21 @@
-use crate::account::{Account, Device};
-use crate::database::SignalDatabase;
-use crate::managers::websocket::wsstream::WSStream;
+use crate::{
+    account::{Account, Device},
+    database::SignalDatabase,
+    managers::websocket::wsstream::WSStream,
+};
 use anyhow::Result;
-use axum::async_trait;
-use axum::extract::ws::Message;
-use axum::Error;
-use common::pre_key::PreKeyType;
-use common::signal_protobuf::Envelope;
-use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
-use futures_util::stream::Stream;
-use futures_util::Sink;
-use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
-use std::collections::{HashMap, VecDeque};
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
+use axum::{async_trait, extract::ws::Message, Error};
+use common::{
+    signal_protobuf::Envelope,
+    web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
+};
+use futures_util::{stream::Stream, Sink};
+use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct MockDB {}
@@ -44,10 +43,10 @@ impl SignalDatabase for MockDB {
     async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
         todo!()
     }
-    async fn get_device(&self, service_id: &ServiceId, device_id: u32) -> Result<Device> {
+    async fn get_device(&self, address: &ProtocolAddress) -> Result<Device> {
         todo!()
     }
-    async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()> {
+    async fn delete_device(&self, address: &ProtocolAddress) -> Result<()> {
         todo!()
     }
 

@@ -38,14 +38,13 @@ impl DestinationDeviceValidator {
             .iter()
             .filter(|device_id_and_registration_id| device_id_and_registration_id.1 > 0)
             .filter(|device_id_and_registration_id| {
-                let device_id = device_id_and_registration_id.0;
-                let registration_id = device_id_and_registration_id.1;
+                let (device_id, registration_id) = device_id_and_registration_id;
                 let registration_id_matches: bool = if let Some(device) = account
                     .devices()
                     .iter()
-                    .find(|device| (u32::from(device.device_id()) == device_id))
+                    .find(|device| (u32::from(device.device_id()) == *device_id))
                 {
-                    registration_id
+                    *registration_id
                         == if use_phone_number_identity {
                             device.pni_registration_id()
                         } else {

@@ -1,15 +1,7 @@
-use crate::contact_manager::Device;
 use crate::errors::{LoginError, MissingFieldError};
-use crate::key_management::bundle::PrimitiveKeyBundleContent;
 use libsignal_core::{Aci, Pni};
-use libsignal_protocol::{
-    IdentityKeyPair, IdentityKeyStore, InMemIdentityKeyStore, InMemKyberPreKeyStore,
-    InMemPreKeyStore, InMemSignalProtocolStore, KyberPreKeyStore, PreKeyId, PreKeyStore,
-    PrivateKey, ProtocolStore, PublicKey,
-};
+use libsignal_protocol::{PrivateKey, PublicKey};
 use serde::{Deserialize, Serialize};
-use serde_json::to_string;
-use std::collections::HashMap;
 use std::fs;
 use uuid::Uuid;
 
@@ -40,15 +32,14 @@ mod public_key_serde {
 
 mod private_key_serde {
     use libsignal_protocol::PrivateKey;
-    use serde::{self, de, Deserialize, Deserializer, Serializer};
+    use serde::{Deserialize, Deserializer, Serializer};
 
+    /// Convert IdentityKey to bytes and serialize them
     pub fn serialize<S>(key: &PrivateKey, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // Convert IdentityKey to bytes and serialize them
-        let key_bytes = key.serialize();
-        serializer.serialize_bytes(&key_bytes)
+        serializer.serialize_bytes(&key.serialize())
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<PrivateKey, D::Error>
@@ -65,7 +56,7 @@ mod private_key_serde {
 
 mod aci_serde {
     use libsignal_protocol::Aci;
-    use serde::{self, de, Deserialize, Deserializer, Serializer};
+    use serde::{Deserialize, Deserializer, Serializer};
     use uuid::Uuid;
 
     pub fn serialize<S>(key: &Aci, serializer: S) -> Result<S::Ok, S::Error>
@@ -92,7 +83,7 @@ mod aci_serde {
 
 mod pni_serde {
     use libsignal_core::Pni;
-    use serde::{self, de, Deserialize, Deserializer, Serializer};
+    use serde::{Deserialize, Deserializer, Serializer};
     use uuid::Uuid;
 
     pub fn serialize<S>(key: &Pni, serializer: S) -> Result<S::Ok, S::Error>

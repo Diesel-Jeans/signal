@@ -17,15 +17,22 @@ use libsignal_protocol::IdentityKey;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Default)]
-pub struct KeyManager {}
+pub struct KeyManager<T>
+where
+    T: SignalDatabase,
+{
+    db: T,
+}
 
-impl KeyManager {
-    pub fn new() -> Self {
-        Self {}
+impl<T> KeyManager<T>
+where
+    T: SignalDatabase,
+{
+    pub fn new(db: T) -> Self {
+        Self { db }
     }
-    pub async fn handle_put_keys<S: SignalDatabase>(
+    pub async fn handle_put_keys(
         &self,
-        database: &S,
         auth_device: &AuthenticatedDevice,
         bundle: SetKeyRequest,
         kind: ServiceIdKind,
@@ -37,7 +44,7 @@ impl KeyManager {
         };
 
         if let Some(prekeys) = bundle.pre_key {
-            database
+            self.db
                 .store_one_time_ec_pre_keys(prekeys, &address)
                 .await
                 .map_err(|_| ApiError {
@@ -62,8 +69,7 @@ impl KeyManager {
 
         if let Some(ref prekey) = bundle.signed_pre_key {
             verify_key(prekey, "Could not verify signature for signed prekey")?;
-
-            database
+            self.db
                 .store_signed_pre_key(prekey, &address)
                 .await
                 .map_err(|_| ApiError {
@@ -77,7 +83,7 @@ impl KeyManager {
                 verify_key(prekey, "Could not verify signature for kem prekey")
             })?;
 
-            database
+            self.db
                 .store_one_time_pq_pre_keys(prekeys, &address)
                 .await
                 .map_err(|_| ApiError {
@@ -88,8 +94,7 @@ impl KeyManager {
 
         if let Some(ref prekey) = bundle.pq_last_resort_pre_key {
             verify_key(prekey, "Could not verify signature for kem prekey")?;
-
-            database
+            self.db
                 .store_pq_signed_pre_key(prekey, &address)
                 .await
                 .map_err(|_| ApiError {
@@ -165,7 +170,10 @@ impl KeyManager {
                 })?,
             Some(device_id) => {
                 vec![database
-                    .get_device(&target_service_id, device_id.into())
+                    .get_device(&ProtocolAddress::new(
+                        target_service_id.service_id_string(),
+                        device_id,
+                    ))
                     .await
                     .map_err(|_| ApiError {
                         status_code: StatusCode::BAD_REQUEST,
@@ -203,9 +211,8 @@ impl KeyManager {
     // The Signal endpoint /v2/keys/check says that a u64 id is needed, however their ids, such as
     // KyperPreKeyID only supports u32. Here only a u32 is used and therefore only a 4 byte size
     // instead of the sugested u64.
-    pub async fn handle_post_keycheck<S: SignalDatabase>(
+    pub async fn handle_post_keycheck(
         &self,
-        database: &S,
         auth_device: &AuthenticatedDevice,
         kind: ServiceIdKind, // In Signal this is called IdentityType
         usr_digest: [u8; 32],
@@ -215,7 +222,8 @@ impl KeyManager {
             ServiceIdKind::Pni => auth_device.account().pni().into(),
         };
         let address = auth_device.get_protocol_address(kind);
-        let bundle = database
+        let bundle = self
+            .db
             .get_key_bundle(&address)
             .await
             .map_err(|_| ApiError {
@@ -266,14 +274,10 @@ impl KeyManager {
         Ok(server_digest == usr_digest)
     }
 
-    pub async fn get_one_time_pre_key_count<T: SignalDatabase>(
-        &self,
-        db: &T,
-        service_id: &ServiceId,
-    ) -> Result<(u32, u32)> {
+    pub async fn get_one_time_pre_key_count(&self, service_id: &ServiceId) -> Result<(u32, u32)> {
         Ok((
-            db.get_one_time_ec_pre_key_count(service_id).await?,
-            db.get_one_time_pq_pre_key_count(service_id).await?,
+            self.db.get_one_time_ec_pre_key_count(service_id).await?,
+            self.db.get_one_time_pq_pre_key_count(service_id).await?,
         ))
     }
 }
@@ -310,8 +314,8 @@ mod key_manager_tests {
 
     #[tokio::test]
     async fn get_keys_test() {
-        let km = KeyManager::new();
         let database = database_connect().await;
+        let km = KeyManager::new(database.clone());
 
         let target = new_account();
         let target_device = target.devices()[0].clone();
@@ -372,8 +376,8 @@ mod key_manager_tests {
 
     #[tokio::test]
     async fn put_keys_test() {
-        let km = KeyManager::new();
         let database = database_connect().await;
+        let km = KeyManager::new(database.clone());
 
         let mut csprng = OsRng;
         let identity_key = KeyPair::generate(&mut csprng);
@@ -405,7 +409,7 @@ mod key_manager_tests {
 
         database.add_account(auth_device.account()).await.unwrap();
 
-        km.handle_put_keys(&database, &auth_device, request.clone(), ServiceIdKind::Pni)
+        km.handle_put_keys(&auth_device, request.clone(), ServiceIdKind::Pni)
             .await
             .unwrap();
 
@@ -413,7 +417,7 @@ mod key_manager_tests {
         let signed_pre_key_db = get_ec_pni_signed_pre_key(
             &database,
             request.signed_pre_key.unwrap().key_id,
-            &ServiceId::Pni(target_service_id),
+            &target_service_id.into(),
             target_device_id.into(),
         )
         .await
@@ -422,14 +426,14 @@ mod key_manager_tests {
         let pq_last_resort_pre_key_db = get_pq_last_resort_pre_key(
             &database,
             request.pq_last_resort_pre_key.unwrap().key_id,
-            &ServiceId::Pni(target_service_id),
+            &target_service_id.into(),
             target_device_id.into(),
         )
         .await
         .unwrap();
 
         database
-            .delete_account(&ServiceId::Pni(target_service_id))
+            .delete_account(&target_service_id.into())
             .await
             .unwrap();
 
@@ -470,9 +474,8 @@ mod key_manager_tests {
         usr_digest.update(pq_last_resort_pre_key.key_id.to_be_bytes());
         usr_digest.update(pq_last_resort_pre_key.public_key);
 
-        let res = KeyManager::new()
+        let res = KeyManager::new(database.clone())
             .handle_post_keycheck(
-                &database,
                 &auth_device,
                 ServiceIdKind::Pni,
                 usr_digest.finalize().into(),
@@ -481,7 +484,7 @@ mod key_manager_tests {
             .unwrap();
 
         database
-            .delete_account(&ServiceId::Pni(auth_device.account().pni()))
+            .delete_account(&auth_device.account().pni().into())
             .await
             .unwrap();
 

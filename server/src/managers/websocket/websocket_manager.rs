@@ -69,12 +69,20 @@ use chrono::Utc;
     "v1/storage/auth",
 ];*/
 
-#[derive(Debug)]
-pub struct WebSocketManager<T: WSStream + Debug, U: SignalDatabase> {
+#[derive(Default, Debug)]
+pub struct WebSocketManager<T, U>
+where
+    T: WSStream + Debug,
+    U: SignalDatabase,
+{
     sockets: ConnectionMap<T, U>,
 }
 
-impl<T: WSStream + Debug, U: SignalDatabase> Clone for WebSocketManager<T, U> {
+impl<T, U> Clone for WebSocketManager<T, U>
+where
+    T: WSStream + Debug,
+    U: SignalDatabase,
+{
     fn clone(&self) -> Self {
         Self {
             sockets: Arc::clone(&self.sockets),
@@ -82,16 +90,10 @@ impl<T: WSStream + Debug, U: SignalDatabase> Clone for WebSocketManager<T, U> {
     }
 }
 
-impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static> Default
-    for WebSocketManager<T, U>
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static>
-    WebSocketManager<T, U>
+impl<T, U> WebSocketManager<T, U>
+where
+    T: WSStream + Debug + Send + 'static,
+    U: SignalDatabase + Send + 'static,
 {
     pub fn new() -> Self {
         Self {
@@ -115,16 +117,13 @@ impl<T: WSStream + Debug + Send + 'static, U: SignalDatabase + Send + 'static>
 
         tokio::spawn(async move {
             while let Some(res) = receiver.next().await {
-                let msg = match res {
-                    Ok(y) => y,
-                    Err(x) => {
-                        println!("WebSocketManager recv ERROR: {}", x);
-                        connection.lock().await.close().await;
-                        break;
-                    }
+                if let Err(x) = res {
+                    println!("WebSocketManager recv ERROR: {}", x);
+                    connection.lock().await.close().await;
+                    break;
                 };
 
-                match msg {
+                match res.unwrap() {
                     Message::Binary(b) => {
                         let msg = match WebSocketMessage::decode(Bytes::from(b)) {
                             Ok(x) => x,

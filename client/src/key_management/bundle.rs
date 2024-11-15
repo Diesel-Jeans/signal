@@ -1,7 +1,10 @@
 use anyhow::Result;
-use libsignal_protocol::*;
-use serde::{Deserialize, Serialize, Serializer};
-use std::ops::Deref;
+use libsignal_core::DeviceId;
+use libsignal_protocol::{
+    kem, IdentityKey, KyberPreKeyId, PreKeyBundle, PreKeyId, PublicKey, SignalProtocolError,
+    SignedPreKeyId,
+};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct KeyBundleContent {
@@ -227,9 +230,7 @@ mod tests {
     use crate::contact_manager::Device;
     use crate::encryption::test::{create_pre_key_bundle, store};
     use crate::key_management::bundle::{KeyBundleContent, PrimitiveKeyBundleContent};
-    use libsignal_protocol::*;
     use rand::rngs::OsRng;
-    use serde::*;
     use serde_json;
     use uuid::Uuid;
 

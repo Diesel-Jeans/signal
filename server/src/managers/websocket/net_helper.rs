@@ -37,10 +37,7 @@ impl PathExtractor {
         if index >= self.parts.len() {
             return Err("PathExtractor: Larger than count".to_string());
         }
-        match T::from_str(&self.parts[index]) {
-            Ok(x) => Ok(x),
-            Err(_) => Err("failed to convert".to_string()),
-        }
+        T::from_str(&self.parts[index]).map_err(|_| "failed to convert".to_string())
     }
 }
 
@@ -99,20 +96,10 @@ pub fn create_request(
 }
 
 pub fn unpack_messages(body: Option<Vec<u8>>) -> Result<SignalMessages, String> {
-    let body = match body {
-        None => return Err("Body was none".to_string()),
-        Some(x) => x,
-    };
+    let json = String::from_utf8(body.ok_or_else(|| "Body was none".to_string())?)
+        .map_err(|_| "Failed to convert req body to string".to_string())?;
 
-    let json = match String::from_utf8(body) {
-        Err(_) => return Err("Failed to convert req body to string".to_string()),
-        Ok(y) => y,
-    };
-
-    match serde_json::from_str(&json) {
-        Err(_) => Err("Failed to convert json to SignalMessages".to_string()),
-        Ok(y) => Ok(y),
-    }
+    serde_json::from_str(&json).map_err(|_| "Failed to convert json to SignalMessages".to_string())
 }
 
 pub fn generate_req_id() -> u64 {

@@ -22,7 +22,7 @@ pub struct MessagePersister<T: SignalDatabase, U: MessageAvailabilityListener + 
     run_flag: Arc<AtomicBool>,
     message_cache: MessageCache<U>,
     messages_manager: MessagesManager<T, U>,
-    account_manager: AccountManager,
+    account_manager: AccountManager<T>,
     db: T,
 }
 
@@ -52,15 +52,15 @@ where
     U: MessageAvailabilityListener + Send + 'static,
 {
     pub fn start(
-        message_manager: MessagesManager<T, U>,
+        messages_manager: MessagesManager<T, U>,
         message_cache: MessageCache<U>,
         db: T,
-        account_manager: AccountManager,
+        account_manager: AccountManager<T>,
     ) -> MessagePersister<T, U> {
         let mut message_persister = MessagePersister {
             run_flag: Arc::new(AtomicBool::new(true)),
             message_cache,
-            messages_manager: message_manager,
+            messages_manager,
             account_manager,
             db,
         };
@@ -83,15 +83,13 @@ where
     // Finds the message queues where the oldest message is >10 minutes old.
     async fn persist_next_queues(&mut self) -> Result<()> {
         let mut queues_to_persist: Vec<String> = Vec::new();
-        let time = SystemTime::now();
-        let time_in_secs: u64 = time
+        let time_in_secs: u64 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Failed to get time")
             .as_secs();
 
         while {
-            let time = SystemTime::now();
-            let time_in_secs: u64 = time
+            let time_in_secs: u64 = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Failed to get time")
                 .as_secs();
@@ -113,13 +111,9 @@ where
                         anyhow::anyhow!("Failed to parse service id from queue: {}", queue_key)
                     })?;
 
-                let account = self
-                    .account_manager
-                    .get_account(&self.db, &service_id)
-                    .await?;
+                let account = self.account_manager.get_account(&service_id).await?;
 
                 let device_id = device_id.parse::<u32>()?;
-
                 let device = account
                     .devices()
                     .iter()
@@ -171,7 +165,7 @@ mod message_persister_tests {
     use crate::postgres::PostgresDatabase;
     use crate::test_utils::database::database_connect;
     use crate::test_utils::message_cache::{
-        generate_random_envelope, generate_uuid, teardown, MockWebSocketConnection,
+        generate_envelope, generate_uuid, teardown, MockWebSocketConnection,
     };
     use crate::test_utils::user::new_account;
     use redis::cmd;
@@ -179,6 +173,13 @@ mod message_persister_tests {
     use std::time::Duration;
     use tokio::sync::Mutex;
     use uuid::Uuid;
+
+    fn time_now_secs() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
 
     async fn insert_with_custom_timestamp(
         message_cache: &MessageCache<MockWebSocketConnection>,
@@ -275,14 +276,11 @@ mod message_persister_tests {
         let db = database_connect().await;
         let cache = MessageCache::connect();
         let mut message_manager = MessagesManager::new(db.clone(), cache.clone());
-        let account_manager = AccountManager::new();
+        let account_manager = AccountManager::new(db.clone());
 
         let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
 
-        let now_timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now_timestamp = time_now_secs();
 
         let ten_minutes_past_timestamp = now_timestamp - 600;
 
@@ -299,8 +297,7 @@ mod message_persister_tests {
             protocol_addresses.push(protocol_address.clone());
 
             let envelope_uuid = generate_uuid();
-            let mut envelope =
-                generate_random_envelope("This is a test of MessagePersister", &envelope_uuid);
+            let mut envelope = generate_envelope(&envelope_uuid);
 
             db.add_account(&account).await.unwrap();
 
@@ -354,9 +351,7 @@ mod message_persister_tests {
         teardown(&cache.test_key, cache.get_connection().await.unwrap()).await;
 
         for account in accounts {
-            db.delete_account(&ServiceId::Aci(account.aci()))
-                .await
-                .unwrap();
+            db.delete_account(&account.aci().into()).await.unwrap();
         }
 
         let handle_persisted_messages_evoked =
@@ -374,19 +369,13 @@ mod message_persister_tests {
     #[tokio::test]
     
     async fn test_message_persister_late_msg() {
-        let message_time = SystemTime::now() // 11 minutes old
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            - 660;
-
         let (
             handle_persisted_messages_evoked,
             no_queue_lock_keys_in_cache,
             old_msg_deleted,
             msg_before,
             msg_after,
-        ) = message_persister_test_setup_run(vec![message_time]).await;
+        ) = message_persister_test_setup_run(vec![time_now_secs() - 660]).await;
 
         assert_eq!(handle_persisted_messages_evoked, true);
         assert_eq!(no_queue_lock_keys_in_cache, true);
@@ -398,19 +387,13 @@ mod message_persister_tests {
     #[tokio::test]
     
     async fn test_message_persister_new_msg() {
-        let message_time = SystemTime::now() // 5 minutes old
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            - 300;
-
         let (
             handle_persisted_messages_evoked,
             no_queue_lock_keys_in_cache,
             old_msg_deleted,
             msg_before,
             msg_after,
-        ) = message_persister_test_setup_run(vec![message_time]).await;
+        ) = message_persister_test_setup_run(vec![time_now_secs() - 300]).await;
 
         assert_eq!(handle_persisted_messages_evoked, false);
         assert_eq!(no_queue_lock_keys_in_cache, true);
@@ -422,11 +405,7 @@ mod message_persister_tests {
     #[tokio::test]
     
     async fn test_message_persister_new_and_late_msg() {
-        let message_time = SystemTime::now() // 10 minutes old
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            - 600;
+        let message_time = time_now_secs() - 600;
 
         let message_times = vec![
             message_time - 100,

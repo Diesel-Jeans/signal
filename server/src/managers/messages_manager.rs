@@ -41,11 +41,9 @@ where
     }
     /// Add message to cache
     pub async fn insert(&self, address: &ProtocolAddress, envelope: &mut Envelope) -> Result<u64> {
-        let message_guid = Uuid::new_v4().to_string();
-
         Ok(self
             .message_cache
-            .insert(address, envelope, &message_guid)
+            .insert(address, envelope, &Uuid::new_v4().to_string())
             .await?)
     }
 
@@ -94,7 +92,6 @@ where
         message_guids: Vec<String>,
     ) -> Result<Vec<Envelope>> {
         let cache_removed_messages = self.message_cache.remove(address, message_guids).await?;
-
         let db_removed_messages = self.db.delete_messages(address).await?;
 
         Ok([cache_removed_messages, db_removed_messages].concat())
@@ -141,8 +138,7 @@ where
     U: MessageAvailabilityListener + Send,
 {
     async fn has_messages(&self, address: &ProtocolAddress) -> Result<bool> {
-        let count = self.db.count_messages(address).await?;
-        Ok(count > 0)
+        Ok(self.db.count_messages(address).await? > 0)
     }
 }
 
@@ -151,6 +147,7 @@ pub mod message_manager_tests {
     use crate::account::{Account, Device};
     use crate::message_cache::MessageCache;
     use crate::postgres::PostgresDatabase;
+    use crate::test_utils::database::database_connect;
     use crate::test_utils::message_cache::{teardown, MockWebSocketConnection};
     use crate::test_utils::user::{new_account, new_device};
     use anyhow::Result;
@@ -167,16 +164,9 @@ pub mod message_manager_tests {
         Ok(
             MessagesManager::<PostgresDatabase, MockWebSocketConnection> {
                 message_cache: MessageCache::connect(),
-                db: PostgresDatabase::connect("DATABASE_URL_TEST".to_string()).await,
+                db: database_connect().await,
             },
         )
-    }
-
-    fn generate_random_envelope(message: &str) -> Envelope {
-        Envelope {
-            content: Some(bincode::serialize(message).unwrap()),
-            ..Default::default()
-        }
     }
 
     fn new_account_and_address() -> (Account, ProtocolAddress) {
@@ -194,8 +184,7 @@ pub mod message_manager_tests {
         let msg_manager = init_manager().await.unwrap();
 
         let (account, address) = new_account_and_address();
-
-        let mut envelope = generate_random_envelope("Hello Bob");
+        let mut envelope = Envelope::default();
 
         // Cache
         msg_manager.insert(&address, &mut envelope).await;
@@ -219,7 +208,7 @@ pub mod message_manager_tests {
 
         let (account, address) = new_account_and_address();
 
-        let envelope = generate_random_envelope("Hello Bob");
+        let envelope = Envelope::default();
 
         // DB
         msg_manager.db.add_account(&account).await.unwrap();
@@ -239,7 +228,7 @@ pub mod message_manager_tests {
         // Teardown DB
         msg_manager
             .db
-            .delete_account(&ServiceId::Aci(account.aci()))
+            .delete_account(&account.aci().into())
             .await
             .unwrap();
 
@@ -253,7 +242,7 @@ pub mod message_manager_tests {
 
         let (account, address) = new_account_and_address();
 
-        let mut envelope = generate_random_envelope("Hello Bob");
+        let mut envelope = Envelope::default();
 
         // Cache
         msg_manager.insert(&address, &mut envelope).await;
@@ -276,7 +265,7 @@ pub mod message_manager_tests {
         // Teardown DB and cache
         msg_manager
             .db
-            .delete_account(&ServiceId::Aci(account.aci()))
+            .delete_account(&account.aci().into())
             .await
             .unwrap();
 
@@ -292,7 +281,7 @@ pub mod message_manager_tests {
 
         let (account, address) = new_account_and_address();
 
-        let envelope = generate_random_envelope("Hello Bob");
+        let envelope = Envelope::default();
 
         // DB
         msg_manager.db.add_account(&account).await.unwrap();
@@ -309,7 +298,7 @@ pub mod message_manager_tests {
         // Teardown DB
         msg_manager
             .db
-            .delete_account(&ServiceId::Aci(account.aci()))
+            .delete_account(&account.aci().into())
             .await
             .unwrap();
 
@@ -323,8 +312,8 @@ pub mod message_manager_tests {
 
         let (account, address) = new_account_and_address();
 
-        let mut envelope1 = generate_random_envelope("Hello Bob");
-        let mut envelope2 = generate_random_envelope("How are you?");
+        let mut envelope1 = Envelope::default();
+        let mut envelope2 = Envelope::default();
 
         // Cache
         msg_manager.insert(&address, &mut envelope1).await;
@@ -348,7 +337,7 @@ pub mod message_manager_tests {
         // Teardown DB and cache
         msg_manager
             .db
-            .delete_account(&ServiceId::Aci(account.aci()))
+            .delete_account(&account.aci().into())
             .await
             .unwrap();
 
@@ -364,7 +353,7 @@ pub mod message_manager_tests {
 
         let (account, address) = new_account_and_address();
 
-        let mut envelope = generate_random_envelope("Hello Bob");
+        let mut envelope = Envelope::default();
 
         // Cache
         msg_manager.insert(&address, &mut envelope).await;
@@ -392,7 +381,7 @@ pub mod message_manager_tests {
         // Teardown DB and cache
         msg_manager
             .db
-            .delete_account(&ServiceId::Aci(account.aci()))
+            .delete_account(&account.aci().into())
             .await
             .unwrap();
 
@@ -409,8 +398,8 @@ pub mod message_manager_tests {
 
         let (account, address) = new_account_and_address();
 
-        let mut envelope1 = generate_random_envelope("Hello Bob");
-        let mut envelope2 = generate_random_envelope("How are you?");
+        let mut envelope1 = Envelope::default();
+        let mut envelope2 = Envelope::default();
 
         // Cache
         msg_manager.insert(&address, &mut envelope1).await;
@@ -444,7 +433,7 @@ pub mod message_manager_tests {
         // Teardown DB and cache
         msg_manager
             .db
-            .delete_account(&ServiceId::Aci(account.aci()))
+            .delete_account(&account.aci().into())
             .await
             .unwrap();
 
@@ -461,8 +450,8 @@ pub mod message_manager_tests {
 
         let (account, address) = new_account_and_address();
 
-        let mut envelope1 = generate_random_envelope("Hello Bob");
-        let mut envelope2 = generate_random_envelope("How are you?");
+        let mut envelope1 = Envelope::default();
+        let mut envelope2 = Envelope::default();
 
         // Cache
         msg_manager.insert(&address, &mut envelope1).await;
@@ -488,7 +477,7 @@ pub mod message_manager_tests {
         // Teardown DB and cache
         msg_manager
             .db
-            .delete_account(&ServiceId::Aci(account.aci()))
+            .delete_account(&account.aci().into())
             .await
             .unwrap();
 

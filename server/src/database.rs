@@ -26,9 +26,9 @@ pub trait SignalDatabase: Clone + Send + Sync + 'static {
     /// Get all devices owned by account
     async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>>;
     /// Get single device owned by account
-    async fn get_device(&self, service_id: &ServiceId, device_id: u32) -> Result<Device>;
+    async fn get_device(&self, address: &ProtocolAddress) -> Result<Device>;
     /// Delete device owned by account
-    async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()>;
+    async fn delete_device(&self, address: &ProtocolAddress) -> Result<()>;
 
     /// Add an ACI to an account overriding the existing ACI if any.
     async fn update_account_aci(&self, service_id: &ServiceId, new_aci: Aci) -> Result<()>;

@@ -36,10 +36,8 @@ pub async fn teardown(key: &str, mut con: deadpool_redis::Connection){
 
 }
 
-pub fn generate_random_envelope(message: &str, uuid: &str) -> Envelope {
-    let mut data = bincode::serialize(message).unwrap();
+pub fn generate_envelope(uuid: &str) -> Envelope {
     Envelope {
-        content: Some(data),
         server_guid: Some(uuid.to_string()),
         ..Default::default()
     }
