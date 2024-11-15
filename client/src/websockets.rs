@@ -308,6 +308,16 @@ impl WebsocketHandler {
         }
     }
 
+    pub async fn get_messages(&mut self) -> Vec<WebSocketRequestMessage> {
+        let mut msg_vec: Vec<WebSocketRequestMessage> = Vec::new();
+
+        while let Ok(msg) = self.ws_request_channel.lock().await.try_recv() {
+            msg_vec.push(msg);
+        }
+
+        msg_vec
+    }
+
     pub async fn close(&mut self, code: u16, reason: String) -> Result<()> {
         Ok(self
             .socket
@@ -322,6 +332,7 @@ impl WebsocketHandler {
     }
 }
 
+#[derive(Clone)]
 pub struct SendRequestOptions {
     verb: String,
     path: String,
@@ -329,10 +340,25 @@ pub struct SendRequestOptions {
     timeout: Option<u32>,
     headers: Option<Vec<(String, String)>>,
 }
+impl SendRequestOptions {
+    pub fn new(
+        verb: impl Into<String>,
+        path: impl Into<String>,
+        body: impl Into<Option<Vec<u8>>>,
+    ) -> Self {
+        SendRequestOptions {
+            verb: verb.into(),
+            path: path.into(),
+            body: body.into(),
+            timeout: None,
+            headers: None,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct KeepAliveOptions {
-    path: Option<String>,
+    pub path: Option<String>,
 }
 
 #[derive(Clone)]
