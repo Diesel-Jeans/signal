@@ -175,8 +175,7 @@ impl Server for ServerAPI {
         let options = SendRequestOptions::new("PUT", uri, payload);
 
         if let Some(ws) = &self.ws {
-            let result = ws.clone().send_request(options).await?;
-            Ok(result)
+            Ok(ws.clone().send_request(options).await?)
         } else {
             anyhow::bail!("No websocket connection is active")
         }
