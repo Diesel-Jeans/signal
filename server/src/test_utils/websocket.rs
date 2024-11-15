@@ -7,7 +7,7 @@ use anyhow::Result;
 use axum::{async_trait, extract::ws::Message, Error};
 use common::{
     signal_protobuf::Envelope,
-    web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
+    web_api::{DeviceCapabilityEnum, DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
 };
 use futures_util::{stream::Stream, Sink};
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
@@ -67,7 +67,10 @@ impl SignalDatabase for MockDB {
         todo!()
     }
 
-    async fn get_device_capabilities(&self, device_id: u32) -> Result<Vec<DeviceCapabilityEnum>> {
+    async fn get_device_capabilities(
+        &self,
+        address: &ProtocolAddress,
+    ) -> Result<Vec<DeviceCapabilityEnum>> {
         todo!()
     }
 

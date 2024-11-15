@@ -257,7 +257,7 @@ impl SignalDatabase for PostgresDatabase {
     }
 
     async fn get_device(&self, address: &ProtocolAddress) -> Result<Device> {
-        let device_capabilities = self.get_device_capabilities(device_id).await?;
+        let device_capabilities = self.get_device_capabilities(address).await?;
 
         sqlx::query!(
             r#"
@@ -317,86 +317,10 @@ impl SignalDatabase for PostgresDatabase {
         .map_err(|err| err.into())
     }
 
-    async fn get_device_capabilities(&self, device_id: u32) -> Result<Vec<DeviceCapabilityEnum>> {
-        sqlx::query!(
-            r#"
-            SELECT
-                capability_type
-            FROM
-                device_capabilities
-            WHERE
-                owner = $1
-            "#,
-            device_id as i32
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .map(|row| DeviceCapabilityEnum::from(row.capability_type))
-                .collect()
-        })
-        .map_err(|err| err.into())
-    }
-
-    async fn get_all_device_capabilities(
+    async fn get_device_capabilities(
         &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<(i32, DeviceCapabilityEnum)>> {
-        sqlx::query!(
-            r#"
-            SELECT
-                owner,
-                capability_type
-            FROM
-                device_capabilities
-            WHERE
-                owner = (
-                    SELECT
-                        id
-                    FROM
-                        devices
-                    WHERE
-                        owner = (
-                            SELECT
-                                id
-                            FROM
-                                accounts
-                            WHERE
-                                aci = $1 OR
-                                pni = $1
-                        )
-                )
-            "#,
-            service_id.service_id_string()
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .map(|row| (row.owner, DeviceCapabilityEnum::from(row.capability_type)))
-                .collect()
-        })
-        .map_err(|err| err.into())
-    }
-
-    async fn add_used_device_link_token(&self, device_link_token: String) -> Result<()> {
-        sqlx::query!(
-            r#"
-            INSERT INTO
-                used_device_link_tokens (device_link_token)
-            VALUES
-                ($1)
-            "#,
-            device_link_token,
-        )
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
-        .map_err(|err| err.into())
-    }
-
-    async fn get_device_capabilities(&self, device_id: u32) -> Result<Vec<DeviceCapabilityEnum>> {
+        address: &ProtocolAddress,
+    ) -> Result<Vec<DeviceCapabilityEnum>> {
         sqlx::query!(
             r#"
             SELECT
@@ -406,7 +330,7 @@ impl SignalDatabase for PostgresDatabase {
             WHERE
                 owner = $1
             "#,
-            device_id as i32
+            u32::from(address.device_id()) as i32
         )
         .fetch_all(&self.pool)
         .await

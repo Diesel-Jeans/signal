@@ -433,7 +433,10 @@ async fn handle_delete_device<T: SignalDatabase, U: WSStream + Debug>(
 
     state
         .account_manager
-        .delete_device(&authenticated_device.account().aci().into(), device_id)
+        .delete_device(&ProtocolAddress::new(
+            authenticated_device.account().aci().service_id_string(),
+            device_id.into(),
+        ))
         .await
         .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,

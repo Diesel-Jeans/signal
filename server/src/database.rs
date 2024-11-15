@@ -39,7 +39,10 @@ pub trait SignalDatabase: Clone + Send + Sync + 'static {
     /// Delete the account associated with the given [ServiceId].
     async fn delete_account(&self, service_id: &ServiceId) -> Result<()>;
 
-    async fn get_device_capabilities(&self, device_id: u32) -> Result<Vec<DeviceCapabilityEnum>>;
+    async fn get_device_capabilities(
+        &self,
+        address: &ProtocolAddress,
+    ) -> Result<Vec<DeviceCapabilityEnum>>;
 
     async fn get_all_device_capabilities(
         &self,
