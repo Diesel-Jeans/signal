@@ -68,11 +68,11 @@ where
     pub async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
         self.db.get_all_devices(service_id).await
     }
-    pub async fn get_device(&self, service_id: &ServiceId, device_id: u32) -> Result<Device> {
-        self.db.get_device(service_id, device_id).await
+    pub async fn get_device(&self, address: &ProtocolAddress) -> Result<Device> {
+        self.db.get_device(address).await
     }
-    pub async fn delete_device(&self, service_id: &ServiceId, device_id: u32) -> Result<()> {
-        self.db.delete_device(service_id, device_id).await
+    pub async fn delete_device(&self, address: &ProtocolAddress) -> Result<()> {
+        self.db.delete_device(address).await
     }
 
     pub async fn store_key_bundle(

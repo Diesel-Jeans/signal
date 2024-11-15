@@ -1,10 +1,7 @@
-use std::fmt::{write, Display};
-use std::num::ParseIntError;
-use std::str::FromStr;
+use std::{fmt::Display, num::ParseIntError, str::FromStr};
 
 use anyhow::{anyhow, bail, Error, Result};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-use serde;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]

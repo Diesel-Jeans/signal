@@ -1,50 +1,41 @@
-use crate::encryption::{decrypt, encrypt};
 use anyhow::Result;
-use base64::{
-    alphabet,
-    engine::{self, general_purpose},
-    Engine as _,
-};
+use base64::{engine::general_purpose, Engine as _};
 use common::signal_protobuf::{
     WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
 };
-use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::task::LocalSpawnExt;
-use futures_util::{FutureExt, SinkExt, StreamExt, TryStream, TryStreamExt};
-use libsignal_protocol::InMemSignalProtocolStore;
+use futures_util::{SinkExt, StreamExt};
 use native_tls::{Certificate, TlsConnector as NativeTlsConnector};
-use prost::encoding::hash_map::encode;
 use prost::Message as ProstMessage;
-use serde::de::IntoDeserializer;
 use socket2::{Domain, Socket, TcpKeepalive, Type};
-use std::collections::HashMap;
-use std::env;
-use std::fmt::{Display, Formatter};
-use std::fs;
-use std::future::{Future, IntoFuture};
-use std::net::ToSocketAddrs;
-use std::ops::Deref;
-use std::pin::Pin;
-use std::process::Output;
-use std::sync::{mpsc, Arc};
-use std::thread;
-use std::time::{Duration, Instant, SystemTime};
-use surf::http::headers::ToHeaderValues;
-use tokio::net::TcpStream;
-use tokio::runtime::Handle;
-use tokio::spawn;
-use tokio::sync::Mutex;
-use tokio::task::{yield_now, AbortHandle, JoinHandle, Unconstrained};
-use tokio::time::{sleep, timeout};
+use std::{
+    collections::HashMap,
+    env, fs,
+    future::Future,
+    net::ToSocketAddrs,
+    sync::{mpsc, Arc},
+    thread,
+    time::{Duration, Instant, SystemTime},
+};
+use tokio::{
+    net::TcpStream,
+    runtime::Handle,
+    spawn,
+    sync::Mutex,
+    task::{yield_now, AbortHandle, JoinHandle},
+    time::sleep,
+};
 use tokio_native_tls::{TlsConnector, TlsStream};
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::protocol::{frame, WebSocketConfig};
-use tokio_tungstenite::tungstenite::{http, WebSocket};
-use tokio_tungstenite::*;
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
-use url::Url;
+use tokio_tungstenite::{
+    client_async_with_config,
+    tungstenite::{
+        client::IntoClientRequest,
+        http,
+        protocol::{frame, Message, WebSocketConfig},
+    },
+    WebSocketStream,
+};
 
-//Constants used by Signal, and therefore also used in our project
+// Constants used by Signal, and therefore also used in our project
 const SECOND: u32 = 1000;
 const MINUTE: u32 = SECOND * 60;
 const HOUR: u32 = MINUTE * 60;

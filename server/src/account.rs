@@ -76,9 +76,14 @@ impl Account {
     }
 
     pub fn add_device(&mut self, device: Device) -> Result<()> {
-        // TODO: Do some check to see if device is not in devices
-        self.devices.push(device);
-        Ok(())
+        if !self.devices.contains(&device) {
+            self.devices.push(device);
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "Device is already registered on the account"
+            ))
+        }
     }
 
     pub fn phone_number(&self) -> &str {

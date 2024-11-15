@@ -170,7 +170,10 @@ where
                 })?,
             Some(device_id) => {
                 vec![database
-                    .get_device(&target_service_id, device_id.into())
+                    .get_device(&ProtocolAddress::new(
+                        target_service_id.service_id_string(),
+                        device_id,
+                    ))
                     .await
                     .map_err(|_| ApiError {
                         status_code: StatusCode::BAD_REQUEST,
@@ -414,7 +417,7 @@ mod key_manager_tests {
         let signed_pre_key_db = get_ec_pni_signed_pre_key(
             &database,
             request.signed_pre_key.unwrap().key_id,
-            &ServiceId::Pni(target_service_id),
+            &target_service_id.into(),
             target_device_id.into(),
         )
         .await
@@ -423,14 +426,14 @@ mod key_manager_tests {
         let pq_last_resort_pre_key_db = get_pq_last_resort_pre_key(
             &database,
             request.pq_last_resort_pre_key.unwrap().key_id,
-            &ServiceId::Pni(target_service_id),
+            &target_service_id.into(),
             target_device_id.into(),
         )
         .await
         .unwrap();
 
         database
-            .delete_account(&ServiceId::Pni(target_service_id))
+            .delete_account(&target_service_id.into())
             .await
             .unwrap();
 
@@ -481,7 +484,7 @@ mod key_manager_tests {
             .unwrap();
 
         database
-            .delete_account(&ServiceId::Pni(auth_device.account().pni()))
+            .delete_account(&auth_device.account().pni().into())
             .await
             .unwrap();
 
