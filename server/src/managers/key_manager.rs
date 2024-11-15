@@ -301,9 +301,9 @@ mod key_manager_tests {
     pub fn new_account_from_identity_key(identity_key: IdentityKey) -> Account {
         Account::new(
             Pni::from(Uuid::new_v4()),
+            identity_key,
+            identity_key,
             new_device(),
-            identity_key,
-            identity_key,
             Uuid::new_v4().into(),
         )
     }

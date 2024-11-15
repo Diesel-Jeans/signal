@@ -344,7 +344,7 @@ pub(crate) mod test {
     use axum::http::StatusCode;
     use base64::Engine;
     use common::signal_protobuf::{envelope, Envelope, WebSocketMessage, WebSocketRequestMessage};
-    use common::web_api::{AccountAttributes, DeviceCapabilities, SignalMessages};
+    use common::web_api::{AccountAttributes, SignalMessages};
     use futures_util::stream::SplitStream;
     use futures_util::StreamExt;
     use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
@@ -408,29 +408,16 @@ pub(crate) mod test {
             .salt("bob_salt".into())
             .registration_id(1)
             .pni_registration_id(1)
+            .capabilities(Vec::new())
             .build();
         let mut identity_key = [0u8; 33];
         identity_key[0] = 5;
         let account = Account::new(
             Pni::from(Uuid::new_v4()),
+            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
+            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
             device.clone(),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
             Uuid::new_v4().to_string(),
-            AccountAttributes {
-                name: "name".into(),
-                fetches_messages: true,
-                registration_id: 1,
-                pni_registration_id: 1,
-                capabilities: DeviceCapabilities {
-                    storage: true,
-                    transfer: true,
-                    payment_activation: true,
-                    delete_sync: true,
-                    versioned_expiration_timer: true,
-                },
-                unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-            },
         );
         let auth_device = AuthenticatedDevice::new(account, device);
 
