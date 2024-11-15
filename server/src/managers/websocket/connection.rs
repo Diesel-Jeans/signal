@@ -713,7 +713,7 @@ pub(crate) mod test {
                 .len(),
             1
         );
-        println!("here");
+
         let msg = match receiver.recv().await {
             Some(Message::Binary(x)) => {
                 WebSocketMessage::decode(Bytes::from(x)).expect("Did not unwrap ws message")
