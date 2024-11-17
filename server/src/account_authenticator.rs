@@ -108,7 +108,7 @@ async fn authenticate_device<T: SignalDatabase, U: WSStream + Debug>(
         salt: device.salt().to_owned(),
     };
 
-    if salted_token.verify(&password.to_owned())? {
+    if salted_token.verify(password)? {
         Ok(AuthenticatedDevice::new(account, device))
     } else {
         Err(ApiError {
@@ -123,7 +123,7 @@ pub struct SaltedTokenHash {
     salt: String,
 }
 impl SaltedTokenHash {
-    pub fn generate_for(credentials: &String) -> Result<Self, ApiError> {
+    pub fn generate_for(credentials: &str) -> Result<Self, ApiError> {
         fn generate_salt() -> String {
             let mut salt = [0u8; SALT_SIZE];
             OsRng.fill_bytes(&mut salt);
@@ -136,12 +136,12 @@ impl SaltedTokenHash {
         Ok(Self { salt, hash: token })
     }
 
-    pub fn verify(&self, credentials: &String) -> Result<bool, ApiError> {
+    pub fn verify(&self, credentials: &str) -> Result<bool, ApiError> {
         let their_value = SaltedTokenHash::calculate(&self.salt, credentials)?;
         Ok(self.hash == their_value)
     }
 
-    fn calculate(salt: &String, token: &String) -> Result<String, ApiError> {
+    fn calculate(salt: &str, token: &str) -> Result<String, ApiError> {
         Ok(hex::encode(HKDF_DeriveSecrets(
             32,
             token.as_bytes(),

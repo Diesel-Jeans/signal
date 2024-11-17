@@ -28,18 +28,16 @@ where
     pub async fn create_account(
         &self,
         phone_number: String,
-        account_attributes: AccountAttributes,
         aci_identity_key: IdentityKey,
         pni_identity_key: IdentityKey,
         primary_device: Device,
     ) -> Result<Account> {
         let account = Account::new(
             Pni::from(Uuid::new_v4()),
-            primary_device,
-            pni_identity_key,
             aci_identity_key,
+            pni_identity_key,
+            primary_device,
             phone_number,
-            account_attributes,
         );
         self.db.add_account(&account).await?;
         Ok(account)

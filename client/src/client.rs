@@ -2,7 +2,7 @@ use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use common::{
     signal_protobuf::WebSocketResponseMessage,
-    web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse},
+    web_api::{AccountAttributes, RegistrationRequest, RegistrationResponse},
 };
 use core::str;
 use libsignal_core::{Aci, Pni};
@@ -100,14 +100,12 @@ impl Client {
         let mut master_key = [0u8; MASTER_KEY_LENGTH];
         csprng.fill(&mut master_key);
 
-        let capabilities = DeviceCapabilities::default();
-
         let account_attributes = AccountAttributes::new(
             name.into(),
             true,
             aci_registration_id,
             pni_registration_id,
-            capabilities,
+            Vec::new(),
             Box::new(access_key),
         );
         let server_api = ServerAPI::new();

@@ -2,7 +2,7 @@ use crate::{
     account::{Account, AuthenticatedDevice, Device},
     postgres::PostgresDatabase,
 };
-use common::web_api::{AccountAttributes, DeviceCapabilities};
+use common::web_api::AccountAttributes;
 use libsignal_core::{Pni, ProtocolAddress};
 use libsignal_protocol::{IdentityKey, KeyPair, PublicKey};
 use rand::{
@@ -23,11 +23,10 @@ pub fn new_account() -> Account {
 
     Account::new(
         Pni::from(Uuid::new_v4()),
+        IdentityKey::new(identity_key.public_key),
+        IdentityKey::new(identity_key.public_key),
         new_device(),
-        IdentityKey::new(identity_key.public_key),
-        IdentityKey::new(identity_key.public_key),
         Uuid::new_v4().into(),
-        new_account_attributes(),
     )
 }
 pub fn new_device() -> Device {
@@ -40,24 +39,8 @@ pub fn new_device() -> Device {
         .salt("bob_salt".into())
         .registration_id(StdRng::from_entropy().gen::<u32>().into())
         .pni_registration_id(StdRng::from_entropy().gen::<u32>().into())
+        .capabilities(Vec::new())
         .build()
-}
-
-pub fn new_account_attributes() -> AccountAttributes {
-    AccountAttributes {
-        name: "name".into(),
-        fetches_messages: true,
-        registration_id: 1,
-        pni_registration_id: 1,
-        capabilities: DeviceCapabilities {
-            storage: true,
-            transfer: true,
-            payment_activation: true,
-            delete_sync: true,
-            versioned_expiration_timer: true,
-        },
-        unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-    }
 }
 
 pub fn new_protocol_address() -> ProtocolAddress {
