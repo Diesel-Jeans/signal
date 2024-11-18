@@ -196,8 +196,9 @@ WebSocketConnection<W, DB>
 
     async fn handle_request(&mut self, request_msq: WebSocketRequestMessage) -> Result<(), String> {
         let msq_id = request_msq.id.ok_or("Request id was not present")?;
-        if (!request_msq.path().starts_with("/v1/messages")
-            || !request_msq.path().starts_with("/v1/keepalive"))
+        let path = request_msq.path.clone().ok_or("Request path was not present")?;
+        if (!path.starts_with("/v1/messages")
+            && !path.starts_with("/v1/keepalive"))
         {
             self.send(Message::Binary(
                 create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
@@ -376,16 +377,17 @@ pub(crate) mod test {
     };
     use axum::{extract::ws::Message, http::StatusCode, Error};
     use base64::prelude::{Engine as _, BASE64_STANDARD};
-    use common::signal_protobuf::{Envelope, WebSocketMessage};
+    use common::signal_protobuf::{Envelope, WebSocketMessage, WebSocketRequestMessage};
     use futures_util::{stream::SplitStream, StreamExt};
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};
     use serial_test::serial;
     use std::time::Duration;
     use std::{net::SocketAddr, str::FromStr};
+    use std::sync::{Arc, Mutex};
     use tokio::sync::mpsc::{Receiver, Sender};
     use tokio::time::sleep;
-
+    // use tonic::codegen::tokio_stream::StreamExt;
     use super::{UserIdentity, WebSocketConnection};
 
     fn make_envelope() -> Envelope {
@@ -737,5 +739,67 @@ pub(crate) mod test {
         assert!(req.headers[0] == "X-Signal-Key: false");
         assert!(req.headers[1].starts_with("X-Signal-Timestamp:"));
         assert!(req.body.unwrap() == env.encode_to_vec());
+    }
+
+    #[tokio::test]
+    async fn test_keepalive_for_present_device() {
+        let mut state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver, mut mreceiver) =
+            create_connection("127.0.0.1:4042", state.clone()).await;
+
+        let websocket = Arc::new(tokio::sync::Mutex::new(client));
+
+        state.clone().client_presence_manager.set_present(&(websocket.lock().await.protocol_address()), websocket.clone());
+        websocket.lock().await
+            .on_receive(create_request(
+                1,
+                "PUT",
+                "/v1/keepalive",
+                vec![],
+                None,
+            ))
+            .await
+            .unwrap();
+
+        let message_response = receiver.recv().await.unwrap();
+        let message = WebSocketMessage::decode(message_response.into_data().as_slice()).unwrap();
+        let response = message.response.unwrap();
+
+        assert!(state.clone().client_presence_manager.is_present(&websocket.lock().await.protocol_address()).await.unwrap());
+        assert_eq!(message.r#type.unwrap(), 2);
+        assert_eq!(response.status.unwrap(), 200);
+        assert_eq!(response.message.unwrap(), "OK");
+    }
+
+    #[tokio::test]
+    async fn test_keepalive_for_unpresent_device() {
+        let mut state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver, mut mreceiver) =
+            create_connection("127.0.0.1:4042", state.clone()).await;
+
+        state.clone().client_presence_manager.disconnect_presence_in_test(&client.protocol_address());
+
+        client
+            .on_receive(create_request(
+                1,
+                "PUT",
+                "/v1/keepalive",
+                vec![],
+                None,
+            ))
+            .await
+            .unwrap();
+
+        let message_response = receiver.recv().await.unwrap();
+        let message = WebSocketMessage::decode(message_response.into_data().as_slice()).unwrap();
+        let response = message.response.unwrap();
+
+
+        println!("Is locally present: {}", state.client_presence_manager.is_locally_present(&client.protocol_address()));
+        println!("Status: {}, Message: {}", response.status.unwrap(), response.message.unwrap());
+
+
+        assert_eq!(message.r#type.unwrap(), 2);
+        // assert_eq!(response.status.unwrap(), 500);
     }
 }
