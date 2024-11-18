@@ -169,6 +169,12 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
             .await
     }
 
+    #[cfg(test)]
+    pub async fn disconnect_presence_in_test(&mut self, address: &ProtocolAddress) -> Result<u8> {
+        self.disconnect_all_presence(address.name(), vec![address.device_id()])
+            .await
+    }
+
     async fn displace_presence(
         &mut self,
         presence_key: &str,
@@ -185,7 +191,7 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         self.clear_presence(presence_key).await
     }
 
-    async fn is_present(&mut self, address: &ProtocolAddress) -> Result<bool> {
+    pub async fn is_present(&self, address: &ProtocolAddress) -> Result<bool> {
         let mut connection = self.pool.get().await?;
         let is_present = cmd("EXISTS")
             .arg(self.get_presence_key(address))
