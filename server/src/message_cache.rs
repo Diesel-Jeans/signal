@@ -360,6 +360,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 
         cmd("SETEX")
             .arg(self.get_persist_in_progress_key(address))
+            .arg(30)
             .arg("1")
             .query_async::<()>(&mut connection)
             .await?;
@@ -468,8 +469,6 @@ pub mod message_cache_tests {
     };
 
     use super::*;
-    use serial_test::serial;
-    use uuid::Uuid;
 
     #[tokio::test]
 
