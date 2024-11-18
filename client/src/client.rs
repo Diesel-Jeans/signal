@@ -11,7 +11,6 @@ use libsignal_protocol::{
     SignedPreKeyRecord,
 };
 use rand::{rngs::OsRng, Rng};
-use std::error::Error;
 use surf::StatusCode;
 
 use crate::{
@@ -130,7 +129,7 @@ impl Client {
         let mut response = server_api
             .register_client(phone_number, password.to_owned(), req, None)
             .await
-            .map_err(|err| RegistrationError::NoResponse)?;
+            .map_err(|_| RegistrationError::NoResponse)?;
         match response.status() {
             StatusCode::Ok => {
                 let body: RegistrationResponse = response

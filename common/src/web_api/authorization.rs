@@ -96,9 +96,8 @@ impl Display for BasicAuthorizationHeader {
 
 #[cfg(test)]
 mod tests {
-    use libsignal_protocol::DeviceId;
-
     use super::BasicAuthorizationHeader;
+
     fn username() -> String {
         "Darkros1245".to_owned()
     }

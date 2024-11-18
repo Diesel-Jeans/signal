@@ -87,14 +87,12 @@ impl KeyBundleContent {
     }
 
     pub fn deserialize(bundle: PrimitiveKeyBundleContent) -> KeyBundleContent {
-        let one_time_key: Option<(PreKeyId, PublicKey)> = if (bundle
-            .onetime_public_key_id
-            .is_none()
+        let one_time_key: Option<(PreKeyId, PublicKey)> = if bundle.onetime_public_key_id.is_none()
             || bundle.onetime_public_key.is_none()
             || bundle
                 .onetime_public_key_id
                 .expect("One time pre key id is somehow None after a none check - kill me")
-                == 0)
+                == 0
         {
             None
         } else {
@@ -105,13 +103,13 @@ impl KeyBundleContent {
         };
 
         let kyber: Option<(KyberPreKeyId, kem::PublicKey, Vec<u8>)> =
-            if (bundle.kyper_pre_key_id.is_none()
+            if bundle.kyper_pre_key_id.is_none()
                 || bundle.kyper_public_key.is_none()
                 || bundle.kyper_signature.is_none()
                 || bundle
                     .kyper_pre_key_id
                     .expect("None checks are fucked if this happens")
-                    == 0)
+                    == 0
             {
                 None
             } else {
@@ -253,7 +251,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_serialize_bundle_data_with_none() {
-        let alice = Uuid::new_v4().to_string();
         let device_id = 42069;
         let mut store = store(device_id);
 

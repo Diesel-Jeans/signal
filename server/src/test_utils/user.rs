@@ -47,8 +47,8 @@ pub fn new_device() -> Device {
         .created(0)
         .auth_token("bob_token".into())
         .salt("bob_salt".into())
-        .registration_id(StdRng::from_entropy().gen::<u32>().into())
-        .pni_registration_id(StdRng::from_entropy().gen::<u32>().into())
+        .registration_id(StdRng::from_entropy().gen::<u32>())
+        .pni_registration_id(StdRng::from_entropy().gen::<u32>())
         .build()
 }
 

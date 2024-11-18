@@ -9,12 +9,12 @@ use prost::Message as ProstMessage;
 use socket2::{Domain, Socket, TcpKeepalive, Type};
 use std::{
     collections::HashMap,
-    env, fs,
+    fs,
     future::Future,
     net::ToSocketAddrs,
     sync::{mpsc, Arc},
     thread,
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant},
 };
 use tokio::{
     net::TcpStream,
@@ -38,10 +38,6 @@ use tokio_tungstenite::{
 // Constants used by Signal, and therefore also used in our project
 const SECOND: u32 = 1000;
 const MINUTE: u32 = SECOND * 60;
-const HOUR: u32 = MINUTE * 60;
-const DAY: u32 = HOUR * 24;
-const WEEK: u32 = DAY * 7;
-const MONTH: u32 = DAY * 30;
 
 // 30 seconds + 5 seconds for closing the socket above.
 const KEEPALIVE_INTERVAL_MS: u32 = 30 * SECOND;
@@ -53,8 +49,6 @@ const STALE_THRESHOLD_MS: u32 = 5 * MINUTE;
 // If we don't receive a response to keepalive request within 30 seconds -
 // close the socket.
 const KEEPALIVE_TIMEOUT_MS: u32 = 30 * SECOND;
-
-const MAX_MESSAGE_SIZE: u32 = 512 * 1024;
 
 struct StreamHandler {
     pub stream: WebSocketStream<TlsStream<TcpStream>>,
@@ -135,18 +129,18 @@ impl WebsocketHandler {
     }
 
     fn get_handle_for_ws_listener(
-        mut sock: Arc<Mutex<StreamHandler>>,
-        mut incoming: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>>,
-        mut outgoing: Arc<Mutex<HashMap<u64, AbortHandle>>>,
+        sock: Arc<Mutex<StreamHandler>>,
+        incoming: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>>,
+        outgoing: Arc<Mutex<HashMap<u64, AbortHandle>>>,
     ) -> (
         thread::JoinHandle<JoinHandle<()>>,
         mpsc::Receiver<Message>,
         mpsc::Receiver<WebSocketRequestMessage>,
     ) {
-        let (mut message_tx, mut message_rx) = mpsc::channel::<Message>();
+        let (message_tx, message_rx) = mpsc::channel::<Message>();
         let handle = Handle::current();
         let mtx = message_tx.clone();
-        let (mut request_tx, mut request_rx) = mpsc::channel::<WebSocketRequestMessage>();
+        let (request_tx, request_rx) = mpsc::channel::<WebSocketRequestMessage>();
 
         //This is a fragile house of cards so don't change the spawn structure
         let hand = thread::spawn(move || {
@@ -154,7 +148,7 @@ impl WebsocketHandler {
                 while let Some(Ok(msg)) = sock.lock().await.stream.next().await {
                     match msg {
                         Message::Text(msg) => {
-                            if let Err(e) = mtx.send(Message::Text(msg)) {
+                            if mtx.send(Message::Text(msg)).is_err() {
                                 break;
                             }
                         }
@@ -168,7 +162,7 @@ impl WebsocketHandler {
                                     let request = wsm
                                         .request
                                         .expect("Got a request type without an attached request");
-                                    if let Err(e) = request_tx.send(request) {
+                                    if request_tx.send(request).is_err() {
                                         //Requests will be handled by the receive channel
                                         break;
                                     }
@@ -212,10 +206,9 @@ impl WebsocketHandler {
     pub async fn send_request(
         &mut self,
         options: SendRequestOptions,
-    ) -> Result<(WebSocketResponseMessage)> {
-        let mut id;
+    ) -> Result<WebSocketResponseMessage> {
         let mut lock = self.outgoing_id.lock().await;
-        id = *lock;
+        let id = *lock;
         *lock += 1;
         drop(lock);
 
@@ -228,7 +221,7 @@ impl WebsocketHandler {
         if let Some(headers) = options.headers {
             headers
                 .iter()
-                .map(|(key, value)| header_vec.push(format!("{}:{}", key, value)));
+                .for_each(|(key, value)| header_vec.push(format!("{}:{}", key, value)));
         }
 
         //Make the protobuf message and convert it to bytes
@@ -248,7 +241,7 @@ impl WebsocketHandler {
         //Send the message over ws
         self.socket.lock().await.stream.send(msg).await?;
 
-        let mut self_clone = self.clone();
+        let self_clone = self.clone();
 
         let promise = spawn(async move {
             if self_clone.has_keepalive {
@@ -277,7 +270,7 @@ impl WebsocketHandler {
             .await
             .insert(id, promise.abort_handle());
 
-        promise.await;
+        promise.await?;
 
         if let Some(incoming) = self.incoming_response.lock().await.get(&id) {
             let Some(status) = incoming.status else {
@@ -370,14 +363,11 @@ impl KeepaliveHandler {
 
     pub async fn reset_keepalive(&mut self) {
         *self.last_alive_at.clone().lock().await = Instant::now();
-        let mut self_clone = self.clone();
         self.set_timeout(KEEPALIVE_INTERVAL_MS).await;
     }
 
     //KeepAlive contains two send methods to replicate the functionality of Signal-Desktop to the best of my ability
     async fn keepalive_super_send(&mut self) -> Result<bool> {
-        let sent_at = Instant::now();
-
         let request_options = SendRequestOptions {
             verb: "GET".to_string(),
             path: "/v1/keepalive".to_string(),
@@ -398,7 +388,8 @@ impl KeepaliveHandler {
                 self.websocket_resource
                     .lock()
                     .await
-                    .close(3001, format!("keepalive response with {} code", status));
+                    .close(3001, format!("keepalive response with {} code", status))
+                    .await?;
                 bail!("keepalive response with {} code", status);
             }
         } else {
@@ -410,13 +401,17 @@ impl KeepaliveHandler {
 
     pub async fn keepalive_send(&mut self) -> Result<bool> {
         if self.last_alive_at.lock().await.elapsed().as_millis() > STALE_THRESHOLD_MS.into() {
-            self.websocket_resource.lock().await.close(
-                3001,
-                format!(
-                    "Last keepalive request was too far in the past: {}",
-                    self.last_alive_at.lock().await.elapsed().as_millis()
-                ),
-            );
+            self.websocket_resource
+                .lock()
+                .await
+                .close(
+                    3001,
+                    format!(
+                        "Last keepalive request was too far in the past: {}",
+                        self.last_alive_at.lock().await.elapsed().as_millis()
+                    ),
+                )
+                .await?;
             bail!("Connection is stale")
         }
 
@@ -439,7 +434,7 @@ impl KeepaliveHandler {
             loop {
                 let now = Instant::now();
                 while now.elapsed().as_millis() <= timeout.into() {
-                    yield_now();
+                    yield_now().await;
                 }
                 match handler.lock().await.keepalive_send().await {
                     Ok(true) => (),
@@ -549,7 +544,11 @@ where
 #[cfg(test)]
 mod websocket_tests {
     use super::*;
-    use std::{thread::sleep, time::Duration};
+    use std::{
+        env,
+        thread::sleep,
+        time::{Duration, SystemTime},
+    };
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
@@ -620,7 +619,7 @@ mod websocket_tests {
         println!("Testing keepalive");
         sleep(Duration::from_millis(5000));
 
-        handler.close(1000, "Normal closure".into());
+        handler.close(1000, "Normal closure".into()).await.unwrap();
 
         assert!(true)
     }
