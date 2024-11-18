@@ -1,15 +1,12 @@
+#[cfg(test)]
+use crate::test_utils::random_string;
 use anyhow::Result;
 use deadpool_redis::{Config, Runtime};
 use libsignal_core::{DeviceId, ProtocolAddress};
 use redis::cmd;
-use std::collections::HashMap;
-use std::marker::PhantomData;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-
-#[cfg(test)]
-use crate::test_utils::random_string;
 
 const PRESENCE_EXPIRATION_SECONDS: u16 = 660;
 
@@ -124,8 +121,6 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
 
     async fn clear_presence(&mut self, presence_key: &str) -> Result<bool> {
         self.displacement_listeners.remove(presence_key);
-
-        let removed: bool;
         let mut connection = self.pool.get().await?;
 
         if let Some(key) = cmd("GET")
@@ -224,10 +219,8 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
 
 #[cfg(test)]
 mod client_presence_manager_test {
-    use crate::test_utils::message_cache::{generate_uuid, teardown};
-
     use super::*;
-    use serial_test::serial;
+    use crate::test_utils::message_cache::{generate_uuid, teardown};
 
     pub struct MockWebSocketConnection {
         pub evoke_handle_displacement: bool,
@@ -249,7 +242,6 @@ mod client_presence_manager_test {
     }
 
     #[tokio::test]
-
     async fn test_handle_displacement() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
             ClientPresenceManager::connect();
@@ -286,7 +278,6 @@ mod client_presence_manager_test {
     }
 
     #[tokio::test]
-
     async fn test_set_present() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
             ClientPresenceManager::connect();
@@ -325,7 +316,6 @@ mod client_presence_manager_test {
     }
 
     #[tokio::test]
-
     async fn test_disconnect_all_presence() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
             ClientPresenceManager::connect();
@@ -349,7 +339,6 @@ mod client_presence_manager_test {
     }
 
     #[tokio::test]
-
     async fn test_is_present() {
         let mut manager: ClientPresenceManager<MockWebSocketConnection> =
             ClientPresenceManager::connect();

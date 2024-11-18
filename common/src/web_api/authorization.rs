@@ -1,8 +1,7 @@
-use std::{fmt::Display, num::ParseIntError, str::FromStr};
-
 use anyhow::{anyhow, bail, Error, Result};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
+use std::{fmt::Display, num::ParseIntError, str::FromStr};
 
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,5 +1,7 @@
-use axum::extract::ws::{Message, WebSocket};
-use axum::Error;
+use axum::{
+    extract::ws::{Message, WebSocket},
+    Error,
+};
 use futures_util::{Sink, Stream};
 
 #[async_trait::async_trait]

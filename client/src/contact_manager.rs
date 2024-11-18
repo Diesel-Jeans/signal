@@ -51,19 +51,15 @@ impl ContactManager {
     }
 
     pub fn get_contact(&self, uuid: &String) -> Result<&Contact, String> {
-        if let Some(contact) = self.contacts.get(uuid) {
-            Ok(contact)
-        } else {
-            Err(format!("Contact with UUID '{uuid}' not found"))
-        }
+        self.contacts
+            .get(uuid)
+            .ok_or_else(|| format!("Contact with UUID '{uuid}' not found"))
     }
 
     fn get_contact_mut(&mut self, uuid: &String) -> Result<&mut Contact, String> {
-        if let Some(contact) = self.contacts.get_mut(uuid) {
-            Ok(contact)
-        } else {
-            Err(format!("Contact with UUID '{uuid}' not found"))
-        }
+        self.contacts
+            .get_mut(uuid)
+            .ok_or_else(|| format!("Contact with UUID '{uuid}' not found"))
     }
 
     pub fn remove_contact(&mut self, uuid: &String) -> Result<(), String> {
@@ -102,51 +98,42 @@ mod test {
     fn test_cm_add() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
-        if let Err(x) = cm.add_contact(&charlie) {
-            panic!("{}", x)
-        }
+
+        cm.add_contact(&charlie).unwrap();
     }
 
     #[test]
     fn test_cm_remove() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
-
         cm.add_contact(&charlie);
 
-        if let Err(x) = cm.remove_contact(&charlie) {
-            panic!("{}", x)
-        }
+        cm.remove_contact(&charlie).unwrap()
     }
 
     #[test]
     fn test_cm_get() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
-
         cm.add_contact(&charlie);
 
-        match cm.get_contact(&charlie) {
-            Ok(c) => assert!(c.uuid == charlie && c.devices.is_empty()),
-            Err(x) => panic!("{}", x),
-        };
+        let c = cm.get_contact(&charlie).unwrap();
+        assert!(c.uuid == charlie);
+        assert!(c.devices.is_empty());
     }
 
     #[tokio::test]
     async fn test_cm_update() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
-
         cm.add_contact(&charlie);
 
         let mut store = store(1);
         let bundle = create_pre_key_bundle(&mut store, 1, &mut OsRng)
             .await
             .unwrap();
-        if let Err(x) = cm.update_contact(&charlie, vec![(1, bundle.try_into().unwrap())]) {
-            panic!("{}", x)
-        }
-
+        cm.update_contact(&charlie, vec![(1, bundle.try_into().unwrap())])
+            .unwrap();
         assert!(cm.get_contact(&charlie).is_ok(), "Charlie was not ok")
     }
 }

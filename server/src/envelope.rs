@@ -2,9 +2,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::account::Account;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-use common::signal_protobuf::{envelope, Envelope};
-use common::web_api::{SignalMessage, SignalMessages};
-use libsignal_core::{DeviceId, ServiceId};
+use common::{signal_protobuf::Envelope, web_api::SignalMessage};
+use libsignal_core::ServiceId;
 
 pub trait ToEnvelope {
     fn to_envelope(

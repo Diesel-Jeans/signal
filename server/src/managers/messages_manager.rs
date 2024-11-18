@@ -1,6 +1,8 @@
-use crate::database::SignalDatabase;
-use crate::message_cache::{MessageAvailabilityListener, MessageCache};
-use crate::postgres::PostgresDatabase;
+use crate::{
+    database::SignalDatabase,
+    message_cache::{MessageAvailabilityListener, MessageCache},
+    postgres::PostgresDatabase,
+};
 use anyhow::{Ok, Result};
 use common::signal_protobuf::Envelope;
 use libsignal_core::ProtocolAddress;
@@ -41,10 +43,9 @@ where
     }
     /// Add message to cache
     pub async fn insert(&self, address: &ProtocolAddress, envelope: &mut Envelope) -> Result<u64> {
-        Ok(self
-            .message_cache
+        self.message_cache
             .insert(address, envelope, &Uuid::new_v4().to_string())
-            .await?)
+            .await
     }
 
     /// Check if user has persisted messages
@@ -110,9 +111,11 @@ where
 
         self.db.push_message_queue(address, messages).await?;
 
-        let removed_from_cache = self.message_cache.remove(address, message_guids).await?;
-
-        Ok(removed_from_cache.len())
+        Ok(self
+            .message_cache
+            .remove(address, message_guids)
+            .await?
+            .len())
     }
 
     pub async fn add_message_availability_listener(
@@ -144,45 +147,28 @@ where
 
 #[cfg(test)]
 pub mod message_manager_tests {
-    use crate::account::{Account, Device};
-    use crate::message_cache::MessageCache;
-    use crate::postgres::PostgresDatabase;
-    use crate::test_utils::database::database_connect;
-    use crate::test_utils::message_cache::{teardown, MockWebSocketConnection};
-    use crate::test_utils::user::{new_account, new_device};
-    use anyhow::Result;
-    use common::web_api::{AccountAttributes, DeviceCapabilities};
-    use deadpool_redis::redis::cmd;
-    use libsignal_core::{Pni, ProtocolAddress, ServiceId};
-    use libsignal_protocol::{IdentityKey, PublicKey};
-    use serial_test::serial;
-    use uuid::Uuid;
-
     use super::*;
+    use crate::{
+        message_cache::MessageCache,
+        postgres::PostgresDatabase,
+        test_utils::{
+            database::database_connect,
+            message_cache::{teardown, MockWebSocketConnection},
+            user::new_account_and_address,
+        },
+    };
+    use libsignal_core::ProtocolAddress;
 
-    async fn init_manager() -> Result<MessagesManager<PostgresDatabase, MockWebSocketConnection>> {
-        Ok(
-            MessagesManager::<PostgresDatabase, MockWebSocketConnection> {
-                message_cache: MessageCache::connect(),
-                db: database_connect().await,
-            },
-        )
-    }
-
-    fn new_account_and_address() -> (Account, ProtocolAddress) {
-        let account = new_account();
-        let address = ProtocolAddress::new(
-            account.aci().service_id_string(),
-            account.devices()[0].device_id(),
-        );
-        (account, address)
+    async fn init_manager() -> MessagesManager<PostgresDatabase, MockWebSocketConnection> {
+        MessagesManager::<PostgresDatabase, MockWebSocketConnection> {
+            message_cache: MessageCache::connect(),
+            db: database_connect().await,
+        }
     }
 
     #[tokio::test]
-
     async fn test_may_have_cached_persisted_messages() {
-        let msg_manager = init_manager().await.unwrap();
-
+        let msg_manager = init_manager().await;
         let (account, address) = new_account_and_address();
         let mut envelope = Envelope::default();
 
@@ -206,12 +192,9 @@ pub mod message_manager_tests {
     }
 
     #[tokio::test]
-
     async fn test_may_have_persisted_persisted_messages() {
-        let msg_manager = init_manager().await.unwrap();
-
+        let msg_manager = init_manager().await;
         let (account, address) = new_account_and_address();
-
         let envelope = Envelope::default();
 
         // DB
@@ -240,12 +223,9 @@ pub mod message_manager_tests {
     }
 
     #[tokio::test]
-
     async fn test_may_have_both_cached_and_db_persisted_messages() {
-        let msg_manager = init_manager().await.unwrap();
-
+        let msg_manager = init_manager().await;
         let (account, address) = new_account_and_address();
-
         let mut envelope = Envelope::default();
 
         // Cache
@@ -283,12 +263,9 @@ pub mod message_manager_tests {
     }
 
     #[tokio::test]
-
     async fn test_count_messages() {
-        let msg_manager = init_manager().await.unwrap();
-
+        let msg_manager = init_manager().await;
         let (account, address) = new_account_and_address();
-
         let envelope = Envelope::default();
 
         // DB
@@ -314,12 +291,9 @@ pub mod message_manager_tests {
     }
 
     #[tokio::test]
-
     async fn test_get_messages_for_device() {
-        let msg_manager = init_manager().await.unwrap();
-
+        let msg_manager = init_manager().await;
         let (account, address) = new_account_and_address();
-
         let mut envelope1 = Envelope::default();
         let mut envelope2 = Envelope::default();
 
@@ -359,12 +333,9 @@ pub mod message_manager_tests {
     }
 
     #[tokio::test]
-
     async fn test_get_cache_only_messages_for_device() {
-        let msg_manager = init_manager().await.unwrap();
-
+        let msg_manager = init_manager().await;
         let (account, address) = new_account_and_address();
-
         let mut envelope = Envelope::default();
 
         // Cache
@@ -408,12 +379,9 @@ pub mod message_manager_tests {
     }
 
     #[tokio::test]
-
     async fn test_delete_messages() {
-        let msg_manager = init_manager().await.unwrap();
-
+        let msg_manager = init_manager().await;
         let (account, address) = new_account_and_address();
-
         let mut envelope1 = Envelope::default();
         let mut envelope2 = Envelope::default();
 
@@ -464,12 +432,9 @@ pub mod message_manager_tests {
     }
 
     #[tokio::test]
-
     async fn test_persist_messages() {
-        let msg_manager = init_manager().await.unwrap();
-
+        let msg_manager = init_manager().await;
         let (account, address) = new_account_and_address();
-
         let mut envelope1 = Envelope::default();
         let mut envelope2 = Envelope::default();
 

@@ -1,61 +1,59 @@
-use crate::account::{Account, AuthenticatedDevice, Device};
-use crate::account_authenticator::SaltedTokenHash;
-use crate::database::SignalDatabase;
-use crate::envelope::ToEnvelope;
-use crate::error::ApiError;
-use crate::managers::state::SignalServerState;
-use crate::managers::websocket::connection::{UserIdentity, WebSocketConnection};
-use crate::managers::websocket::wsstream::WSStream;
-use crate::postgres::PostgresDatabase;
-use crate::response::SendMessageResponse;
-use anyhow::Result;
-use axum::extract::{connect_info::ConnectInfo, FromRequest, Host, Path, State};
-use axum::handler::HandlerWithoutStateExt;
-use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
-use axum::http::{HeaderMap, Method, StatusCode, Uri};
-use axum::response::{IntoResponse, Redirect};
-use axum::routing::{any, delete, get, post, put};
-use axum::{debug_handler, BoxError, Json, Router};
-use common::web_api::authorization::BasicAuthorizationHeader;
-use common::web_api::{
-    DevicePreKeyBundle, RegistrationRequest, RegistrationResponse, SignalMessages,
+use crate::{
+    account::{Account, AuthenticatedDevice, Device},
+    account_authenticator::SaltedTokenHash,
+    database::SignalDatabase,
+    destination_device_validator::DestinationDeviceValidator,
+    envelope::ToEnvelope,
+    error::ApiError,
+    managers::{
+        message_persister::MessagePersister,
+        state::SignalServerState,
+        websocket::{
+            connection::{UserIdentity, WebSocketConnection},
+            wsstream::WSStream,
+        },
+    },
+    postgres::PostgresDatabase,
+    response::SendMessageResponse,
 };
-use futures_util::StreamExt;
-use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
-use serde::Serialize;
-use std::env;
-use std::time::{Duration, SystemTime};
-use tower_http::cors::CorsLayer;
-
-use crate::destination_device_validator::DestinationDeviceValidator;
-use crate::managers::message_persister::MessagePersister;
-use crate::message_cache::MessageAvailabilityListener;
-use axum::extract::ws::{WebSocket, WebSocketUpgrade};
+use anyhow::Result;
 use axum::{
-    body::{self, Bytes, *},
-    extract::{Extension, FromRequestParts},
-    http::Request,
-    middleware::Next,
-    response::Response,
+    debug_handler,
+    extract::{
+        connect_info::ConnectInfo,
+        ws::{WebSocket, WebSocketUpgrade},
+        Host, Path, State,
+    },
+    handler::HandlerWithoutStateExt,
+    http::{
+        header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
+        HeaderMap, Method, StatusCode, Uri,
+    },
+    response::{IntoResponse, Redirect},
+    routing::{any, delete, get, post, put},
+    BoxError, Json, Router,
 };
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
-use std::fmt::Debug;
-use std::io::BufRead;
-use std::net::SocketAddr;
-use std::os::linux::raw::stat;
-use std::str::FromStr;
-use tonic::service::AxumBody;
-use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
-use tracing::trace;
+use common::web_api::{
+    authorization::BasicAuthorizationHeader, DevicePreKeyBundle, RegistrationRequest,
+    RegistrationResponse, SignalMessages,
+};
+use futures_util::StreamExt;
+use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
+use std::{
+    env,
+    fmt::Debug,
+    net::SocketAddr,
+    str::FromStr,
+    time::{Duration, SystemTime},
+};
+use tower::ServiceBuilder;
+use tower_http::{
+    cors::CorsLayer,
+    trace::{self, TraceLayer},
+};
 use tracing::Level;
-
-use async_trait::async_trait;
-use futures::future::{self, Ready};
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use tower::{Layer, Service, ServiceBuilder};
-use tower_http::trace;
 
 pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
     state: &SignalServerState<T, U>,
@@ -164,7 +162,7 @@ async fn handle_get_messages<T: SignalDatabase, U: WSStream + Debug>(
     state: SignalServerState<T, U>,
     address: ProtocolAddress,
 ) {
-    println!("Get messages")
+    todo!("Get messages")
 }
 
 async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
