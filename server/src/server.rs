@@ -74,7 +74,7 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
     } else {
         state
             .account_manager
-            .get_account(&destination_identifier)
+            .get_account(destination_identifier)
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::NOT_FOUND,
@@ -188,7 +188,11 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
     state
         .account_manager
         .store_key_bundle(&device_pre_key_bundle, &address)
-        .await;
+        .await
+        .map_err(|err| ApiError {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            message: err.to_string(),
+        })?;
 
     Ok(RegistrationResponse {
         uuid: aci.into(),
@@ -378,7 +382,7 @@ async fn create_websocket_endpoint(
     ws.on_upgrade(move |socket| {
         let mut wmgr = state.websocket_manager.clone();
         async move {
-            let (mut sender, mut receiver) = socket.split();
+            let (sender, receiver) = socket.split();
             let ws = WebSocketConnection::new(
                 UserIdentity::AuthenticatedDevice(authenticated_device.into()),
                 addr,
@@ -391,7 +395,7 @@ async fn create_websocket_endpoint(
                 println!("ws.on_upgrade: WebSocket does not exist in WebSocketManager");
                 return;
             };
-            ws.lock().await.send_messages(false);
+            ws.lock().await.send_messages(false).await;
             state
                 .message_manager
                 .add_message_availability_listener(&addr, ws.clone())
@@ -476,7 +480,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
-    message_persister.stop();
+    message_persister.stop().await;
 
     Ok(())
 }
@@ -493,7 +497,6 @@ fn time_now() -> Result<u64, ApiError> {
 
 #[cfg(test)]
 mod server_tests {
-    use common::web_api::{AccountAttributes, DeviceCapabilities};
 
     #[ignore = "Not implemented"]
     #[tokio::test]

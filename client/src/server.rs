@@ -7,10 +7,7 @@ use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
 use common::{
     signal_protobuf::{WebSocketRequestMessage, WebSocketResponseMessage},
-    web_api::{
-        authorization::BasicAuthorizationHeader, AccountAttributes, RegistrationRequest,
-        UploadSignedPreKey,
-    },
+    web_api::{authorization::BasicAuthorizationHeader, RegistrationRequest},
 };
 use http_client::h1::H1Client;
 use std::{
@@ -22,7 +19,6 @@ use std::{
     time::Duration,
 };
 use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
-use tokio_tungstenite::connect_async;
 
 const CLIENT_URI: &str = "/client";
 const MSG_URI: &str = "v1/messages";

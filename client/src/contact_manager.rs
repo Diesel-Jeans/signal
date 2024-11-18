@@ -106,7 +106,7 @@ mod test {
     fn test_cm_remove() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
-        cm.add_contact(&charlie);
+        cm.add_contact(&charlie).unwrap();
 
         cm.remove_contact(&charlie).unwrap()
     }
@@ -115,7 +115,7 @@ mod test {
     fn test_cm_get() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
-        cm.add_contact(&charlie);
+        cm.add_contact(&charlie).unwrap();
 
         let c = cm.get_contact(&charlie).unwrap();
         assert!(c.uuid == charlie);
@@ -126,7 +126,7 @@ mod test {
     async fn test_cm_update() {
         let mut cm = ContactManager::new();
         let charlie = Uuid::new_v4().to_string();
-        cm.add_contact(&charlie);
+        cm.add_contact(&charlie).unwrap();
 
         let mut store = store(1);
         let bundle = create_pre_key_bundle(&mut store, 1, &mut OsRng)

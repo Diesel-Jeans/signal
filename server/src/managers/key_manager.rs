@@ -3,17 +3,16 @@ use anyhow::Result;
 use axum::http::StatusCode;
 use common::web_api::{PreKeyResponse, PreKeyResponseItem, SetKeyRequest, UploadSignedPreKey};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
-use libsignal_protocol::IdentityKey;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Default)]
 pub struct KeyManager<T: SignalDatabase> {
-    database: T,
+    db: T,
 }
 
 impl<T: SignalDatabase> KeyManager<T> {
     pub fn new(db: T) -> Self {
-        Self { database: db }
+        Self { db }
     }
     pub async fn handle_put_keys(
         &self,
@@ -28,7 +27,7 @@ impl<T: SignalDatabase> KeyManager<T> {
         };
 
         if let Some(prekeys) = bundle.pre_key {
-            self.database
+            self.db
                 .store_one_time_ec_pre_keys(prekeys, &address)
                 .await
                 .map_err(|_| ApiError {
@@ -53,7 +52,7 @@ impl<T: SignalDatabase> KeyManager<T> {
 
         if let Some(ref prekey) = bundle.signed_pre_key {
             verify_key(prekey, "Could not verify signature for signed prekey")?;
-            self.database
+            self.db
                 .store_signed_pre_key(prekey, &address)
                 .await
                 .map_err(|_| ApiError {
@@ -67,7 +66,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 verify_key(prekey, "Could not verify signature for kem prekey")
             })?;
 
-            self.database
+            self.db
                 .store_one_time_pq_pre_keys(prekeys, &address)
                 .await
                 .map_err(|_| ApiError {
@@ -78,7 +77,7 @@ impl<T: SignalDatabase> KeyManager<T> {
 
         if let Some(ref prekey) = bundle.pq_last_resort_pre_key {
             verify_key(prekey, "Could not verify signature for kem prekey")?;
-            self.database
+            self.db
                 .store_pq_signed_pre_key(prekey, &address)
                 .await
                 .map_err(|_| ApiError {
@@ -131,6 +130,8 @@ impl<T: SignalDatabase> KeyManager<T> {
                 signed_pre_key,
             ))
         }
+
+        // TODO: Verify account through auth device
 
         let target_account = database
             .get_account(&target_service_id)
@@ -205,7 +206,7 @@ impl<T: SignalDatabase> KeyManager<T> {
         };
         let address = auth_device.get_protocol_address(kind);
         let bundle = self
-            .database
+            .db
             .get_key_bundle(&address)
             .await
             .map_err(|_| ApiError {
@@ -258,12 +259,8 @@ impl<T: SignalDatabase> KeyManager<T> {
 
     pub async fn get_one_time_pre_key_count(&self, service_id: &ServiceId) -> Result<(u32, u32)> {
         Ok((
-            self.database
-                .get_one_time_ec_pre_key_count(service_id)
-                .await?,
-            self.database
-                .get_one_time_pq_pre_key_count(service_id)
-                .await?,
+            self.db.get_one_time_ec_pre_key_count(service_id).await?,
+            self.db.get_one_time_pq_pre_key_count(service_id).await?,
         ))
     }
 }
@@ -305,7 +302,7 @@ mod key_manager_tests {
         let key_bundle = new_device_pre_key_bundle();
         let one_time = new_upload_pre_keys(1);
 
-        database.add_account(&target).await;
+        database.add_account(&target).await.unwrap();
 
         database
             .store_key_bundle(&key_bundle, &target_address)
@@ -366,12 +363,6 @@ mod key_manager_tests {
         let auth_device = AuthenticatedDevice::new(account, device);
         let target_address = auth_device.get_protocol_address(ServiceIdKind::Pni);
 
-        let key = Box::new([1, 2, 3, 4]);
-        let sign = identity_key
-            .private_key
-            .calculate_signature(&*key, &mut csprng)
-            .unwrap();
-
         let prekey = new_upload_pre_keys(1);
         let signed_pre_key = new_upload_signed_pre_key(Some(identity_key.private_key));
         let pq_pre_key = new_upload_signed_pre_key(Some(identity_key.private_key));
@@ -427,7 +418,7 @@ mod key_manager_tests {
     async fn check_keys_test() {
         let database = database_connect().await;
         let auth_device = new_authenticated_device();
-        database.add_account(auth_device.account()).await;
+        database.add_account(auth_device.account()).await.unwrap();
 
         let key_bundle = new_device_pre_key_bundle();
         let signed_pre_key = key_bundle.pni_signed_pre_key.clone();
