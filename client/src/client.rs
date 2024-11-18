@@ -1,26 +1,32 @@
 use anyhow::Result;
+use base64::Engine;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
+use bon::vec;
+use common::signalservice::{envelope, Content, DataMessage, Envelope};
 use common::{
     signalservice::WebSocketResponseMessage,
     web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse},
 };
 use core::str;
 use libsignal_core::{Aci, Pni};
+use serde::de::value;
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use common::web_api::{SignalMessage, SignalMessages};
 use libsignal_protocol::{
-    IdentityKey, IdentityKeyPair, InMemSignalProtocolStore, KeyPair, KyberPreKeyRecord,
-    SignedPreKeyRecord,
+    CiphertextMessage, IdentityKey, IdentityKeyPair, InMemSignalProtocolStore, KeyPair,
+    KyberPreKeyRecord, SessionStore, SignalProtocolError, SignedPreKeyRecord,
 };
 use rand::{rngs::OsRng, Rng};
 use surf::StatusCode;
 
 use crate::contact_manager::{Contact, ContactManager};
-use crate::encryption::encrypt;
-use crate::errors::{LoginError, RegistrationError};
+use crate::encryption::{encrypt, pad_message};
+use crate::errors::{ClientError, LoginError, RegistrationError};
 use crate::key_management::key_manager::{InMemoryKeyManager, KeyManager};
 use crate::server::{Server, ServerAPI};
-use crate::storage::device::{DeviceStorage, Storage};
+use crate::storage::device::DeviceStorage;
 use crate::storage::protocol_store::ProtocolStore;
 
 pub struct Client {
@@ -147,21 +153,30 @@ impl Client {
                     .aci(aci)
                     .pni(pni)
                     .password(password)
-                    .public_key(aci_key_pair.public_key)
-                    .private_key(aci_key_pair.private_key)
+                    .identity_key_pair(IdentityKeyPair::new(
+                        aci_key_pair.public_key.into(),
+                        aci_key_pair.private_key,
+                    ))
                     .aci_registration_id(aci_registration_id as u32)
-                    .pni_registration_id(pni_registration_id as u32)
                     .build();
-                let client =
-                    Client::new(aci, pni, contact_manager, server_api, key_manager, storage);
+                let client = Client::new(
+                    aci,
+                    pni,
+                    contact_manager,
+                    server_api,
+                    key_manager,
+                    storage.await,
+                );
                 Ok(client)
             }
             _ => Err(RegistrationError::PhoneNumberTaken),
         }
     }
 
+    /// Log in to a local account that is already registered with the server.
     pub async fn login() -> Result<Self, LoginError> {
-        let storage = DeviceStorage::load()?;
+        todo!()
+        /*let storage = DeviceStorage::load().await?;
 
         let key_pair = KeyPair::new(
             storage.get_public_key().to_owned(),
@@ -178,18 +193,78 @@ impl Client {
             ServerAPI::new(),
             InMemoryKeyManager::new(proto_store),
             storage,
-        ))
+        ))*/
     }
 
-    pub async fn send_message(
-        &mut self,
-        message: &str,
-        user_id: &str,
-        device_id: u32,
-    ) -> Result<WebSocketResponseMessage> {
+    /// Send a message to a specific contact using websockets.
+    pub async fn send_message(&mut self, message: &str, to: &Contact) -> Result<(), ClientError> {
+        // Prepare a message to be sent
+        let content = Content::builder()
+            .data_message(
+                DataMessage::builder()
+                    .body(message.to_owned())
+                    .contact(vec![])
+                    .body_ranges(vec![])
+                    .preview(vec![])
+                    .attachments(vec![])
+                    .build(),
+            )
+            .build();
+
+        let protocol_store = &mut self.storage.protocol_store;
+        // pad and encrypt message.
+
+        let timestamp = SystemTime::now();
+
+        let msgs = encrypt(
+            &mut protocol_store.session_store,
+            &mut protocol_store.identity_key_store,
+            to,
+            pad_message(message.as_bytes()).as_ref(),
+            timestamp,
+        )
+        .await;
+
+        // TODO: What to do if encryption fails?
+        let msgs = handle_encryption_failed(msgs)?;
+
+        // Put messages into structure ready.
+        let msgs = SignalMessages {
+            messages: msgs
+                .into_iter()
+                .map(|(id, msg)| SignalMessage {
+                    r#type: envelope::Type::Ciphertext.into(),
+                    destination_device_id: id,
+                    destination_registration_id: todo!(),
+                    content: BASE64_STANDARD.encode(msg.serialize()),
+                })
+                .collect(),
+            online: true, // Should this be false?
+            urgent: true,
+            timestamp: timestamp
+                .duration_since(UNIX_EPOCH)
+                .expect("can get the time since epoch")
+                .as_secs(),
+        };
+
+        todo!("Use websockets to send the messages");
+    }
+
+    pub async fn receive_message(&mut self) -> Result<String, ClientError> {
         todo!()
     }
 }
+
+/// Currently, we do not handle the case when encryption fails.
+/// If a message fails to encrypt, we return a [ClientError]
+/// and do not recover.
+/// TODO: Figure out how to recover when we cannot send to a device.
+fn handle_encryption_failed(
+    msgs: HashMap<u32, Result<CiphertextMessage, SignalProtocolError>>,
+) -> Result<HashMap<u32, CiphertextMessage>, ClientError> {
+    transform_hashmap_result(msgs).map_err(|err| ClientError::EncryptionError(err))
+}
+
 fn transform_hashmap_result<K, T, E>(map: HashMap<K, Result<T, E>>) -> Result<HashMap<K, T>, E>
 where
     K: Eq + std::hash::Hash,

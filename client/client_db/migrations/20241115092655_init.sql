@@ -1,7 +1,13 @@
+CREATE TABLE Identity (
+  public_key       TEXT NOT NULL,
+  private_key      TEXT NOT NULL,
+  registration_id  UNSIGNED BIG INT NOT NULL
+);
+
 CREATE TABLE DeviceIdentityKeyStore (
-  id            INTEGER PRIMARY KEY,
-  address       TEXT NOT NULL UNIQUE,
-  identity_key  TEXT NOT NULL
+  id               INTEGER PRIMARY KEY,
+  address          TEXT NOT NULL UNIQUE,
+  identity_key     TEXT NOT NULL    -- identity key for another device
 );
 
 CREATE TABLE DevicePreKeyStore (
@@ -34,12 +40,11 @@ CREATE TABLE DeviceSenderKeyStore (
   sender_key_record   TEXT NOT NULL
 );
 
-CREATE TABLE DeviceProtocolStore (
-  id                    INTEGER PRIMARY KEY,
-  identity_key_store    INTEGER NOT NULL REFERENCES DeviceIdentityKeyStore(id) ON DELETE CASCADE,
-  pre_key_store         INTEGER NOT NULL REFERENCES DevicePreKeyStore(id) ON DELETE CASCADE,
-  signed_pre_key_store  INTEGER NOT NULL REFERENCES DeviceSignedPreKeyStore(id) ON DELETE CASCADE,
-  kyber_pre_key_store   INTEGER NOT NULL REFERENCES DeviceKyberPreKeyStore(id) ON DELETE CASCADE,
-  session_store         INTEGER NOT NULL REFERENCES DeviceSessionStore(id) ON DELETE CASCADE,
-  sender_key_store      INTEGER NOT NULL REFERENCES DeviceSenderKeyStore(id) ON DELETE CASCADE
-);
+CREATE TABLE DeviceStorage (
+  id                   INTEGER PRIMARY KEY,
+  aci                  TEXT NOT NULL,
+  pni                  TEXT NOT NULL,
+  password             TEXT NOT NULL,
+  identity_key_pair    TEXT NOT NULL,
+  aci_registration_id  UNSIGNED BIG INT NOT NULL
+)

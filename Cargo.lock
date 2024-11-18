@@ -324,6 +324,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-once-cell"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4288f83726785267c6f2ef073a3d83dc3f9b81464e9f99898240cced85fce35a"
+
+[[package]]
 name = "async-std"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -887,6 +893,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-native-tls",
+ "async-once-cell",
  "async-std",
  "axum",
  "base64 0.22.1",
@@ -903,6 +910,7 @@ dependencies = [
  "serde",
  "serde_json",
  "socket2 0.5.7",
+ "sqlx",
  "surf",
  "tokio",
  "tokio-native-tls",
@@ -942,6 +950,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "bon 2.3.0",
  "libsignal-protocol",
  "prost",
  "prost-build",

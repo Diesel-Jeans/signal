@@ -4,6 +4,9 @@ use libsignal_protocol::{
     InMemSignalProtocolStore, SessionStore, SignalProtocolError,
 };
 use rand::{CryptoRng, Rng};
+use std::error::Error;
+use std::fmt::Display;
+use std::vec;
 use std::{collections::HashMap, time::SystemTime};
 
 pub async fn encrypt(
@@ -11,6 +14,7 @@ pub async fn encrypt(
     identity_store: &mut dyn IdentityKeyStore,
     target: &Contact,
     msg: &[u8],
+    timestamp: SystemTime,
 ) -> HashMap<u32, Result<CiphertextMessage, SignalProtocolError>> {
     let mut msgs: HashMap<u32, Result<CiphertextMessage, SignalProtocolError>> = HashMap::new();
     for (id, device) in target.devices.iter() {
@@ -19,7 +23,7 @@ pub async fn encrypt(
             &device.address,
             session_store,
             identity_store,
-            SystemTime::now(),
+            timestamp,
         )
         .await;
 
@@ -47,6 +51,50 @@ pub async fn decrypt<R: Rng + CryptoRng>(
     .await
 }
 
+#[derive(Debug)]
+pub enum PaddingError {
+    UnpadError,
+}
+
+impl Display for PaddingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Could not unpad message - missing termination char 0x80")
+    }
+}
+
+impl Error for PaddingError {}
+
+fn get_padded_message_length(length: usize) -> usize {
+    let message_length_with_terminator = length + 1;
+    let mut message_part_count = message_length_with_terminator.div_euclid(160);
+
+    if (message_length_with_terminator % 160 != 0) {
+        message_part_count += 1;
+    }
+
+    return message_part_count * 160;
+}
+
+pub fn pad_message(message: &[u8]) -> Vec<u8> {
+    let len = get_padded_message_length(message.len() + 1) - 1;
+    let mut plaintext = vec![0u8; len];
+    for i in 0..message.len() {
+        plaintext[i] = message[i];
+    }
+    plaintext[message.len()] = 0x80;
+
+    return plaintext;
+}
+
+pub fn unpad_message(message: &[u8]) -> Result<Vec<u8>, PaddingError> {
+    for i in 0..message.len() {
+        if message[i] == 0x80 {
+            return Ok(message[0..i].to_vec());
+        }
+    }
+    Err(PaddingError::UnpadError)
+}
+
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
@@ -60,6 +108,8 @@ pub(crate) mod test {
 
     use std::time::SystemTime;
     use uuid::Uuid;
+
+    use super::{pad_message, unpad_message};
 
     pub fn store(reg: u32) -> InMemSignalProtocolStore {
         let mut rng = OsRng;
@@ -117,6 +167,7 @@ pub(crate) mod test {
             &mut alice_store.identity_store,
             bob,
             "Hello Bob".as_bytes(),
+            SystemTime::now(),
         )
         .await;
 
@@ -216,5 +267,17 @@ pub(crate) mod test {
             )
             .await?;
         Ok(pre_key_bundle)
+    }
+
+    #[test]
+    fn test_padding() {
+        let msg = [5u8; 32];
+        let padded = pad_message(&msg);
+
+        assert_eq!(padded.len(), 159);
+
+        let unpadded = unpad_message(padded.as_ref()).unwrap();
+
+        assert_eq!(msg.to_vec(), unpadded);
     }
 }

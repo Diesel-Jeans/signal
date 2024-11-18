@@ -15,6 +15,8 @@ mod test_utils;
 
 #[tokio::main]
 pub async fn main() {
+    dotenv::dotenv();
+
     //Starting logger
     tracing_subscriber::fmt()
         .log_internal_errors(true)

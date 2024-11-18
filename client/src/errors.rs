@@ -1,6 +1,36 @@
 use std::error::Error;
-use std::fmt;
-use std::fmt::Display;
+use std::fmt::{self, Debug, Display};
+
+use libsignal_protocol::SignalProtocolError;
+
+pub enum ClientError {
+    RegistrationError(RegistrationError),
+    LoginError(LoginError),
+    EncryptionError(SignalProtocolError),
+    PaddingError,
+}
+
+impl Debug for ClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self::Display::fmt(&self, f)
+    }
+}
+
+impl Display for ClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::RegistrationError(err) => format!("{err}"),
+                Self::LoginError(err) => format!("{err}"),
+                Self::EncryptionError(err) => format!("Could not encrypt message: {}", err),
+                Self::PaddingError =>
+                    "Could not unpad message: missing termination char 0x80".to_owned(),
+            }
+        )
+    }
+}
 
 pub enum RegistrationError {
     PhoneNumberTaken,
@@ -8,13 +38,13 @@ pub enum RegistrationError {
     BadResponse,
 }
 
-impl fmt::Debug for RegistrationError {
+impl Debug for RegistrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self::Display::fmt(&self, f)
     }
 }
 
-impl fmt::Display for RegistrationError {
+impl Display for RegistrationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::PhoneNumberTaken => "Phone number was already taken.",
@@ -37,13 +67,13 @@ pub enum LoginError {
 
 impl Error for LoginError {}
 
-impl fmt::Debug for LoginError {
+impl Debug for LoginError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self::Display::fmt(&self, f)
     }
 }
 
-impl fmt::Display for LoginError {
+impl Display for LoginError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::NoAccountInformation => {
@@ -55,23 +85,5 @@ impl fmt::Display for LoginError {
             Self::LoadInfoError => "Could not load stored credentials. Maybe your credentials were corrupted.",
         };
         write!(f, "Could not register account - {}", message)
-    }
-}
-
-trait ClientError: Error {}
-
-#[derive(Debug)]
-pub struct MissingFieldError {
-    field: String,
-}
-impl MissingFieldError {
-    pub fn new(field: String) -> Self {
-        Self { field }
-    }
-}
-
-impl From<&str> for MissingFieldError {
-    fn from(value: &str) -> Self {
-        MissingFieldError::new(value.to_owned())
     }
 }
