@@ -19,7 +19,7 @@ pub struct PostgresDatabase {
 
 impl PostgresDatabase {
     pub async fn connect(database_url: String) -> Self {
-        dotenv::dotenv();
+        dotenv::dotenv().ok();
         let db_url = std::env::var(database_url).expect("Unable to read database url env var");
         Self {
             pool: PgPoolOptions::new()
@@ -950,7 +950,6 @@ async fn store_pq_pni_signed_pre_key(
 mod db_tests {
     use common::signal_protobuf::Envelope;
     use libsignal_core::{Aci, Pni, ProtocolAddress};
-    use rand::{rngs::StdRng, Rng, SeedableRng};
     use uuid::Uuid;
 
     use crate::{
@@ -1038,11 +1037,13 @@ mod db_tests {
         let secondary_device = new_device();
         db.add_device(&account.aci().into(), &secondary_device)
             .await
-            .expect(&format!(
-                "Should be other device_id: {}, {}",
-                account.devices()[0].device_id(),
-                secondary_device.device_id()
-            ));
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Should be other device_id: {}, {}",
+                    account.devices()[0].device_id(),
+                    secondary_device.device_id()
+                )
+            });
 
         let retrieved_device = db
             .get_device(&ProtocolAddress::new(
@@ -1065,11 +1066,13 @@ mod db_tests {
         db.add_account(&account).await.unwrap();
         db.add_device(&account.aci().into(), &device)
             .await
-            .expect(&format!(
-                "Should be other device_id: {}, {}",
-                account.devices()[0].device_id(),
-                device.device_id()
-            ));
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Should be other device_id: {}, {}",
+                    account.devices()[0].device_id(),
+                    device.device_id()
+                )
+            });
         account.add_device(device).unwrap();
         let retrieved_devices = db.get_all_devices(&account.aci().into()).await.unwrap();
         db.delete_account(&account.aci().into()).await.unwrap();

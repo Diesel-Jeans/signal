@@ -3,10 +3,8 @@ use crate::{
     database::SignalDatabase,
     managers::{account_manager::AccountManager, messages_manager::MessagesManager},
     message_cache::{MessageAvailabilityListener, MessageCache},
-    postgres::PostgresDatabase,
 };
 use anyhow::{anyhow, Result};
-use common::signal_protobuf::Envelope;
 use libsignal_core::{ProtocolAddress, ServiceId};
 use std::{
     sync::{
@@ -85,11 +83,7 @@ where
 
     // Finds the message queues where the oldest message is >10 minutes old.
     async fn persist_next_queues(&mut self) -> Result<()> {
-        let mut queues_to_persist: Vec<String> = Vec::new();
-        let time_in_secs: u64 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Failed to get time")
-            .as_secs();
+        let mut queues_to_persist = Vec::new();
 
         while {
             let time_in_secs: u64 = SystemTime::now()
@@ -99,7 +93,7 @@ where
 
             queues_to_persist = self
                 .message_cache
-                .get_message_queues_to_persist((time_in_secs - PERSIST_DELAY), QUEUE_BATCH_LIMIT)
+                .get_message_queues_to_persist(time_in_secs - PERSIST_DELAY, QUEUE_BATCH_LIMIT)
                 .await?;
 
             !queues_to_persist.is_empty()
@@ -132,8 +126,7 @@ where
 
     // Takes the message queues where the oldest message is >10 minutes old.
     async fn persist_queue(&mut self, account: &Account, device: &Device) -> Result<()> {
-        let message_count: u32 = 0;
-        let mut messages: Vec<Envelope> = Vec::new();
+        let mut messages = Vec::new();
         let protocol_address =
             ProtocolAddress::new(account.aci().service_id_string(), device.device_id());
 
@@ -149,8 +142,7 @@ where
 
             !messages.is_empty()
         } {
-            let messages_removed_from_cache = self
-                .messages_manager
+            self.messages_manager
                 .persist_messages(&protocol_address, messages)
                 .await?;
         }
@@ -164,8 +156,10 @@ where
 
 #[cfg(test)]
 mod message_persister_tests {
-    use super::*;
     use crate::{
+        database::SignalDatabase,
+        managers::{account_manager::AccountManager, messages_manager::MessagesManager},
+        message_cache::MessageCache,
         postgres::PostgresDatabase,
         test_utils::{
             database::database_connect,
@@ -173,9 +167,16 @@ mod message_persister_tests {
             user::new_account_and_address,
         },
     };
+    use common::signal_protobuf::Envelope;
+    use libsignal_core::ProtocolAddress;
     use redis::cmd;
-    use std::time::Duration;
+    use std::{
+        sync::Arc,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
     use tokio::sync::Mutex;
+
+    use super::MessagePersister;
 
     fn time_now_secs() -> u64 {
         SystemTime::now()
@@ -220,25 +221,25 @@ mod message_persister_tests {
         cmd("ZRANGE")
             .arg(&queue_index_key)
             .arg(0)
-            .arg(&max_time)
+            .arg(max_time)
             .arg("BYSCORE")
             .arg("LIMIT")
             .arg(0)
-            .arg(&limit)
+            .arg(limit)
             .query_async::<Vec<String>>(&mut connection)
             .await
             .unwrap()
     }
 
     async fn has_messages(
-        mut cache: &MessageCache<MockWebSocketConnection>,
+        cache: &MessageCache<MockWebSocketConnection>,
         queue_keys: &Vec<String>,
     ) -> bool {
         let mut connection = cache.get_connection().await.unwrap();
 
         for queue_key in queue_keys {
             if cmd("ZCARD")
-                .arg(&queue_key)
+                .arg(queue_key)
                 .query_async::<u64>(&mut connection)
                 .await
                 .unwrap()
@@ -265,7 +266,7 @@ mod message_persister_tests {
                 .await
                 .unwrap();
 
-            if let Some(queue_lock_key) = locked {
+            if locked.is_some() {
                 return false;
             }
         }
@@ -312,12 +313,12 @@ mod message_persister_tests {
 
         message_manager
             .add_message_availability_listener(
-                &protocol_addresses.first().unwrap(),
+                protocol_addresses.first().unwrap(),
                 websocket.clone(),
             )
             .await;
 
-        let mut queue_keys_before_message_persister = check_queue_key_timestamp(
+        let queue_keys_before_message_persister = check_queue_key_timestamp(
             &cache,
             now_timestamp, // now time
             10,
@@ -375,9 +376,9 @@ mod message_persister_tests {
             msg_after,
         ) = message_persister_test_setup_run(vec![time_now_secs() - 660]).await;
 
-        assert_eq!(handle_persisted_messages_evoked, true);
-        assert_eq!(no_queue_lock_keys_in_cache, true);
-        assert_eq!(old_msg_deleted, true);
+        assert!(handle_persisted_messages_evoked);
+        assert!(no_queue_lock_keys_in_cache);
+        assert!(old_msg_deleted);
         assert_eq!(msg_before.len(), 1);
         assert_eq!(msg_after.len(), 0);
     }
@@ -392,9 +393,9 @@ mod message_persister_tests {
             msg_after,
         ) = message_persister_test_setup_run(vec![time_now_secs() - 300]).await;
 
-        assert_eq!(handle_persisted_messages_evoked, false);
-        assert_eq!(no_queue_lock_keys_in_cache, true);
-        assert_eq!(old_msg_deleted, true);
+        assert!(!handle_persisted_messages_evoked);
+        assert!(no_queue_lock_keys_in_cache);
+        assert!(old_msg_deleted);
         assert_eq!(msg_before.len(), 1);
         assert_eq!(msg_after.len(), 1);
     }
@@ -419,9 +420,9 @@ mod message_persister_tests {
             msg_after,
         ) = message_persister_test_setup_run(message_times).await;
 
-        assert_eq!(handle_persisted_messages_evoked, true);
-        assert_eq!(no_queue_lock_keys_in_cache, true);
-        assert_eq!(old_msg_deleted, true);
+        assert!(handle_persisted_messages_evoked);
+        assert!(no_queue_lock_keys_in_cache);
+        assert!(old_msg_deleted);
         assert_eq!(msg_before.len(), 5);
         assert_eq!(msg_after.len(), 3);
     }

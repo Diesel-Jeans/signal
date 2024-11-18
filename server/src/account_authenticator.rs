@@ -16,7 +16,6 @@ use axum_extra::{
 };
 use libsignal_core::ServiceId;
 use rand::{rngs::OsRng, RngCore};
-use sha2::Sha256;
 use std::fmt::Debug;
 
 const SALT_SIZE: usize = 16;

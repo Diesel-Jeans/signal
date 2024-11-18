@@ -101,7 +101,7 @@ impl KeyManager<KyberPreKeyRecord, KyberPreKeyId> for InMemoryKeyManager {
             self.store.get_identity_key_pair().await?.private_key(),
         )?;
 
-        self.store.save_kyber_pre_key(id, &record);
+        self.store.save_kyber_pre_key(id, &record).await?;
         Ok(record)
     }
 }
