@@ -205,11 +205,7 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
             registration.pni_identity_key().to_owned(),
             device.clone(),
         )
-        .await
-        .map_err(|err| ApiError {
-            message: format!("Could not create account:{}", err),
-            status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        })?;
+        .await?;
 
     let aci = account.aci();
     let address = ProtocolAddress::new(aci.service_id_string(), device.device_id());
