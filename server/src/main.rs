@@ -17,10 +17,10 @@ mod test_utils;
 #[tokio::main]
 pub async fn main() {
     //Starting logger
-    tracing_subscriber::fmt()
+    /*tracing_subscriber::fmt()
         .log_internal_errors(true)
         .with_max_level(tracing::Level::DEBUG)
         .with_line_number(true)
-        .init();
+        .init();*/
     server::start_server().await.unwrap();
 }

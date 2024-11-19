@@ -1,7 +1,6 @@
 use crate::{
     account::{Account, Device},
     database::SignalDatabase,
-    managers::websocket::wsstream::WSStream,
 };
 use anyhow::Result;
 use axum::{async_trait, extract::ws::Message, Error};
@@ -16,6 +15,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use common::websocket::wsstream::WSStream;
 
 #[derive(Clone)]
 pub struct MockDB {}
@@ -192,7 +192,7 @@ impl Sink<Message> for MockSocket {
 }
 
 #[async_trait::async_trait]
-impl WSStream for MockSocket {
+impl WSStream<Message, axum::Error> for MockSocket {
     async fn recv(&mut self) -> Option<Result<Message, Error>> {
         self.client_sender.recv().await
     }

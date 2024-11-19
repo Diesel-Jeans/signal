@@ -23,6 +23,7 @@ use std::{
 };
 use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
 use tokio_tungstenite::connect_async;
+use crate::socket_manager::{SocketManager, signal_ws_connect, SignalStream};
 
 const CLIENT_URI: &str = "/client";
 const MSG_URI: &str = "v1/messages";
@@ -32,7 +33,7 @@ const BUNDLE_URI: &str = "/bundle";
 
 pub struct ServerAPI {
     client: Client,
-    ws: Option<WebsocketHandler>,
+    socket_manager: SocketManager<SignalStream>,
 }
 
 enum ReqType {
@@ -103,20 +104,15 @@ impl Server for ServerAPI {
         username: &str,
         password: &str,
         url: &str,
-        port: &str,
+        tls_cert: &str,
     ) -> Result<()> {
-        let options = KeepAliveOptions {
-            path: Some("/v1/keepalive".to_string()),
-        };
-        let ws = WebsocketHandler::try_new(
-            Some(options),
-            url.into(),
-            port.into(),
-            username.into(),
-            password.into(),
-        )
-        .await?;
-        self.ws = Some(ws);
+        if self.socket_manager.is_active().await {
+            return Ok(())
+        }
+
+        let ws = signal_ws_connect(tls_cert, url, username, password).await.expect("Failed to connect");
+        let wrap = SignalStream::new(ws);
+        self.socket_manager.set_stream(wrap).await;
 
         println!("connected!");
         Ok(())
@@ -171,19 +167,7 @@ impl Server for ServerAPI {
         user_id: String,
         device_id: u32,
     ) -> Result<WebSocketResponseMessage> {
-        let payload = json!({
-            "message": msg
-        })
-        .to_string()
-        .as_bytes()
-        .to_vec();
-        let uri = format!("{}/{}.{}", MSG_URI, user_id, device_id);
-        let options = SendRequestOptions::new("PUT", uri, payload);
-
-        match &self.ws {
-            Some(ws) => Ok(ws.clone().send_request(options).await?),
-            None => Err(anyhow::anyhow!("No websocket connection is active")),
-        }
+        todo!()
     }
 
     async fn update_client(
@@ -234,7 +218,7 @@ impl Server for ServerAPI {
             .set_base_url(Url::parse(&address).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
-        ServerAPI { client, ws: None }
+        ServerAPI { client, socket_manager: SocketManager::new(5) }
     }
 }
 impl ServerAPI {
@@ -270,9 +254,6 @@ impl ServerAPI {
     }
 
     async fn get_incoming_messages(&mut self) -> Result<Vec<WebSocketRequestMessage>> {
-        match &self.ws {
-            Some(ws) => Ok(ws.clone().get_messages().await),
-            None => Err(anyhow::anyhow!("No websocket connection is active")),
-        }
+        todo!()
     }
 }

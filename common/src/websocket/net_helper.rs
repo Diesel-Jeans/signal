@@ -1,5 +1,5 @@
 use axum::http::{StatusCode, Uri};
-use common::{
+use crate::{
     signal_protobuf::{
         web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
     },
@@ -117,7 +117,7 @@ pub fn current_millis() -> Result<u128, SystemTimeError> {
 mod test {
     use super::{create_request, create_response, unpack_messages, PathExtractor};
     use axum::http::{StatusCode, Uri};
-    use common::signal_protobuf::web_socket_message;
+    use crate::signal_protobuf::web_socket_message;
     use std::str::FromStr;
 
     #[test]
