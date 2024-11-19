@@ -865,6 +865,7 @@ dependencies = [
  "anyhow",
  "async-native-tls",
  "async-std",
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "common",
@@ -876,6 +877,8 @@ dependencies = [
  "native-tls",
  "prost",
  "rand 0.8.5",
+ "rustls",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "socket2 0.5.7",
@@ -917,10 +920,16 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "axum",
  "base64 0.22.1",
+ "futures-util",
  "libsignal-protocol",
  "prost",
+ "rand 0.8.5",
  "serde",
+ "serde_json",
+ "tokio",
  "tonic",
  "tonic-build",
  "uuid",
@@ -3389,6 +3398,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls-native-certs"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcaf18a4f2be7326cd874a5fa579fae794320a0f388d365dca7e480e55f83f8a"
+dependencies = [
+ "openssl-probe",
+ "rustls-pemfile",
+ "rustls-pki-types",
+ "schannel",
+ "security-framework",
+]
+
+[[package]]
 name = "rustls-pemfile"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4379,8 +4401,12 @@ dependencies = [
  "futures-util",
  "log",
  "native-tls",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pki-types",
  "tokio",
  "tokio-native-tls",
+ "tokio-rustls",
  "tungstenite",
 ]
 
@@ -4626,6 +4652,8 @@ dependencies = [
  "log",
  "native-tls",
  "rand 0.8.5",
+ "rustls",
+ "rustls-pki-types",
  "sha1 0.10.6",
  "thiserror",
  "utf-8",

@@ -2,8 +2,9 @@ use crate::{
     account::{Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
     error::ApiError,
-    managers::{state::SignalServerState, websocket::wsstream::WSStream},
+    managers::state::SignalServerState
 };
+use common::websocket::wsstream::WSStream;
 use axum::{
     async_trait,
     extract::FromRequestParts,
@@ -17,12 +18,13 @@ use axum_extra::{
 use libsignal_core::ServiceId;
 use rand::{rngs::OsRng, RngCore};
 use std::fmt::Debug;
+use axum::extract::ws::Message;
 
 const SALT_SIZE: usize = 16;
 const AUTH_TOKEN_HKDF_INFO: &[u8] = "authtoken".as_bytes();
 
 #[async_trait]
-impl<T: SignalDatabase, U: WSStream + Debug> FromRequestParts<SignalServerState<T, U>>
+impl<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug> FromRequestParts<SignalServerState<T, U>>
     for AuthenticatedDevice
 where
     T: Sync + Send,
@@ -73,7 +75,7 @@ where
     }
 }
 
-async fn authenticate_device<T: SignalDatabase, U: WSStream + Debug>(
+async fn authenticate_device<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
     state: &SignalServerState<T, U>,
     service_id: &ServiceId,
     device_id: u32,
