@@ -1,5 +1,4 @@
 use futures_util::lock::Mutex;
-use futures_util::stream::SplitSink;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use tokio::net::TcpStream;
 use tokio::time::Instant;
@@ -15,7 +14,7 @@ use rustls::pki_types::CertificateDer;
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pemfile::certs;
 use socket2::{SockRef, TcpKeepalive};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -197,13 +196,13 @@ pub async fn signal_ws_connect(
 }
 
 type RequestMap = Arc<Mutex<HashMap<u32, String>>>;
+
 type MessageType = WebSocketMessage;
 #[derive(Debug)]
 pub struct SocketManager<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> {
     next_id: Arc<AtomicU64>,
     request_delegater: Sender<MessageType>,
     receiver: Receiver<MessageType>,
-    pending_requests: Arc<Mutex<HashMap<u32, MessageType>>>,
     connection: Arc<Mutex<ConnectionState<Message, T>>>,
 }
 
@@ -213,7 +212,6 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> Clone for Socke
             next_id: self.next_id.clone(),
             request_delegater: self.request_delegater.clone(),
             receiver: self.request_delegater.subscribe(),
-            pending_requests: self.pending_requests.clone(),
             connection: self.connection.clone(),
         }
     }
@@ -226,7 +224,6 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<T
             next_id: Arc::new(AtomicU64::new(0)),
             request_delegater: tx,
             receiver: rx,
-            pending_requests: Arc::new(Mutex::new(HashMap::new())),
             connection: Arc::new(Mutex::new(ConnectionState::Closed)),
         }
     }
@@ -587,4 +584,3 @@ mod test {
         hndl.await.expect("Thread Panic");
     }
 }
-
