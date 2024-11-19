@@ -16,7 +16,7 @@ use surf::StatusCode;
 use crate::{
     contact_manager::ContactManager,
     errors::{LoginError, RegistrationError},
-    key_management::key_manager::{InMemoryKeyManager, KeyManager},
+    key_manager::{InMemoryKeyManager, KeyManager},
     server::{Server, ServerAPI},
     storage::{DeviceStorage, Storage},
 };

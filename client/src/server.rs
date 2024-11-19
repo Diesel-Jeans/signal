@@ -154,9 +154,13 @@ impl Server for ServerAPI {
         client_info: &Contact,
     ) -> Result<Response, Box<dyn std::error::Error>> {
         let payload = json!({
-            "uuid": client_info.uuid
+            "uuid": client_info.service_id.service_id_string()
         });
-        let uri = format!("{}/{}", DEVICE_URI, client_info.uuid);
+        let uri = format!(
+            "{}/{}",
+            DEVICE_URI,
+            client_info.service_id.service_id_string()
+        );
 
         self.make_request(ReqType::Put(payload), uri).await
     }
@@ -187,7 +191,7 @@ impl Server for ServerAPI {
         client: &Contact,
     ) -> Result<Response, Box<dyn std::error::Error>> {
         let payload = json!({
-            "uuid": client.uuid
+            "uuid": client.service_id.service_id_string()
         });
         self.make_request(ReqType::Put(payload), CLIENT_URI.to_string())
             .await

@@ -1,6 +1,6 @@
 use crate::account::{Account, AuthenticatedDevice, Device};
 use common::web_api::{AccountAttributes, DeviceCapabilities};
-use libsignal_core::{Pni, ProtocolAddress};
+use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{IdentityKey, KeyPair};
 use rand::{
     rngs::{OsRng, StdRng},
@@ -31,24 +31,24 @@ pub fn new_account() -> Account {
     let identity_key = KeyPair::generate(&mut csprng);
 
     Account::new(
-        Pni::from(Uuid::new_v4()),
+        new_pni(),
         new_device(),
         IdentityKey::new(identity_key.public_key),
         IdentityKey::new(identity_key.public_key),
-        Uuid::new_v4().into(),
+        new_uuid().into(),
         new_account_attributes(),
     )
 }
 pub fn new_device() -> Device {
     Device::builder()
-        .device_id(StdRng::from_entropy().gen::<u32>().into())
+        .device_id(new_device_id())
         .name("device".into())
         .last_seen(0)
         .created(0)
         .auth_token("bob_token".into())
         .salt("bob_salt".into())
-        .registration_id(StdRng::from_entropy().gen::<u32>())
-        .pni_registration_id(StdRng::from_entropy().gen::<u32>())
+        .registration_id(new_rand_number())
+        .pni_registration_id(new_rand_number())
         .build()
 }
 
@@ -70,7 +70,30 @@ pub fn new_account_attributes() -> AccountAttributes {
 }
 
 pub fn new_protocol_address() -> ProtocolAddress {
-    let name = Pni::from(Uuid::new_v4());
-    let device_id = StdRng::from_entropy().gen::<u32>().into();
-    ProtocolAddress::new(name.service_id_string(), device_id)
+    let name = new_aci();
+    ProtocolAddress::new(name.service_id_string(), new_device_id())
+}
+
+pub fn new_service_id() -> ServiceId {
+    new_aci().into()
+}
+
+pub fn new_aci() -> Aci {
+    Aci::from(new_uuid())
+}
+
+pub fn new_pni() -> Pni {
+    Pni::from(new_uuid()).into()
+}
+
+pub fn new_device_id() -> DeviceId {
+    new_rand_number().into()
+}
+
+pub fn new_rand_number() -> u32 {
+    StdRng::from_entropy().gen::<u32>()
+}
+
+pub fn new_uuid() -> Uuid {
+    Uuid::new_v4()
 }
