@@ -138,7 +138,8 @@ where
             ProtocolAddress::new(account.aci().service_id_string(), device.device_id());
 
         self.message_cache
-            .lock_queue_for_persistence(&protocol_address);
+            .lock_queue_for_persistence(&protocol_address)
+            .await?;
 
         while {
             messages = self
@@ -156,7 +157,7 @@ where
 
         self.message_cache
             .unlock_queue_for_persistence(&protocol_address)
-            .await;
+            .await?;
         Ok(())
     }
 }
