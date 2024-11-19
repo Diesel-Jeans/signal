@@ -49,7 +49,7 @@ pub struct WebSocketConnection<W: WSStream + Debug, DB: SignalDatabase> {
 }
 
 impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
-    WebSocketConnection<W, DB>
+WebSocketConnection<W, DB>
 {
     pub fn new(
         identity: UserIdentity,
@@ -205,7 +205,7 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
                 create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
                     .encode_to_vec(),
             ))
-            .await;
+                .await;
             return Err(format!("Incorret path: {}", request_msq.path()));
         }
 
@@ -249,13 +249,13 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
                                 .parse::<Uri>()
                                 .map_err(|err| err.to_string())?,
                         )?
-                        .extract::<String>(2)?
-                        .as_str(),
+                            .extract::<String>(2)?
+                            .as_str(),
                     )
-                    .ok_or("Could not parse uri to service id")?,
+                        .ok_or("Could not parse uri to service id")?,
                     unpack_messages(request_msq.body.clone())?,
                 )
-                .await
+                    .await
             }
         };
         match res {
@@ -267,7 +267,7 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
                         vec![],
                         Some(serde_json::to_string(&res).unwrap().as_bytes().to_vec()),
                     )?
-                    .encode_to_vec(),
+                        .encode_to_vec(),
                 ))
                 .await
                 .map_err(|err| err.to_string()),
@@ -388,7 +388,6 @@ pub(crate) mod test {
     use std::{net::SocketAddr, str::FromStr};
     use tokio::sync::mpsc::{Receiver, Sender};
     use tokio::time::sleep;
-    // use tonic::codegen::tokio_stream::StreamExt;
     use super::{UserIdentity, WebSocketConnection};
 
     fn make_envelope() -> Envelope {
@@ -524,8 +523,8 @@ pub(crate) mod test {
             "timestamp": 1730217386
         }
         "#
-        .as_bytes()
-        .to_vec();
+            .as_bytes()
+            .to_vec();
 
         client
             .on_receive(create_request(
@@ -607,8 +606,8 @@ pub(crate) mod test {
             bob_address.device_id(),
             reg_id,
         )
-        .as_bytes()
-        .to_vec();
+            .as_bytes()
+            .to_vec();
 
         alice_sender
             .send(Ok(Message::Binary(
@@ -619,7 +618,7 @@ pub(crate) mod test {
                     vec![],
                     Some(sending_msg),
                 )
-                .encode_to_vec(),
+                    .encode_to_vec(),
             )))
             .await
             .unwrap();
@@ -725,7 +724,7 @@ pub(crate) mod test {
             &state.message_cache.test_key,
             state.message_cache.get_connection().await.unwrap(),
         )
-        .await;
+            .await;
 
         assert!(msg.request.is_some());
         assert!(queue.request.is_some());
