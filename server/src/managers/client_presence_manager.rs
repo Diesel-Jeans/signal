@@ -150,7 +150,7 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         for device_id in device_ids {
             let addr = ProtocolAddress::new(account_uuid.clone(), device_id);
             let presence_key = self.get_presence_key(&addr);
-            if (self.is_locally_present(&presence_key)) {
+            if (self.is_locally_present(&addr)) {
                 if self.displace_presence(&presence_key, false).await? {
                     presence_keys.push(presence_key.to_string());
                 }
