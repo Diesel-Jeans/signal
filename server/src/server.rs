@@ -533,6 +533,7 @@ fn time_now() -> Result<u64, ApiError> {
 
 #[cfg(test)]
 mod server_tests {
+
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_get_messages_pops_message_queue() {

@@ -378,6 +378,7 @@ pub(crate) mod test {
     use futures_util::{stream::SplitStream, StreamExt};
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};
+
     use std::time::Duration;
     use std::{net::SocketAddr, str::FromStr, sync::Arc};
     use tokio::sync::mpsc::{Receiver, Sender};
