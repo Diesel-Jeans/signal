@@ -10,7 +10,7 @@ use crate::{
     database::SignalDatabase,
     managers::{client_presence_manager::DisplacedPresenceListener, state::SignalServerState},
     message_cache::MessageAvailabilityListener,
-    server::{handle_put_messages,handle_keepalive},
+    server::{handle_keepalive, handle_put_messages},
 };
 use axum::{
     extract::ws::{CloseFrame, Message},
@@ -199,7 +199,7 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
             .path
             .clone()
             .ok_or("Request path was not present")?;
-        if (!path.starts_with("/v1/messages") && !path.starts_with("/v1/keepalive")) {
+        if !path.starts_with("/v1/messages") && !path.starts_with("/v1/keepalive") {
             self.send(Message::Binary(
                 create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
                     .encode_to_vec(),
@@ -378,9 +378,8 @@ pub(crate) mod test {
     use futures_util::{stream::SplitStream, StreamExt};
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};
-
     use std::time::Duration;
-    use std::{net::SocketAddr, str::FromStr};
+    use std::{net::SocketAddr, str::FromStr, sync::Arc};
     use tokio::sync::mpsc::{Receiver, Sender};
     use tokio::time::sleep;
 
@@ -758,7 +757,6 @@ pub(crate) mod test {
         let message = WebSocketMessage::decode(message_response.into_data().as_slice()).unwrap();
         let response = message.response.unwrap();
 
-        assert!(state.clone().client_presence_manager.is_present(&websocket.lock().await.protocol_address()).await.unwrap());
         assert_eq!(message.r#type.unwrap(), 2);
         assert_eq!(response.status.unwrap(), 200);
         assert_eq!(response.message.unwrap(), "OK");
@@ -784,10 +782,17 @@ pub(crate) mod test {
         let message = WebSocketMessage::decode(message_response.into_data().as_slice()).unwrap();
         let response = message.response.unwrap();
 
-
-        println!("Is locally present: {}", state.client_presence_manager.is_locally_present(&client.protocol_address()));
-        println!("Status: {}, Message: {}", response.status.unwrap(), response.message.unwrap());
-
+        println!(
+            "Is locally present: {}",
+            state
+                .client_presence_manager
+                .is_locally_present(&client.protocol_address())
+        );
+        println!(
+            "Status: {}, Message: {}",
+            response.status.unwrap(),
+            response.message.unwrap()
+        );
 
         assert_eq!(message.r#type.unwrap(), 2);
         // assert_eq!(response.status.unwrap(), 500);

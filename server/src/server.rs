@@ -41,6 +41,7 @@ use common::web_api::{
 };
 use futures_util::StreamExt;
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
+use std::io::BufRead;
 use std::{
     env,
     fmt::Debug,
@@ -433,7 +434,7 @@ async fn create_websocket_endpoint(
 
 #[debug_handler]
 pub async fn get_keepalive(
-    State(mut state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
     authenticated_device: AuthenticatedDevice,
 ) -> impl IntoResponse {
     handle_keepalive(&state, &authenticated_device).await
@@ -532,7 +533,6 @@ fn time_now() -> Result<u64, ApiError> {
 
 #[cfg(test)]
 mod server_tests {
-
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_get_messages_pops_message_queue() {
