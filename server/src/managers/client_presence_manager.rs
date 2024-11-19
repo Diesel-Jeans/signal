@@ -161,7 +161,7 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
 
     pub fn is_locally_present(&self, address: &ProtocolAddress) -> bool {
         self.displacement_listeners
-            .contains_key(&self.get_presence_key(protocol_address))
+            .contains_key(&self.get_presence_key(&address))
     }
 
     async fn disconnect_presence(&mut self, address: &ProtocolAddress) -> Result<u8> {
