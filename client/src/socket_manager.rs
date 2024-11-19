@@ -10,7 +10,7 @@ use tokio_tungstenite::{client_async_tls_with_config, tungstenite, Connector, Ma
 use rustls::pki_types::CertificateDer;
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pemfile::certs;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
@@ -183,14 +183,13 @@ pub async fn signal_ws_connect(tls_cert: &str, url: &str, username: &str, passwo
 
 
 
-type RequestMap = Arc<Mutex<HashMap<u32, String>>>;
+
 type MessageType = WebSocketMessage;
 #[derive(Debug)]
 pub struct SocketManager<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug>{
     next_id: Arc<AtomicU64>,
     request_delegater: Sender<MessageType>,
     receiver: Receiver<MessageType>,
-    pending_requests: Arc<Mutex<HashMap<u32, MessageType>>>,
     connection: Arc<Mutex<ConnectionState<Message, T>>>
 }
 
@@ -200,7 +199,6 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> Clone for Socke
             next_id: self.next_id.clone(),
             request_delegater: self.request_delegater.clone(),
             receiver: self.request_delegater.subscribe(),
-            pending_requests: self.pending_requests.clone(),
             connection: self.connection.clone()
         }
     }
@@ -213,7 +211,6 @@ impl <T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<
             next_id: Arc::new(AtomicU64::new(0)),
             request_delegater: tx,
             receiver: rx,
-            pending_requests: Arc::new(Mutex::new(HashMap::new())),
             connection: Arc::new(Mutex::new(ConnectionState::Closed))
         }
     }
@@ -353,11 +350,11 @@ impl <T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<
     }
 
 
-    pub fn subscribe(&self) -> Receiver<WebSocketMessage> {
+    pub fn subscribe(&self) -> Receiver<MessageType> {
         self.request_delegater.subscribe()
     }
 
-    async fn wait_for_id(&mut self, id: u64) -> Result<WebSocketMessage, String>{
+    async fn wait_for_id(&mut self, id: u64) -> Result<MessageType, String>{
         loop {
             let msg = self.receiver.recv().await.map_err(|e| e.to_string())?;
             match msg.r#type() {
