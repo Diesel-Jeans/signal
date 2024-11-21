@@ -9,6 +9,7 @@ use core::str;
 use libsignal_core::{Aci, Pni, ServiceId};
 use prost::Message;
 use rand::CryptoRng;
+use sqlx::sqlite::SqlitePoolOptions;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -33,6 +34,7 @@ pub struct Client {
     pni: Pni,
     contact_manager: ContactManager,
     server_api: ServerAPI,
+    key_manager: KeyManager,
     storage: DeviceStorage,
 }
 
@@ -109,6 +111,7 @@ impl Client {
         pni: Pni,
         contact_manager: ContactManager,
         server_api: ServerAPI,
+        key_manager: KeyManager,
         storage: DeviceStorage,
     ) -> Self {
         Self {
@@ -116,6 +119,7 @@ impl Client {
             pni,
             contact_manager,
             server_api,
+            key_manager,
             storage,
         }
     }
@@ -126,25 +130,54 @@ impl Client {
 
     /// Register a new account with the server.
     /// `phone_number` must be unique.
-    pub async fn register(name: &str, phone_number: String) -> Result<Self, RegistrationError> {
+    pub async fn register(name: &str, phone_number: String) -> Result<Self, ClientError> {
         let mut csprng = OsRng;
         let identity = get_registration_identity(&mut csprng);
+        let db_url =
+            std::env::var("DATABASE_URL").expect("Expected to read database url from .env file");
+        let pool = SqlitePoolOptions::new()
+            .connect(&db_url)
+            .await
+            .expect("Could not connect to database");
+        sqlx::migrate!("client_db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
         let mut protocol_store =
-            DeviceProtocolStore::new(identity.aci_key_pair, identity.aci_registration_id).await;
-        let mut key_manager = KeyManager::new(&mut protocol_store);
+            DeviceProtocolStore::create(identity.aci_key_pair, identity.aci_registration_id, pool)
+                .await?;
+        let mut key_manager = KeyManager::new();
         let aci_signed_pk: SignedPreKeyRecord = key_manager
-            .generate_signed_prekey(&mut csprng)
+            .generate_signed_prekey(
+                &mut protocol_store.identity_key_store,
+                &mut protocol_store.signed_pre_key_store,
+                &mut csprng,
+            )
             .await
             .unwrap();
         let pni_signed_pk: SignedPreKeyRecord = key_manager
-            .generate_signed_prekey(&mut csprng)
+            .generate_signed_prekey(
+                &mut protocol_store.identity_key_store,
+                &mut protocol_store.signed_pre_key_store,
+                &mut csprng,
+            )
             .await
             .unwrap();
 
-        let aci_pq_last_resort: KyberPreKeyRecord =
-            key_manager.generate_kyber_prekey().await.unwrap();
-        let pni_pq_last_resort: KyberPreKeyRecord =
-            key_manager.generate_kyber_prekey().await.unwrap();
+        let aci_pq_last_resort: KyberPreKeyRecord = key_manager
+            .generate_kyber_prekey(
+                &mut protocol_store.identity_key_store,
+                &mut protocol_store.kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
+        let pni_pq_last_resort: KyberPreKeyRecord = key_manager
+            .generate_kyber_prekey(
+                &mut protocol_store.identity_key_store,
+                &mut protocol_store.kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
 
         let mut password = [0u8; PASSWORD_LENGTH];
         csprng.fill(&mut password);
@@ -184,31 +217,32 @@ impl Client {
                 None,
             )
             .await
-            .map_err(|_| RegistrationError::NoResponse)?;
+            .map_err(|_| ClientError::RegistrationError(RegistrationError::NoResponse))?;
         match response.status() {
             StatusCode::Ok => {
                 let body: RegistrationResponse = response
                     .body_json()
                     .await
-                    .map_err(|_| RegistrationError::BadResponse)?;
+                    .map_err(|_| ClientError::RegistrationError(RegistrationError::BadResponse))?;
 
                 let aci: Aci = body.uuid.into();
                 let pni: Pni = body.pni.into();
 
                 let contact_manager = ContactManager::new();
-
-                let storage = DeviceStorage::builder()
-                    .aci_registration_id(identity.aci_registration_id)
+                let storage = DeviceStorage::create()
                     .aci(aci)
                     .pni(pni)
                     .password(password)
-                    .identity_key_pair(identity.aci_key_pair)
-                    .build()
-                    .await;
-                let client = Client::new(aci, pni, contact_manager, server_api, storage);
+                    .protocol_store(protocol_store)
+                    .call()
+                    .await?;
+                let client =
+                    Client::new(aci, pni, contact_manager, server_api, key_manager, storage);
                 Ok(client)
             }
-            _ => Err(RegistrationError::PhoneNumberTaken),
+            _ => Err(ClientError::RegistrationError(
+                RegistrationError::PhoneNumberTaken,
+            )),
         }
     }
 
@@ -219,8 +253,8 @@ impl Client {
 
     /// Send a message to a specific contact using websockets.
     pub async fn send_message(&mut self, message: &str, to: &Contact) -> Result<(), ClientError> {
-        let username = self.storage.get_aci().service_id_string();
-        let password = self.storage.get_password();
+        let username = self.storage.aci().service_id_string();
+        let password = self.storage.password();
         let url = "wss://127.0.0.1:443/v1/websocket";
         let tls_cert = "server/cert/rootCA.crt";
         self.server_api
@@ -353,11 +387,6 @@ impl Client {
             .body()
             .to_owned())
     }
-
-    #[cfg(test)]
-    fn test_client(_name: &str) -> Self {
-        todo!()
-    }
 }
 
 fn get_registration_identity<R>(mut csprng: &mut R) -> RegistrationIdentity
@@ -416,11 +445,9 @@ where
 
 #[cfg(test)]
 mod client_test {
-
-    use crate::Client;
-
+    #[ignore]
     #[tokio::test]
     async fn test_client_send_and_receive() {
-        let _alice = Client::test_client("alice");
+        todo!()
     }
 }

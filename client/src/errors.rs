@@ -18,6 +18,7 @@ pub enum ClientError {
     CiphertextMessageDecodeError,
     ParseProtocolAddress(ParseProtocolAddressError),
     NoPendingMessage,
+    DatabaseError(String),
 }
 
 impl Debug for ClientError {
@@ -49,6 +50,7 @@ impl Display for ClientError {
                 Self::NoMessageType => "Envelope did not contain a message type.".to_owned(),
                 Self::DecryptionError(err) => format!("Could not encrypt message: {}", err),
                 Self::NoPendingMessage => "No new messages received".to_owned(),
+                Self::DatabaseError(err) => format!("{err}"),
             }
         )
     }

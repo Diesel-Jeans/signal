@@ -5,3 +5,4 @@ include!(concat!(env!("OUT_DIR"), "/_includes.rs"));
 
 pub mod pre_key;
 pub mod protocol_address;
+pub mod utils;
