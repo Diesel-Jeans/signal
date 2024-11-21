@@ -1,15 +1,15 @@
+use crate::{
+    signalservice::{
+        web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
+    },
+    web_api::SignalMessages,
+};
 use std::{
     str::FromStr,
     time::{SystemTime, SystemTimeError, UNIX_EPOCH},
 };
 
 use axum::http::{StatusCode, Uri};
-use common::{
-    signalservice::{
-        web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
-    },
-    web_api::SignalMessages,
-};
 use rand::{rngs::OsRng, Rng as _};
 
 pub struct PathExtractor {
@@ -117,8 +117,8 @@ pub fn current_millis() -> Result<u128, SystemTimeError> {
 #[cfg(test)]
 mod test {
     use super::{create_request, create_response, unpack_messages, PathExtractor};
+    use crate::signalservice::web_socket_message;
     use axum::http::{StatusCode, Uri};
-    use common::signalservice::web_socket_message;
     use std::str::FromStr;
 
     #[test]

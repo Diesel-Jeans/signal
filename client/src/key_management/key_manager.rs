@@ -79,15 +79,18 @@ impl<'a> KeyManager<'a> {
         let signature = self
             .identity_key_store
             .get_identity_key_pair()
-            .await?
+            .await
+            .unwrap()
             .private_key()
-            .calculate_signature(&signed_pre_key_pair.public_key.serialize(), csprng)?;
+            .calculate_signature(&signed_pre_key_pair.public_key.serialize(), csprng)
+            .unwrap();
         let id = self.get_new_key_id(&PreKeyType::Signed).into();
         let record = SignedPreKeyRecord::new(id, time_now(), &signed_pre_key_pair, &signature);
 
         self.signed_pre_key_store
             .save_signed_pre_key(id, &record)
-            .await?;
+            .await
+            .unwrap();
 
         Ok(record)
     }

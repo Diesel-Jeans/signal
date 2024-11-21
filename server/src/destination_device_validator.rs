@@ -82,7 +82,6 @@ impl DestinationDeviceValidator {
             .filter(|message_device_id| !account_device_ids.contains(message_device_id))
             .cloned()
             .collect();
-
         if !missing_device_ids.is_empty() || !extra_device_ids.is_empty() {
             bail!("Mismatched devices.")
         }

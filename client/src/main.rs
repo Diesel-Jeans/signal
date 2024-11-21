@@ -3,6 +3,9 @@ use std::error::Error;
 use contact_manager::Contact;
 
 use crate::client::Client;
+use crate::socket_manager::{signal_ws_connect, SignalStream, SocketManager};
+use common::websocket::net_helper::create_request;
+use std::env;
 
 mod client;
 mod contact_manager;
@@ -10,6 +13,7 @@ mod encryption;
 mod errors;
 mod key_management;
 mod server;
+mod socket_manager;
 mod storage;
 #[cfg(test)]
 mod test;
@@ -18,6 +22,10 @@ mod websockets;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::from_filename("client/.env")?;
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     let mut client = Client::register("name", "a".to_string()).await.unwrap();
 
     println!("Logged in, sending message to myself");

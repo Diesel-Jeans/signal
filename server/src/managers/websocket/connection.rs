@@ -1,10 +1,3 @@
-use super::{
-    net_helper::{
-        create_request, create_response, current_millis, generate_req_id, unpack_messages,
-        PathExtractor,
-    },
-    wsstream::WSStream,
-};
 use crate::{
     account::AuthenticatedDevice,
     database::SignalDatabase,
@@ -12,14 +5,21 @@ use crate::{
     message_cache::MessageAvailabilityListener,
     server::handle_put_messages,
 };
+use axum::extract::ws::WebSocket;
 use axum::{
     extract::ws::{CloseFrame, Message},
     http::{StatusCode, Uri},
+    Error,
 };
 use common::signalservice::{
     web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
+use common::websocket::net_helper::{
+    create_request, create_response, current_millis, generate_req_id, unpack_messages,
+    PathExtractor,
+};
+use common::websocket::wsstream::WSStream;
 use futures_util::{stream::SplitSink, SinkExt};
 use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
 use prost::Message as PMessage;
@@ -39,7 +39,7 @@ pub enum UserIdentity {
 }
 
 #[derive(Debug)]
-pub struct WebSocketConnection<W: WSStream + Debug, DB: SignalDatabase> {
+pub struct WebSocketConnection<W: WSStream<Message, Error> + Debug, DB: SignalDatabase> {
     identity: UserIdentity,
     socket_address: SocketAddr,
     ws: ConnectionState<W>,
@@ -47,7 +47,7 @@ pub struct WebSocketConnection<W: WSStream + Debug, DB: SignalDatabase> {
     state: SignalServerState<DB, W>,
 }
 
-impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
+impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
     WebSocketConnection<W, DB>
 {
     pub fn new(
@@ -283,7 +283,7 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
 #[async_trait::async_trait]
 impl<T, U> MessageAvailabilityListener for WebSocketConnection<T, U>
 where
-    T: WSStream + Debug + 'static,
+    T: WSStream<Message, Error> + Debug + 'static,
     U: SignalDatabase,
 {
     async fn handle_new_messages_available(&mut self) -> bool {
@@ -304,7 +304,7 @@ where
 #[async_trait::async_trait]
 impl<T, U> DisplacedPresenceListener for WebSocketConnection<T, U>
 where
-    T: WSStream + Debug + 'static,
+    T: WSStream<Message, axum::Error> + Debug + 'static,
     U: SignalDatabase,
 {
     async fn handle_displacement(&mut self, connected_elsewhere: bool) {
@@ -320,12 +320,73 @@ where
 }
 
 #[derive(Debug)]
-pub enum ConnectionState<T: WSStream> {
+pub struct SignalWebSocket(WebSocket);
+impl SignalWebSocket {
+    pub fn new(w: WebSocket) -> Self {
+        Self(w)
+    }
+}
+
+impl futures_util::Stream for SignalWebSocket {
+    type Item = Result<Message, Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        futures_util::Stream::poll_next(std::pin::Pin::new(&mut self.0), cx)
+    }
+}
+
+impl futures_util::Sink<Message> for SignalWebSocket {
+    type Error = Error;
+
+    fn poll_ready(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        futures_util::Sink::poll_ready(std::pin::Pin::new(&mut self.0), cx)
+    }
+
+    fn start_send(mut self: std::pin::Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+        futures_util::Sink::start_send(std::pin::Pin::new(&mut self.0), item)
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        futures_util::Sink::poll_flush(std::pin::Pin::new(&mut self.0), cx)
+    }
+
+    fn poll_close(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        futures_util::Sink::poll_close(std::pin::Pin::new(&mut self.0), cx)
+    }
+}
+
+#[async_trait::async_trait]
+impl WSStream<Message, Error> for SignalWebSocket {
+    async fn recv(&mut self) -> Option<Result<Message, Error>> {
+        self.recv().await
+    }
+    async fn send(&mut self, msg: Message) -> Result<(), Error> {
+        SinkExt::send(self, msg).await
+    }
+    async fn close(self) -> Result<(), Error> {
+        self.close().await
+    }
+}
+
+#[derive(Debug)]
+pub enum ConnectionState<T: WSStream<Message, Error>> {
     Active(SplitSink<T, Message>),
     Closed,
 }
 
-impl<T: WSStream + Debug> ConnectionState<T> {
+impl<T: WSStream<Message, Error> + Debug> ConnectionState<T> {
     pub fn is_active(&self) -> bool {
         matches!(self, ConnectionState::Active(_))
     }
@@ -338,10 +399,7 @@ pub type ConnectionMap<T, U> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnecti
 pub(crate) mod test {
     use crate::{
         database::SignalDatabase,
-        managers::{
-            state::SignalServerState,
-            websocket::net_helper::{create_request, create_response},
-        },
+        managers::state::SignalServerState,
         postgres::PostgresDatabase,
         test_utils::{
             message_cache::teardown,
@@ -352,6 +410,7 @@ pub(crate) mod test {
     use axum::{extract::ws::Message, http::StatusCode, Error};
     use base64::prelude::{Engine as _, BASE64_STANDARD};
     use common::signalservice::{Envelope, WebSocketMessage};
+    use common::websocket::net_helper::{create_request, create_response};
     use futures_util::{stream::SplitStream, StreamExt};
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};

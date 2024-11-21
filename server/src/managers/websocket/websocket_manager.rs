@@ -1,6 +1,5 @@
 use super::{
     connection::{ClientConnection, ConnectionMap, WebSocketConnection},
-    wsstream::WSStream,
 };
 use crate::database::SignalDatabase;
 use axum::extract::ws::Message;
@@ -10,6 +9,7 @@ use libsignal_core::ProtocolAddress;
 use prost::{bytes::Bytes, Message as PMessage};
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use tokio::sync::Mutex;
+use common::websocket::wsstream::WSStream;
 
 /*const WS_ENDPOINTS: [&str; 24] = [
     "v4/attachments/form/upload",
@@ -41,7 +41,7 @@ use tokio::sync::Mutex;
 #[derive(Default, Debug)]
 pub struct WebSocketManager<T, U>
 where
-    T: WSStream + Debug,
+    T: WSStream<Message, axum::Error> + Debug,
     U: SignalDatabase,
 {
     sockets: ConnectionMap<T, U>,
@@ -49,7 +49,7 @@ where
 
 impl<T, U> Clone for WebSocketManager<T, U>
 where
-    T: WSStream + Debug,
+    T: WSStream<Message, axum::Error> + Debug,
     U: SignalDatabase,
 {
     fn clone(&self) -> Self {
@@ -61,7 +61,7 @@ where
 
 impl<T, U> WebSocketManager<T, U>
 where
-    T: WSStream + Debug + Send + 'static,
+    T: WSStream<Message, axum::Error> + Debug + Send + 'static,
     U: SignalDatabase + Send + 'static,
 {
     pub fn new() -> Self {
@@ -154,13 +154,13 @@ mod test {
             state::SignalServerState,
             websocket::{
                 connection::{test::create_connection, ClientConnection},
-                net_helper,
             },
         },
         test_utils::websocket::{MockDB, MockSocket},
     };
     use axum::extract::ws::Message;
     use prost::Message as PMessage;
+    use common::websocket::net_helper;
 
     #[tokio::test]
     async fn test_insert() {

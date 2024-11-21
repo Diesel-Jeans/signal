@@ -118,15 +118,13 @@ impl Client {
         server_api: ServerAPI,
         storage: DeviceStorage,
     ) -> Self {
-        let mut client = Client {
+        Self {
             aci,
             pni,
             contact_manager,
             server_api,
             storage,
-        };
-        client.server_api.connect();
-        client
+        }
     }
 
     pub fn aci(&self) -> Aci {
@@ -210,7 +208,6 @@ impl Client {
 
                 let contact_manager = ContactManager::new();
 
-                server_api.username = Some(aci.service_id_string());
                 let storage = DeviceStorage::builder()
                     .aci_registration_id(identity.aci_registration_id)
                     .aci(aci)
@@ -233,7 +230,14 @@ impl Client {
 
     /// Send a message to a specific contact using websockets.
     pub async fn send_message(&mut self, message: &str, to: &Contact) -> Result<(), ClientError> {
-        self.server_api.connect().await.unwrap();
+        let username = self.storage.get_aci().service_id_string();
+        let password = self.storage.get_password();
+        let url = "wss://127.0.0.1:443/v1/websocket";
+        let tls_cert = "server/cert/rootCA.crt";
+        self.server_api
+            .connect(&username, password, url, tls_cert)
+            .await
+            .unwrap();
         println!("Connected");
         // Prepare a message to be sent
 
