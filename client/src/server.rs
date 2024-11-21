@@ -1,16 +1,10 @@
-use crate::{
-    client::VerifiedSession,
-    contact_manager::Contact,
-    websockets::{KeepAliveOptions, SendRequestOptions, WebsocketHandler},
-};
+use crate::socket_manager::{signal_ws_connect, SignalStream, SocketManager};
+use crate::{client::VerifiedSession, contact_manager::Contact};
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
 use common::{
     signal_protobuf::{WebSocketRequestMessage, WebSocketResponseMessage},
-    web_api::{
-        authorization::BasicAuthorizationHeader, AccountAttributes, RegistrationRequest,
-        UploadSignedPreKey,
-    },
+    web_api::{authorization::BasicAuthorizationHeader, RegistrationRequest},
 };
 use http_client::h1::H1Client;
 use std::{
@@ -22,8 +16,6 @@ use std::{
     time::Duration,
 };
 use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
-use tokio_tungstenite::connect_async;
-use crate::socket_manager::{SocketManager, signal_ws_connect, SignalStream};
 
 const CLIENT_URI: &str = "/client";
 const MSG_URI: &str = "v1/messages";
@@ -107,10 +99,12 @@ impl Server for ServerAPI {
         tls_cert: &str,
     ) -> Result<()> {
         if self.socket_manager.is_active().await {
-            return Ok(())
+            return Ok(());
         }
 
-        let ws = signal_ws_connect(tls_cert, url, username, password).await.expect("Failed to connect");
+        let ws = signal_ws_connect(tls_cert, url, username, password)
+            .await
+            .expect("Failed to connect");
         let wrap = SignalStream::new(ws);
         self.socket_manager.set_stream(wrap).await;
 
@@ -218,7 +212,10 @@ impl Server for ServerAPI {
             .set_base_url(Url::parse(&address).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
-        ServerAPI { client, socket_manager: SocketManager::new(5) }
+        ServerAPI {
+            client,
+            socket_manager: SocketManager::new(5),
+        }
     }
 }
 impl ServerAPI {

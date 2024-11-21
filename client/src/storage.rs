@@ -3,11 +3,10 @@ use libsignal_core::{Aci, Pni};
 use libsignal_protocol::{PrivateKey, PublicKey};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use uuid::Uuid;
 
 mod public_key_serde {
-    use libsignal_protocol::{PrivateKey, PublicKey};
-    use serde::{self, de, Deserialize, Deserializer, Serializer};
+    use libsignal_protocol::PublicKey;
+    use serde::{self, Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(key: &PublicKey, serializer: S) -> Result<S::Ok, S::Error>
     where

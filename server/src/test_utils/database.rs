@@ -1,7 +1,7 @@
 use crate::postgres::PostgresDatabase;
 use anyhow::Result;
 use common::web_api::UploadSignedPreKey;
-use libsignal_core::{ProtocolAddress, ServiceId};
+use libsignal_core::ProtocolAddress;
 
 pub async fn database_connect() -> PostgresDatabase {
     PostgresDatabase::connect("DATABASE_URL_TEST".to_string()).await

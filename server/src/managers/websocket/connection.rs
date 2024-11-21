@@ -1,9 +1,3 @@
-use common::{
-    websocket::net_helper::{
-        create_request, create_response, current_millis, generate_req_id, unpack_messages,
-        PathExtractor,
-    },
-};
 use crate::{
     account::AuthenticatedDevice,
     database::SignalDatabase,
@@ -11,6 +5,7 @@ use crate::{
     message_cache::MessageAvailabilityListener,
     server::handle_put_messages,
 };
+use axum::extract::ws::WebSocket;
 use axum::{
     extract::ws::{CloseFrame, Message},
     http::{StatusCode, Uri},
@@ -20,9 +15,14 @@ use common::signal_protobuf::{
     web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
-use futures_util::{stream::SplitSink, SinkExt, StreamExt};
+use common::websocket::net_helper::{
+    create_request, create_response, current_millis, generate_req_id, unpack_messages,
+    PathExtractor,
+};
+use common::websocket::wsstream::WSStream;
+use futures_util::{stream::SplitSink, SinkExt};
 use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
-use prost::{bytes::Bytes, Message as PMessage};
+use prost::Message as PMessage;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -31,8 +31,6 @@ use std::{
     time::SystemTimeError,
 };
 use tokio::sync::Mutex;
-use common::websocket::wsstream::WSStream;
-use axum::extract::ws::WebSocket;
 
 #[derive(Debug)]
 pub enum UserIdentity {
@@ -78,7 +76,7 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
         }
     }
 
-    pub async fn send_message(&mut self, mut message: Envelope) -> Result<(), String> {
+    pub async fn send_message(&mut self, message: Envelope) -> Result<(), String> {
         let msg = self
             .create_message(message)
             .map_err(|_| "Time went backwards".to_string())?;
@@ -202,12 +200,14 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
                 create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
                     .encode_to_vec(),
             ))
-            .await;
+            .await
+            .map_err(|err| format!("{}", err))?;
+
             return Err(format!("Incorret path: {}", request_msq.path()));
         }
 
         let res = match &self.identity {
-            UserIdentity::ProtocolAddress(protocol_address) => {
+            UserIdentity::ProtocolAddress(_) => {
                 todo!("We do not support protocal addresses yet!")
             }
             UserIdentity::AuthenticatedDevice(authenticated_device) => {
@@ -243,7 +243,7 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
                 ))
                 .await
                 .map_err(|err| err.to_string()),
-            Err(err) => self
+            Err(_) => self
                 .send(Message::Binary(
                     create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
                         .encode_to_vec(),
@@ -322,7 +322,7 @@ where
 pub struct SignalWebSocket(WebSocket);
 impl SignalWebSocket {
     pub fn new(w: WebSocket) -> Self {
-        Self (w)   
+        Self(w)
     }
 }
 
@@ -366,7 +366,6 @@ impl futures_util::Sink<Message> for SignalWebSocket {
     }
 }
 
-
 #[async_trait::async_trait]
 impl WSStream<Message, Error> for SignalWebSocket {
     async fn recv(&mut self) -> Option<Result<Message, Error>> {
@@ -399,9 +398,7 @@ pub type ConnectionMap<T, U> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnecti
 pub(crate) mod test {
     use crate::{
         database::SignalDatabase,
-        managers::{
-            state::SignalServerState,
-        },
+        managers::state::SignalServerState,
         postgres::PostgresDatabase,
         test_utils::{
             message_cache::teardown,
@@ -409,14 +406,14 @@ pub(crate) mod test {
             websocket::{MockDB, MockSocket},
         },
     };
-    use common::websocket::net_helper::{create_request, create_response};
     use axum::{extract::ws::Message, http::StatusCode, Error};
     use base64::prelude::{Engine as _, BASE64_STANDARD};
     use common::signal_protobuf::{Envelope, WebSocketMessage};
+    use common::websocket::net_helper::{create_request, create_response};
     use futures_util::{stream::SplitStream, StreamExt};
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};
-    use serial_test::serial;
+
     use std::time::Duration;
     use std::{net::SocketAddr, str::FromStr};
     use tokio::sync::mpsc::{Receiver, Sender};
@@ -441,7 +438,7 @@ pub(crate) mod test {
         Receiver<Message>,
         SplitStream<MockSocket>,
     ) {
-        let (mock, sender, mut receiver) = MockSocket::new();
+        let (mock, sender, receiver) = MockSocket::new();
         let (msender, mreceiver) = mock.split();
         let who = SocketAddr::from_str(socket_addr).unwrap();
         let auth_device = new_authenticated_device();
@@ -512,7 +509,7 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_send_message() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut client, sender, mut receiver, mut mreceiver) =
+        let (mut client, sender, mut receiver, mreceiver) =
             create_connection("127.0.0.1:4042", state).await;
         let env = make_envelope();
         client.send_message(env.clone()).await;
@@ -539,8 +536,8 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_on_receive_request() {
-        let mut state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut client, sender, mut receiver, mut mreceiver) =
+        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, receiver, mreceiver) =
             create_connection("127.0.0.1:4042", state).await;
         let msg = r#"
         {
@@ -574,8 +571,8 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_on_receive_response() {
-        let mut state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut client, sender, mut receiver, mut mreceiver) =
+        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, receiver, mreceiver) =
             create_connection("127.0.0.1:4042", state).await;
         client
             .on_receive(create_response(1, StatusCode::OK, vec![], None).unwrap())
@@ -586,9 +583,9 @@ pub(crate) mod test {
     async fn test_alice_sends_msg_to_bob() {
         let mut state =
             SignalServerState::<PostgresDatabase, MockSocket>::connect("DATABASE_URL_TEST").await;
-        let (mut alice, alice_sender, mut alice_receiver, mut alice_mreceiver) =
+        let (alice, alice_sender, mut alice_receiver, alice_mreceiver) =
             create_connection("127.0.0.1:4042", state.clone()).await;
-        let (mut bob, bob_sender, mut bob_receiver, mut bob_mreceiver) =
+        let (bob, bob_sender, mut bob_receiver, bob_mreceiver) =
             create_connection("127.0.0.1:4042", state.clone()).await;
 
         match &alice.identity {
@@ -717,7 +714,7 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_handle_new_messages_available() {
         let mut state = SignalServerState::<MockDB, MockSocket>::new();
-        let (mut ws, sender, mut receiver, mut mreceiver) =
+        let (ws, sender, mut receiver, mreceiver) =
             create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();

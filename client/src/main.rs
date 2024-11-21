@@ -1,4 +1,3 @@
-#![allow(unused)]
 use std::error::Error;
 
 use crate::client::Client;

@@ -53,7 +53,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
     pub fn connect() -> Self {
         let _ = dotenv::dotenv();
         let redis_url = std::env::var("REDIS_URL").expect("Unable to read REDIS_URL .env var");
-        let mut redis_config = Config::from_url(redis_url);
+        let redis_config = Config::from_url(redis_url);
         let redis_pool: deadpool_redis::Pool = redis_config
             .create_pool(Some(Runtime::Tokio1))
             .expect("Failed to create connection pool");
@@ -95,7 +95,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
             .query_async::<u8>(&mut connection)
             .await?;
 
-        if (message_guid_exists == 1) {
+        if message_guid_exists == 1 {
             let num = cmd("HGET")
                 .arg(&queue_metadata_key)
                 .arg(message_guid)
@@ -257,7 +257,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
     pub async fn get_all_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
         let messages = self.get_items(address, -1).await?;
 
-        if (messages.is_empty()) {
+        if messages.is_empty() {
             return Ok(Vec::new());
         }
 
@@ -285,11 +285,11 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
             .await?;
 
         // if there is a queue lock key on, due to persist of message.
-        if let Some(lock_key) = locked {
+        if locked.is_some() {
             return Ok(Vec::new());
         }
 
-        let mut messages = cmd("ZRANGE")
+        let messages = cmd("ZRANGE")
             .arg(queue_key.clone())
             .arg(message_sort.clone())
             .arg("+inf")
@@ -440,7 +440,7 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
     }
 
     pub fn get_account_and_device_id_from_queue_key(&self, queue_key: &str) -> (String, String) {
-        let mut parts = queue_key.split("::").collect::<Vec<&str>>();
+        let parts = queue_key.split("::").collect::<Vec<&str>>();
         let account_id = parts[1].trim_matches('{').to_string();
         let device_id = parts[2].trim_end_matches('}').to_string();
         (account_id, device_id)
@@ -463,15 +463,13 @@ impl<T: MessageAvailabilityListener> MessageCache<T> {
 
 #[cfg(test)]
 pub mod message_cache_tests {
+    use super::*;
     use crate::test_utils::{
         message_cache::{generate_envelope, generate_uuid, teardown, MockWebSocketConnection},
         user::new_protocol_address,
     };
 
-    use super::*;
-
     #[tokio::test]
-
     async fn test_message_availability_listener_new_messages() {
         let mut message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
         let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
@@ -484,7 +482,7 @@ pub mod message_cache_tests {
             .add_message_availability_listener(&address, websocket.clone())
             .await;
 
-        let message_id = message_cache
+        message_cache
             .insert(&address, &mut envelope, &uuid)
             .await
             .unwrap();
@@ -622,12 +620,12 @@ pub mod message_cache_tests {
 
     async fn test_remove() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
-        let mut connection = message_cache.pool.get().await.unwrap();
+        let connection = message_cache.pool.get().await.unwrap();
         let address = new_protocol_address();
         let message_guid = generate_uuid();
         let mut envelope = generate_envelope(&message_guid);
 
-        let message_id = message_cache
+        message_cache
             .insert(&address, &mut envelope, &message_guid)
             .await
             .unwrap();
@@ -647,11 +645,11 @@ pub mod message_cache_tests {
 
     async fn test_get_all_messages() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
-        let mut connection = message_cache.pool.get().await.unwrap();
+        let connection = message_cache.pool.get().await.unwrap();
         let address = new_protocol_address();
         let mut envelopes = Vec::new();
 
-        for i in 0..10 {
+        for _ in 0..10 {
             let message_guid = generate_uuid();
             let mut envelope = generate_envelope(&message_guid);
 
@@ -664,7 +662,7 @@ pub mod message_cache_tests {
         }
 
         //getting those messages
-        let mut messages = message_cache.get_all_messages(&address).await.unwrap();
+        let messages = message_cache.get_all_messages(&address).await.unwrap();
 
         teardown(&message_cache.test_key, connection).await;
 
@@ -679,7 +677,7 @@ pub mod message_cache_tests {
 
     async fn test_has_messages() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
-        let mut connection = message_cache.pool.get().await.unwrap();
+        let connection = message_cache.pool.get().await.unwrap();
         let address = new_protocol_address();
         let message_guid = generate_uuid();
 
@@ -687,7 +685,7 @@ pub mod message_cache_tests {
 
         let does_not_has_messages = message_cache.has_messages(&address).await.unwrap();
 
-        let message_id = message_cache
+        message_cache
             .insert(&address, &mut envelope, &message_guid)
             .await
             .unwrap();
@@ -704,7 +702,7 @@ pub mod message_cache_tests {
 
     async fn test_get_messages_to_persist() {
         let message_cache: MessageCache<MockWebSocketConnection> = MessageCache::connect();
-        let mut connection = message_cache.pool.get().await.unwrap();
+        let connection = message_cache.pool.get().await.unwrap();
         let address = new_protocol_address();
         let message_guid = generate_uuid();
 

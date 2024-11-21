@@ -13,8 +13,8 @@ use crate::{
     postgres::PostgresDatabase,
     response::SendMessageResponse,
 };
-use common::websocket::wsstream::WSStream;
 use anyhow::Result;
+use axum::extract::ws::Message;
 use axum::{
     debug_handler,
     extract::{
@@ -33,11 +33,11 @@ use axum::{
 };
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
-use axum::extract::ws::Message;
 use common::web_api::{
     authorization::BasicAuthorizationHeader, DevicePreKeyBundle, RegistrationRequest,
     RegistrationResponse, SignalMessages,
 };
+use common::websocket::wsstream::WSStream;
 use futures_util::StreamExt;
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
 use std::{
@@ -73,7 +73,7 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::E
     } else {
         state
             .account_manager
-            .get_account(&destination_identifier)
+            .get_account(destination_identifier)
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::NOT_FOUND,
@@ -180,11 +180,7 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream<Message, axum::
             registration.pni_identity_key().to_owned(),
             device.clone(),
         )
-        .await
-        .map_err(|err| ApiError {
-            message: format!("Could not create account:{}", err),
-            status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        })?;
+        .await?;
 
     let aci = account.aci();
     let address = ProtocolAddress::new(aci.service_id_string(), device.device_id());
@@ -193,7 +189,11 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream<Message, axum::
     state
         .account_manager
         .store_key_bundle(&device_pre_key_bundle, &address)
-        .await;
+        .await
+        .map_err(|err| ApiError {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            message: err.to_string(),
+        })?;
 
     Ok(RegistrationResponse {
         uuid: aci.into(),
@@ -323,7 +323,9 @@ async fn post_registration_endpoint(
 
 /// Handler for the GET v2/keys endpoint.
 #[debug_handler]
-async fn get_keys_endpoint(State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>) {
+async fn get_keys_endpoint(
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+) {
     // TODO: Call `handle_get_keys`
 }
 
@@ -337,7 +339,9 @@ async fn post_keycheck_endpoint(
 
 /// Handler for the PUT v2/keys endpoint.
 #[debug_handler]
-async fn put_keys_endpoint(State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>) {
+async fn put_keys_endpoint(
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+) {
     // TODO: Call `handle_put_keys`
 }
 
@@ -482,7 +486,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
-    message_persister.stop();
+    message_persister.stop().await;
 
     Ok(())
 }
@@ -499,7 +503,6 @@ fn time_now() -> Result<u64, ApiError> {
 
 #[cfg(test)]
 mod server_tests {
-    use common::web_api::{AccountAttributes, DeviceCapabilities};
 
     #[ignore = "Not implemented"]
     #[tokio::test]
