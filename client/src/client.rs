@@ -1,40 +1,45 @@
-use anyhow::Result;
-use base64::Engine;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
-use bon::vec;
+use bon::{vec, Builder};
+use common::protocol_address::parse_protocol_address;
+use common::signalservice::data_message::contact;
 use common::signalservice::{envelope, Content, DataMessage, Envelope};
 use common::{
     signalservice::WebSocketResponseMessage,
     web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse},
 };
 use core::str;
-use libsignal_core::{Aci, Pni};
+use libsignal_core::{Aci, Pni, ServiceId};
+use prost::Message;
+use rand::CryptoRng;
 use serde::de::value;
 use std::collections::HashMap;
+use std::convert::identity;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use common::web_api::{SignalMessage, SignalMessages};
 use libsignal_protocol::{
-    CiphertextMessage, IdentityKey, IdentityKeyPair, InMemSignalProtocolStore, KeyPair,
-    KyberPreKeyRecord, SessionStore, SignalProtocolError, SignedPreKeyRecord,
+    message_decrypt, CiphertextMessage, CiphertextMessageType, IdentityKey, IdentityKeyPair,
+    IdentityKeyStore, InMemSignalProtocolStore, KeyPair, KyberPreKeyRecord, KyberPreKeyStore,
+    PreKeyStore, SenderKeyStore, SessionStore, SignalMessage as SignalSignalMessage,
+    SignalProtocolError, SignedPreKeyRecord, SignedPreKeyStore,
 };
 use rand::{rngs::OsRng, Rng};
 use surf::StatusCode;
 
-use crate::contact_manager::{Contact, ContactManager};
-use crate::encryption::{encrypt, pad_message};
+use crate::contact_manager::{Contact, ContactManager, Device};
+use crate::encryption::{decrypt, encrypt, pad_message};
 use crate::errors::{ClientError, LoginError, RegistrationError};
-use crate::key_management::key_manager::{InMemoryKeyManager, KeyManager};
+use crate::key_management::key_manager::KeyManager;
 use crate::server::{Server, ServerAPI};
-use crate::storage::device::DeviceStorage;
-use crate::storage::protocol_store::ProtocolStore;
+use crate::storage::device::{DeviceProtocolStore, DeviceStorage};
+use crate::storage::{self, protocol_store};
+use crate::storage::{protocol_store::GenericProtocolStore, storage_trait::Storage};
 
 pub struct Client {
     aci: Aci,
     pni: Pni,
     contact_manager: ContactManager,
     server_api: ServerAPI,
-    key_manager: InMemoryKeyManager,
     storage: DeviceStorage,
 }
 
@@ -52,47 +57,107 @@ const PROFILE_KEY_LENGTH: usize = 32;
 const MASTER_KEY_LENGTH: usize = 32;
 const PASSWORD_LENGTH: usize = 16;
 
+#[derive(Builder)]
+pub struct RegistrationInformation {
+    pub aci_registration_id: u32,
+    pub pni_registration_id: u32,
+    pub aci_identity_key_pair: IdentityKeyPair,
+    pub pni_identity_key_pair: IdentityKeyPair,
+    pub aci_signed_pk: SignedPreKeyRecord,
+    pub pni_signed_pk: SignedPreKeyRecord,
+    pub aci_pq_last_resort: KyberPreKeyRecord,
+    pub pni_pq_last_resort: KyberPreKeyRecord,
+    pub name: String,
+    pub password: String,
+    pub access_key: [u8; 16],
+}
+
+impl RegistrationInformation {
+    fn to_registration_request(self) -> RegistrationRequest {
+        let capabilities = DeviceCapabilities::default();
+
+        let account_attributes = AccountAttributes::new(
+            self.name,
+            true,
+            self.aci_registration_id,
+            self.pni_registration_id,
+            capabilities,
+            Box::new(self.access_key),
+        );
+        RegistrationRequest::new(
+            "".into(),
+            "".into(),
+            account_attributes,
+            true, // Require atomic is always true
+            true, // Skip device transfer is always true
+            self.aci_identity_key_pair.identity_key().to_owned(),
+            self.pni_identity_key_pair.identity_key().to_owned(),
+            self.aci_signed_pk.into(),
+            self.pni_signed_pk.into(),
+            self.aci_pq_last_resort.into(),
+            self.pni_pq_last_resort.into(),
+            None,
+            None,
+        )
+    }
+}
+
+#[derive(Builder)]
+pub struct RegistrationIdentity {
+    pub aci_registration_id: u32,
+    pub pni_registration_id: u32,
+    pub aci_key_pair: IdentityKeyPair,
+    pub pni_key_pair: IdentityKeyPair,
+}
+
 impl Client {
     fn new(
         aci: Aci,
         pni: Pni,
         contact_manager: ContactManager,
         server_api: ServerAPI,
-        key_manager: InMemoryKeyManager,
         storage: DeviceStorage,
     ) -> Self {
-        Client {
+        let mut client = Client {
             aci,
             pni,
             contact_manager,
             server_api,
-            key_manager,
             storage,
-        }
+        };
+        client.server_api.connect();
+        client
+    }
+
+    pub fn aci(&self) -> Aci {
+        self.aci
     }
 
     /// Register a new account with the server.
     /// `phone_number` must be unique.
     pub async fn register(name: &str, phone_number: String) -> Result<Self, RegistrationError> {
         let mut csprng = OsRng;
-        let aci_registration_id = OsRng.gen_range(1..16383);
-        let pni_registration_id = OsRng.gen_range(1..16383);
-        let aci_key_pair = KeyPair::generate(&mut csprng);
-        let pni_key_pair = KeyPair::generate(&mut csprng);
-        let id_key = IdentityKey::new(aci_key_pair.public_key);
-        let id_key_pair = IdentityKeyPair::new(id_key, aci_key_pair.private_key);
+        let identity = get_registration_identity(&mut csprng);
+        let mut protocol_store =
+            DeviceProtocolStore::new(identity.aci_key_pair, identity.aci_registration_id).await;
+        let mut key_manager = KeyManager::new(&mut protocol_store);
+        let aci_signed_pk: SignedPreKeyRecord = key_manager
+            .generate_signed_prekey(&mut csprng)
+            .await
+            .unwrap();
+        let pni_signed_pk: SignedPreKeyRecord = key_manager
+            .generate_signed_prekey(&mut csprng)
+            .await
+            .unwrap();
 
-        let storage = InMemSignalProtocolStore::new(id_key_pair, aci_registration_id)
-            .expect("Can always create a protocol store.");
-        let mut key_manager = InMemoryKeyManager::new(storage);
-
-        let aci_signed_pk: SignedPreKeyRecord = key_manager.generate(&mut csprng).await.unwrap();
-        let pni_signed_pk: SignedPreKeyRecord = key_manager.generate(&mut csprng).await.unwrap();
-
-        let aci_pq_last_resort: KyberPreKeyRecord =
-            key_manager.generate(&mut csprng).await.unwrap();
-        let pni_pq_last_resort: KyberPreKeyRecord =
-            key_manager.generate(&mut csprng).await.unwrap();
+        let aci_pq_last_resort: KyberPreKeyRecord = key_manager
+            .generate_kyber_prekey(&mut csprng)
+            .await
+            .unwrap();
+        let pni_pq_last_resort: KyberPreKeyRecord = key_manager
+            .generate_kyber_prekey(&mut csprng)
+            .await
+            .unwrap();
 
         let mut password = [0u8; PASSWORD_LENGTH];
         csprng.fill(&mut password);
@@ -102,40 +167,35 @@ impl Client {
         let mut profile_key = [0u8; PROFILE_KEY_LENGTH];
         csprng.fill(&mut profile_key);
 
-        let access_key = [0u8; 16]; // This should be derived from profile_key
+        let access_key = [0u8; 16];
+        // This should be derived from profile_key
 
         let mut master_key = [0u8; MASTER_KEY_LENGTH];
         csprng.fill(&mut master_key);
 
-        let capabilities = DeviceCapabilities::default();
+        let info = RegistrationInformation::builder()
+            .aci_registration_id(identity.aci_registration_id)
+            .pni_registration_id(identity.pni_registration_id)
+            .aci_identity_key_pair(identity.aci_key_pair)
+            .pni_identity_key_pair(identity.pni_key_pair)
+            .aci_signed_pk(aci_signed_pk)
+            .pni_signed_pk(pni_signed_pk)
+            .aci_pq_last_resort(aci_pq_last_resort)
+            .pni_pq_last_resort(pni_pq_last_resort)
+            .name(name.to_owned())
+            .password(password.to_owned())
+            .access_key(access_key)
+            .build();
 
-        let account_attributes = AccountAttributes::new(
-            name.into(),
-            true,
-            aci_registration_id,
-            pni_registration_id,
-            capabilities,
-            Box::new(access_key),
-        );
-        let server_api = ServerAPI::new();
-        let req = RegistrationRequest::new(
-            "".into(),
-            "".into(),
-            account_attributes,
-            true, // Require atomic is always true
-            true, // Skip device transfer is always true
-            IdentityKey::new(aci_key_pair.public_key),
-            IdentityKey::new(pni_key_pair.public_key),
-            aci_signed_pk.into(),
-            pni_signed_pk.into(),
-            aci_pq_last_resort.into(),
-            pni_pq_last_resort.into(),
-            None,
-            None,
-        );
+        let mut server_api = ServerAPI::new(None, password.to_owned());
 
         let mut response = server_api
-            .register_client(phone_number, password.to_owned(), req, None)
+            .register_client(
+                phone_number,
+                password.to_owned(),
+                info.to_registration_request(),
+                None,
+            )
             .await
             .map_err(|_| RegistrationError::NoResponse)?;
         match response.status() {
@@ -149,24 +209,17 @@ impl Client {
                 let pni: Pni = body.pni.into();
 
                 let contact_manager = ContactManager::new();
+
+                server_api.username = Some(aci.service_id_string());
                 let storage = DeviceStorage::builder()
+                    .aci_registration_id(identity.aci_registration_id)
                     .aci(aci)
                     .pni(pni)
                     .password(password)
-                    .identity_key_pair(IdentityKeyPair::new(
-                        aci_key_pair.public_key.into(),
-                        aci_key_pair.private_key,
-                    ))
-                    .aci_registration_id(aci_registration_id as u32)
-                    .build();
-                let client = Client::new(
-                    aci,
-                    pni,
-                    contact_manager,
-                    server_api,
-                    key_manager,
-                    storage.await,
-                );
+                    .identity_key_pair(identity.aci_key_pair)
+                    .build()
+                    .await;
+                let client = Client::new(aci, pni, contact_manager, server_api, storage);
                 Ok(client)
             }
             _ => Err(RegistrationError::PhoneNumberTaken),
@@ -176,29 +229,14 @@ impl Client {
     /// Log in to a local account that is already registered with the server.
     pub async fn login() -> Result<Self, LoginError> {
         todo!()
-        /*let storage = DeviceStorage::load().await?;
-
-        let key_pair = KeyPair::new(
-            storage.get_public_key().to_owned(),
-            storage.get_private_key().to_owned(),
-        );
-
-        let proto_store =
-            InMemSignalProtocolStore::new(key_pair.into(), storage.get_aci_registration_id())
-                .expect("Can construct Protocol Store from valid parts.");
-        Ok(Client::new(
-            storage.get_aci().to_owned(),
-            storage.get_pni().to_owned(),
-            ContactManager::new(),
-            ServerAPI::new(),
-            InMemoryKeyManager::new(proto_store),
-            storage,
-        ))*/
     }
 
     /// Send a message to a specific contact using websockets.
     pub async fn send_message(&mut self, message: &str, to: &Contact) -> Result<(), ClientError> {
+        self.server_api.connect().await.unwrap();
+        println!("Connected");
         // Prepare a message to be sent
+
         let content = Content::builder()
             .data_message(
                 DataMessage::builder()
@@ -233,13 +271,24 @@ impl Client {
             messages: msgs
                 .into_iter()
                 .map(|(id, msg)| SignalMessage {
-                    r#type: envelope::Type::Ciphertext.into(),
+                    r#type: match msg {
+                        CiphertextMessage::SignalMessage(_) => envelope::Type::Ciphertext.into(),
+                        CiphertextMessage::SenderKeyMessage(_) => {
+                            envelope::Type::KeyExchange.into()
+                        }
+                        CiphertextMessage::PreKeySignalMessage(_) => {
+                            envelope::Type::PrekeyBundle.into()
+                        }
+                        CiphertextMessage::PlaintextContent(_) => {
+                            envelope::Type::PlaintextContent.into()
+                        }
+                    },
                     destination_device_id: id,
                     destination_registration_id: todo!(),
                     content: BASE64_STANDARD.encode(msg.serialize()),
                 })
                 .collect(),
-            online: true, // Should this be false?
+            online: false, // Should this be true?
             urgent: true,
             timestamp: timestamp
                 .duration_since(UNIX_EPOCH)
@@ -247,11 +296,107 @@ impl Client {
                 .as_secs(),
         };
 
-        todo!("Use websockets to send the messages");
+        // TODO: Fix contact. It should not be a uuid string. it should be a ServiceId.
+        let user_id = ServiceId::parse_from_service_id_string(&to.uuid).unwrap();
+        println!("Handing message off to websocket");
+        self.server_api.send_msg(msgs, user_id).await.unwrap();
+        Ok(())
     }
 
     pub async fn receive_message(&mut self) -> Result<String, ClientError> {
+        ///I get Envelope from Server.
+        let envelope = self
+            .server_api
+            .get_message()
+            .await
+            .ok_or(ClientError::NoPendingMessage)?;
+
+        // Envelope contains a ciphertext message; a so called `encrypted [Content]`
+        let ciphertext_content = envelope.content();
+
+        // The content of the envelope is base64 encoded.
+        let bytes = BASE64_STANDARD
+            .decode(ciphertext_content)
+            .map_err(|decode_err| ClientError::Base64MessageDecodeError(decode_err))?;
+
+        // The evelope contains information about which message type is received.
+        let t_id = envelope.r#type.ok_or(ClientError::NoMessageType)?;
+        let _type = match t_id {
+            2 => Ok(CiphertextMessageType::Whisper),
+            3 => Ok(CiphertextMessageType::PreKey),
+            7 => Ok(CiphertextMessageType::SenderKey),
+            8 => Ok(CiphertextMessageType::Plaintext),
+            _ => Err(ClientError::InvalidMessageType(t_id)),
+        }?;
+
+        // Use the information from envelope to construct a CiphertextMessage.
+        let ciphertext =
+            decode_ciphertext(bytes, _type).map_err(|err| ClientError::DecryptionError(err))?;
+
+        let address = parse_protocol_address(envelope.source_service_id())
+            .map_err(|err| ClientError::ParseProtocolAddress(err))?;
+
+        let mut csprng = OsRng;
+        let store = &mut self.storage.protocol_store;
+
+        // Decrypt the message.
+        let plaintext = message_decrypt(
+            &ciphertext,
+            &address,
+            &mut store.session_store,
+            &mut store.identity_key_store,
+            &mut store.pre_key_store,
+            &mut store.signed_pre_key_store,
+            &mut store.kyber_pre_key_store,
+            &mut csprng,
+        )
+        .await
+        .map_err(|err| ClientError::DecryptionError(err))?;
+
+        // The final message is stored within a DataMessage inside a Content.
+        Ok(Content::decode(plaintext.as_ref())
+            .map_err(|err| ClientError::ProtobufMessageDecodeError(err))?
+            .data_message
+            .ok_or_else(|| ClientError::InvalidContent)?
+            .body()
+            .to_owned())
+    }
+
+    #[cfg(test)]
+    fn test_client(name: &str) -> Self {
         todo!()
+    }
+}
+
+fn get_registration_identity<R>(mut csprng: &mut R) -> RegistrationIdentity
+where
+    R: Rng + CryptoRng,
+{
+    RegistrationIdentity::builder()
+        .aci_registration_id(OsRng.gen_range(1..16383))
+        .pni_registration_id(OsRng.gen_range(1..16383))
+        .aci_key_pair(IdentityKeyPair::generate(&mut csprng))
+        .pni_key_pair(IdentityKeyPair::generate(&mut csprng))
+        .build()
+}
+
+fn decode_ciphertext(
+    bytes: Vec<u8>,
+    _type: CiphertextMessageType,
+) -> Result<CiphertextMessage, SignalProtocolError> {
+    match _type {
+        CiphertextMessageType::Whisper => {
+            Ok(CiphertextMessage::SignalMessage((&*bytes).try_into()?))
+        }
+        CiphertextMessageType::PreKey => Ok(CiphertextMessage::PreKeySignalMessage(
+            (&*bytes).try_into()?,
+        )),
+        CiphertextMessageType::SenderKey => {
+            Ok(CiphertextMessage::SenderKeyMessage((&*bytes).try_into()?))
+        }
+        CiphertextMessageType::Plaintext => {
+            Ok(CiphertextMessage::PlaintextContent((&*bytes).try_into()?))
+        }
     }
 }
 
@@ -275,4 +420,15 @@ where
             new_map.insert(key, value?);
             Ok(new_map)
         })
+}
+
+#[cfg(test)]
+mod client_test {
+    use crate::test;
+    use crate::Client;
+
+    #[tokio::test]
+    async fn test_client_send_and_receive() {
+        let alice = Client::test_client("alice");
+    }
 }

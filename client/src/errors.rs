@@ -1,13 +1,23 @@
 use std::error::Error;
 use std::fmt::{self, Debug, Display};
 
+use common::protocol_address::ParseProtocolAddressError;
 use libsignal_protocol::SignalProtocolError;
 
 pub enum ClientError {
     RegistrationError(RegistrationError),
     LoginError(LoginError),
     EncryptionError(SignalProtocolError),
+    DecryptionError(SignalProtocolError),
     PaddingError,
+    NoMessageType,
+    InvalidMessageType(i32),
+    InvalidContent,
+    ProtobufMessageDecodeError(prost::DecodeError),
+    Base64MessageDecodeError(base64::DecodeError),
+    CiphertextMessageDecodeError,
+    ParseProtocolAddress(ParseProtocolAddressError),
+    NoPendingMessage,
 }
 
 impl Debug for ClientError {
@@ -27,6 +37,18 @@ impl Display for ClientError {
                 Self::EncryptionError(err) => format!("Could not encrypt message: {}", err),
                 Self::PaddingError =>
                     "Could not unpad message: missing termination char 0x80".to_owned(),
+                Self::InvalidMessageType(t) => format!("The message type {} is not supported.", t),
+                Self::ProtobufMessageDecodeError(err) =>
+                    format!("Could not decode protobuf received from server: {}", err),
+                Self::Base64MessageDecodeError(err) =>
+                    format!("Could not decode base64 received from server: {}", err),
+                Self::ParseProtocolAddress(err) => format!("{err}"),
+                Self::CiphertextMessageDecodeError =>
+                    "Could not decode ciphertext message.".to_owned(),
+                Self::InvalidContent => "Content must contain a DataMessage".to_owned(),
+                Self::NoMessageType => "Envelope did not contain a message type.".to_owned(),
+                Self::DecryptionError(err) => format!("Could not encrypt message: {}", err),
+                Self::NoPendingMessage => "No new messages received".to_owned(),
             }
         )
     }

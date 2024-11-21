@@ -11,22 +11,23 @@ mod errors;
 mod key_management;
 mod server;
 mod storage;
+#[cfg(test)]
+mod test;
 mod websockets;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    dotenv::dotenv()?;
+    dotenv::from_filename("client/.env")?;
+    let mut client = Client::register("name", "a".to_string()).await.unwrap();
 
-    let client = Client::login().await;
-    let mut client = match client {
-        Ok(c) => c,
-        Err(_) => Client::register("name", "this is NOT my phone number".to_string()).await?,
-    };
-    println!("Logged in, sending message to Alice");
+    println!("Logged in, sending message to myself");
 
-    let alice = Contact::new(uuid::uuid!("0d76041e-54ce-4cea-a128-ebfa32171c29").to_string());
+    let me = Contact::new(client.aci().service_id_string());
 
-    client.send_message("Hello, World!", &alice).await;
+    client.send_message("Hello, World!", &me).await.unwrap();
+    println!("Sent message");
+
+    println!("{}", client.receive_message().await.unwrap());
 
     Ok(())
 }

@@ -180,6 +180,7 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
     }
 
     pub async fn on_receive(&mut self, proto_message: WebSocketMessage) -> Result<(), String> {
+        println!("on_receive");
         match proto_message.r#type() {
             web_socket_message::Type::Unknown => self.close_reason(1007, "Badly formatted").await,
             web_socket_message::Type::Request => match proto_message.request {
@@ -195,10 +196,10 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
 
     async fn handle_request(&mut self, request_msq: WebSocketRequestMessage) -> Result<(), String> {
         let msq_id = request_msq.id.ok_or("Request id was not present")?;
+        println!("Handling message");
         if !request_msq.path().starts_with("/v1/messages") {
             self.send(Message::Binary(
-                create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
-                    .encode_to_vec(),
+                create_response(msq_id, StatusCode::NOT_FOUND, vec![], None)?.encode_to_vec(),
             ))
             .await
             .map_err(|err| format!("{}", err))?;

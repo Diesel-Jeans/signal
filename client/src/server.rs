@@ -3,16 +3,20 @@ use crate::{
     contact_manager::Contact,
     websockets::{KeepAliveOptions, SendRequestOptions, WebsocketHandler},
 };
+use anyhow::anyhow;
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
 use common::{
-    signalservice::{WebSocketRequestMessage, WebSocketResponseMessage},
+    signalservice::{Envelope, WebSocketRequestMessage, WebSocketResponseMessage},
     web_api::{
         authorization::BasicAuthorizationHeader, AccountAttributes, RegistrationRequest,
-        UploadSignedPreKey,
+        SignalMessages, UploadSignedPreKey,
     },
 };
 use http_client::h1::H1Client;
+use libsignal_core::ServiceId;
+use prost::Message;
+use serde_json::to_vec;
 use std::{
     env,
     fmt::Display,
@@ -24,14 +28,16 @@ use std::{
 use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
 
 const CLIENT_URI: &str = "/client";
-const MSG_URI: &str = "v1/messages";
+const MSG_URI: &str = "/v1/messages";
 const REGISTER_URI: &str = "v1/registration";
 const DEVICE_URI: &str = "/device";
 const BUNDLE_URI: &str = "/bundle";
 
 pub struct ServerAPI {
     client: Client,
-    ws: Option<WebsocketHandler>,
+    websocket: Option<WebsocketHandler>,
+    pub username: Option<String>,
+    password: String,
 }
 
 enum ReqType {
@@ -57,13 +63,7 @@ impl Display for ReqType {
 }
 
 pub trait Server {
-    async fn connect(
-        &mut self,
-        username: &str,
-        password: &str,
-        url: &str,
-        port: &str,
-    ) -> Result<()>;
+    async fn connect(&mut self) -> Result<()>;
     async fn publish_bundle(
         &self,
         uuid: String, //registration_id: u32,
@@ -83,9 +83,8 @@ pub trait Server {
     ) -> Result<Response, Box<dyn std::error::Error>>;
     async fn send_msg(
         &self,
-        msg: String,
-        user_id: String,
-        device_id: u32,
+        msg: SignalMessages,
+        user_id: ServiceId,
     ) -> Result<WebSocketResponseMessage>;
     async fn update_client(
         &self,
@@ -93,29 +92,24 @@ pub trait Server {
     ) -> Result<Response, Box<dyn std::error::Error>>;
     async fn delete_client(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
     async fn delete_device(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
-    fn new() -> Self;
 }
 
 impl Server for ServerAPI {
-    async fn connect(
-        &mut self,
-        username: &str,
-        password: &str,
-        url: &str,
-        port: &str,
-    ) -> Result<()> {
+    async fn connect(&mut self) -> Result<()> {
+        println!("connecting websocket");
         let options = KeepAliveOptions {
             path: Some("/v1/keepalive".to_string()),
         };
         let ws = WebsocketHandler::try_new(
             Some(options),
-            url.into(),
-            port.into(),
-            username.into(),
-            password.into(),
+            self.username
+                .as_mut()
+                .ok_or(anyhow!("Not logged in"))?
+                .to_owned(),
+            self.password.to_owned(),
         )
         .await?;
-        self.ws = Some(ws);
+        self.websocket = Some(ws);
 
         println!("connected!");
         Ok(())
@@ -166,22 +160,18 @@ impl Server for ServerAPI {
 
     async fn send_msg(
         &self,
-        msg: String,
-        user_id: String,
-        device_id: u32,
+        msg: SignalMessages,
+        destination: ServiceId,
     ) -> Result<WebSocketResponseMessage> {
-        let payload = json!({
-            "message": msg
-        })
-        .to_string()
-        .as_bytes()
-        .to_vec();
-        let uri = format!("{}/{}.{}", MSG_URI, user_id, device_id);
+        let payload = to_vec(&msg).unwrap();
+        let uri = format!("{}/{}", MSG_URI, destination.service_id_string());
+        println!("Sending message to: {}", uri);
         let options = SendRequestOptions::new("PUT", uri, payload);
 
-        match &self.ws {
-            Some(ws) => Ok(ws.clone().send_request(options).await?),
-            None => Err(anyhow::anyhow!("No websocket connection is active")),
+        if let Some(ws) = &self.websocket {
+            Ok(ws.clone().send_request(options).await?)
+        } else {
+            anyhow::bail!("No websocket connection is active")
         }
     }
 
@@ -213,10 +203,10 @@ impl Server for ServerAPI {
 
         self.make_request(ReqType::Delete(payload), uri).await
     }
-
-    fn new() -> Self {
-        let cert_bytes =
-            fs::read("../server/cert/rootCA.crt").expect("Could not read certificate.");
+}
+impl ServerAPI {
+    pub fn new(username: Option<String>, password: String) -> Self {
+        let cert_bytes = fs::read("server/cert/rootCA.crt").expect("Could not read certificate.");
         let crt = Certificate::from_pem(&cert_bytes).expect("Could not parse certificate.");
 
         let address =
@@ -233,10 +223,14 @@ impl Server for ServerAPI {
             .set_base_url(Url::parse(&address).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
-        ServerAPI { client, ws: None }
+        Self {
+            client,
+            websocket: None,
+            username,
+            password,
+        }
     }
-}
-impl ServerAPI {
+
     async fn make_request(
         &self,
         req_type: ReqType,
@@ -268,10 +262,10 @@ impl ServerAPI {
         }
     }
 
-    async fn get_incoming_messages(&mut self) -> Result<Vec<WebSocketRequestMessage>> {
-        match &self.ws {
-            Some(ws) => Ok(ws.clone().get_messages().await),
-            None => Err(anyhow::anyhow!("No websocket connection is active")),
-        }
+    pub async fn get_message(&mut self) -> Option<Envelope> {
+        let ws = self.websocket.as_mut()?;
+
+        let ws_message = ws.get_message().await?;
+        Some(Envelope::decode(ws_message.body()).unwrap())
     }
 }

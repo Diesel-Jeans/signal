@@ -6,12 +6,13 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::{fs, u32};
 
-use super::protocol_store::ProtocolStore;
+use super::protocol_store::{self, GenericProtocolStore};
 use super::serializations::{
     aci_serde, identity_key_pair_serde, identity_map_serde, kyber_pre_key_map_serde, pni_serde,
     pre_key_map_serde, private_key_serde, public_key_serde, sender_key_map_serde,
     session_map_serde, signed_pre_key_map_serde,
 };
+use super::storage_trait::Storage;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use base64::Engine;
 use bon::bon;
@@ -33,20 +34,33 @@ use uuid::Uuid;
 /// This implementation stores on disk so that a user can access their data the next time
 /// they login.
 /// TODO: Signal uses a local SQL database to store their data. We should maybe do the same.
-pub struct DeviceProtocolStore {
-    pub identity_key_store: DeviceIdentityKeyStore,
-    pub pre_key_store: DevicePreKeyStore,
-    pub signed_pre_key_store: DeviceSignedPreKeyStore,
-    pub kyber_pre_key_store: DeviceKyberPreKeyStore,
-    pub session_store: DeviceSessionStore,
-    pub sender_key_store: DeviceSenderKeyStore,
-}
+pub type DeviceProtocolStore = GenericProtocolStore<
+    DeviceIdentityKeyStore,
+    DevicePreKeyStore,
+    DeviceSignedPreKeyStore,
+    DeviceKyberPreKeyStore,
+    DeviceSessionStore,
+    DeviceSenderKeyStore,
+>;
 
 impl DeviceProtocolStore {
-    pub async fn new(key_pair: IdentityKeyPair, registration_id: u32, pool: SqlitePool) -> Self {
+    pub async fn new(identity_key_pair: IdentityKeyPair, registration_id: u32) -> Self {
+        let db_url =
+            std::env::var("DATABASE_URL").expect("Expected to read database url from .env file");
+
+        println!("{db_url}");
+        let pool = SqlitePoolOptions::new()
+            .connect(&db_url)
+            .await
+            .expect("Could not connect to database");
+        sqlx::migrate!("client_db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+
         Self {
             identity_key_store: DeviceIdentityKeyStore::new(
-                key_pair,
+                identity_key_pair,
                 registration_id,
                 pool.clone(),
             )
@@ -57,65 +71,6 @@ impl DeviceProtocolStore {
             session_store: DeviceSessionStore::new(pool.clone()),
             sender_key_store: DeviceSenderKeyStore::new(pool.clone()),
         }
-    }
-}
-
-impl
-    ProtocolStore<
-        DeviceIdentityKeyStore,
-        DevicePreKeyStore,
-        DeviceSignedPreKeyStore,
-        DeviceKyberPreKeyStore,
-        DeviceSessionStore,
-        DeviceSenderKeyStore,
-    > for DeviceProtocolStore
-{
-    fn identity_key_store(&self) -> &DeviceIdentityKeyStore {
-        &self.identity_key_store
-    }
-
-    fn identity_key_store_mut(&mut self) -> &mut DeviceIdentityKeyStore {
-        &mut self.identity_key_store
-    }
-
-    fn pre_key_store(&self) -> &DevicePreKeyStore {
-        &self.pre_key_store
-    }
-
-    fn pre_key_store_mut(&mut self) -> &mut DevicePreKeyStore {
-        &mut self.pre_key_store
-    }
-
-    fn signed_pre_key_store(&self) -> &DeviceSignedPreKeyStore {
-        &self.signed_pre_key_store
-    }
-
-    fn signed_pre_key_store_mut(&mut self) -> &mut DeviceSignedPreKeyStore {
-        &mut self.signed_pre_key_store
-    }
-
-    fn kyber_pre_key_store(&self) -> &DeviceKyberPreKeyStore {
-        &self.kyber_pre_key_store
-    }
-
-    fn kyber_pre_key_store_mut(&mut self) -> &mut DeviceKyberPreKeyStore {
-        &mut self.kyber_pre_key_store
-    }
-
-    fn session_store(&self) -> &DeviceSessionStore {
-        &self.session_store
-    }
-
-    fn session_store_mut(&mut self) -> &mut DeviceSessionStore {
-        &mut self.session_store
-    }
-
-    fn sender_key_store(&self) -> &DeviceSenderKeyStore {
-        &self.sender_key_store
-    }
-
-    fn sender_key_store_mut(&mut self) -> &mut DeviceSenderKeyStore {
-        &mut self.sender_key_store
     }
 }
 
@@ -619,54 +574,6 @@ pub struct DeviceStorage {
 
 #[bon]
 impl DeviceStorage {
-    pub async fn load() -> Result<Self, LoginError> {
-        /*fs::read("device_info.json")
-        .map_err(|_| LoginError::NoAccountInformation)
-        .map(|bytes| serde_json::from_slice(&bytes).map_err(|_| LoginError::LoadInfoError))?*/
-        let db_url =
-            std::env::var("DATABASE_URL").expect("Expected to read database url from .env file");
-        let pool = SqlitePoolOptions::new()
-            .connect(&db_url)
-            .await
-            .expect("Could not connect to database");
-
-        sqlx::migrate!("client_db/migrations")
-            .run(&pool)
-            .await
-            .unwrap();
-
-        match sqlx::query!(
-            r#"
-            SELECT
-                aci, pni, password, identity_key_pair, aci_registration_id
-            FROM
-                DeviceStorage
-            "#
-        )
-        .fetch_one(&pool)
-        .await
-        {
-            Ok(row) => Ok(Self {
-                aci: Aci::parse_from_service_id_string(&row.aci).unwrap(),
-                pni: Pni::parse_from_service_id_string(&row.pni).unwrap(),
-                password: row.password,
-                protocol_store: DeviceProtocolStore::new(
-                    BASE64_STANDARD
-                        .decode(row.identity_key_pair)
-                        .unwrap()
-                        .as_slice()
-                        .try_into()
-                        .unwrap(),
-                    row.aci_registration_id.try_into().unwrap(),
-                    pool.clone(),
-                )
-                .await,
-                pool,
-            }),
-            Err(_) => Err(LoginError::NoAccountInformation),
-        }
-    }
-
     #[builder]
     pub async fn new(
         aci: Aci,
@@ -690,49 +597,49 @@ impl DeviceStorage {
             aci,
             pni,
             password,
-            protocol_store: DeviceProtocolStore::new(
-                identity_key_pair,
-                aci_registration_id,
-                pool.clone(),
-            )
-            .await,
+            protocol_store: DeviceProtocolStore::new(identity_key_pair, aci_registration_id).await,
             pool,
         };
-        storage.write();
         storage
     }
-    async fn write(&self) {
-        let aci = self.aci.service_id_string();
-        let pni = self.pni.service_id_string();
-        let identity_key_pair = BASE64_STANDARD.encode(
-            self.protocol_store
-                .identity_key_store()
-                .get_identity_key_pair()
-                .await
-                .unwrap()
-                .serialize(),
-        );
-        let req_id = self
-            .protocol_store
-            .identity_key_store()
-            .get_local_registration_id()
-            .await
-            .unwrap();
+}
 
-        sqlx::query!(
-            r#"
-            INSERT INTO DeviceStorage (aci, pni, password, identity_key_pair, aci_registration_id)
-            VALUES (?, ?, ?, ?, ?)
-            "#,
-            aci,
-            pni,
-            self.password,
-            identity_key_pair,
-            req_id,
-        )
-        .execute(&self.pool)
-        .await
-        .unwrap();
+impl
+    Storage<
+        DeviceIdentityKeyStore,
+        DevicePreKeyStore,
+        DeviceSignedPreKeyStore,
+        DeviceKyberPreKeyStore,
+        DeviceSessionStore,
+        DeviceSenderKeyStore,
+    > for DeviceStorage
+{
+    fn set_password(&mut self, new_password: &str) {
+        self.password = new_password.to_owned();
+    }
+
+    fn get_password(&self) -> &str {
+        &self.password
+    }
+
+    fn set_aci(&mut self, new_aci: &Aci) {
+        self.aci = new_aci.to_owned();
+    }
+
+    fn get_aci(&self) -> &Aci {
+        &self.aci
+    }
+
+    fn set_pni(&mut self, new_pni: &Pni) {
+        self.pni = new_pni.to_owned();
+    }
+
+    fn get_pni(&self) -> &Pni {
+        &self.pni
+    }
+
+    fn protocol_store(&mut self) -> &mut DeviceProtocolStore {
+        &mut self.protocol_store
     }
 }
 

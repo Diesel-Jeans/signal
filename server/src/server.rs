@@ -450,7 +450,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/devices/:device_id", delete(delete_device_endpoint))
         .route("/v1/websocket", any(create_websocket_endpoint))
         .with_state(state)
-        .layer(
+        /*.layer(
             ServiceBuilder::new()
                 .layer(
                     TraceLayer::new_for_http()
@@ -459,7 +459,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                                                                                             // .on_body_chunk(trace::DefaultOnBodyChunk::new()),
                 )
                 .layer(TraceLayer::new_for_grpc()),
-        )
+        )*/
         .layer(cors);
 
     let address = env::var("SERVER_ADDRESS")?;

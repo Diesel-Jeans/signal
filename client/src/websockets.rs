@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use base64::{engine::general_purpose, Engine as _};
 use common::signalservice::{WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage};
+use dotenv::{dotenv, var};
 use futures_util::{SinkExt, StreamExt};
 use native_tls::{Certificate, TlsConnector as NativeTlsConnector};
 use prost::Message as ProstMessage;
@@ -53,14 +54,8 @@ struct StreamHandler {
 }
 
 impl StreamHandler {
-    async fn try_new(
-        address: String,
-        port: String,
-        username: String,
-        password: String,
-    ) -> Result<StreamHandler> {
-        let stream =
-            open_ws_connection_to_server_as_client(address, port, username, password).await?;
+    async fn try_new(username: String, password: String) -> Result<StreamHandler> {
+        let stream = open_ws_connection_to_server_as_client(username, password).await?;
         Ok(StreamHandler { stream })
     }
 }
@@ -81,14 +76,14 @@ pub(crate) struct WebsocketHandler {
 impl WebsocketHandler {
     pub async fn try_new(
         keepalive_options: Option<KeepAliveOptions>,
-        address: String,
-        port: String,
         username: String,
         password: String,
     ) -> Result<WebsocketHandler> {
+        println!("creating socket");
         let socket = Arc::new(Mutex::new(
-            StreamHandler::try_new(address, port, username, password).await?,
+            StreamHandler::try_new(username, password).await?,
         ));
+        println!("Yes");
         let res: Arc<Mutex<HashMap<u64, WebSocketResponseMessage>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let out: Arc<Mutex<HashMap<u64, AbortHandle>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -143,6 +138,7 @@ impl WebsocketHandler {
         //This is a fragile house of cards so don't change the spawn structure
         let hand = thread::spawn(move || {
             handle.spawn(async move {
+                println!("Locking Sock");
                 while let Some(Ok(msg)) = sock.lock().await.stream.next().await {
                     match msg {
                         Message::Text(msg) => {
@@ -236,10 +232,12 @@ impl WebsocketHandler {
         };
         let msg = Message::Binary(ws_msg.encode_to_vec());
 
+        println!("Sending...");
         //Send the message over ws
         self.socket.lock().await.stream.send(msg).await?;
 
-        let self_clone = self.clone();
+        println!("Sent message");
+        let mut self_clone = self.clone();
 
         let promise = spawn(async move {
             if self_clone.has_keepalive {
@@ -278,7 +276,7 @@ impl WebsocketHandler {
             if (200..=299).contains(&status) {
                 Ok(incoming.clone())
             } else {
-                bail!("Got a bad response")
+                anyhow::bail!("Got a bad response: {:?}", incoming)
             }
         } else {
             bail!("Incoming response missing")
@@ -293,6 +291,10 @@ impl WebsocketHandler {
         }
 
         msg_vec
+    }
+
+    pub async fn get_message(&self) -> Option<WebSocketRequestMessage> {
+        self.ws_request_channel.lock().await.try_recv().ok()
     }
 
     pub async fn close(&mut self, code: u16, reason: String) -> Result<()> {
@@ -431,8 +433,12 @@ impl KeepaliveHandler {
         let handle = spawn(async move {
             loop {
                 let now = Instant::now();
-                while now.elapsed().as_millis() <= timeout.into() {
-                    yield_now().await;
+                loop {
+                    if now.elapsed().as_millis() > timeout.into() {
+                        break;
+                    } else {
+                        yield_now().await;
+                    }
                 }
                 match handler.lock().await.keepalive_send().await {
                     Ok(true) => (),
@@ -454,39 +460,43 @@ impl KeepaliveHandler {
 }
 
 pub(crate) async fn open_ws_connection_to_server_as_client(
-    address: String,
-    port: String,
     username: String,
     password: String,
 ) -> Result<WebSocketStream<TlsStream<TcpStream>>> {
     let auth_kv_pair = format!("{}:{}", username, password);
     let auth_value = general_purpose::STANDARD.encode(&auth_kv_pair);
 
-    let ws_url = format!("wss://{}@{}:{}/v1/websocket", auth_kv_pair, address, port);
-    let mut ws_req = ws_url.clone().into_client_request()?;
+    let address = var("SERVER_URL")
+        .expect("SERVER_URL variable was not set in .env")
+        .strip_prefix("https://")
+        .unwrap()
+        .to_owned();
+    let ws_url = format!("wss://{}@{}/v1/websocket", auth_kv_pair, address);
+    let mut ws_req = ws_url.clone().into_client_request().unwrap();
     let mhead = ws_req.headers_mut();
     mhead.insert(
         http::header::AUTHORIZATION,
-        format!("Basic {}", auth_value).parse()?,
+        format!("Basic {}", auth_value).parse().unwrap(),
     );
     //No idea what this does, but Harder's python script sets this header field automatically
     mhead.insert(
         http::header::SEC_WEBSOCKET_EXTENSIONS,
         "permessage-deflate; client_max_window_bits"
             .to_string()
-            .parse()?,
+            .parse()
+            .unwrap(),
     );
 
     let mut tls_connector = NativeTlsConnector::builder();
-    for cert in get_certs()? {
+    for cert in get_certs().unwrap() {
         tls_connector.add_root_certificate(cert);
     }
 
-    let connector = tls_connector.build()?;
+    let connector = tls_connector.build().unwrap();
 
     // Create a TcpSocket, enable keepalive, and set intervals - all related to issue #56
     let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
-    socket.set_keepalive(true)?;
+    socket.set_keepalive(true).unwrap();
     socket.set_tcp_keepalive(
         &TcpKeepalive::new()
             .with_time(Duration::from_secs(10))
@@ -494,21 +504,24 @@ pub(crate) async fn open_ws_connection_to_server_as_client(
     )?;
 
     // Resolve address and convert to SockAddr
-    let socket_address = format!("{}:{}", address.as_str(), port)
-        .to_socket_addrs()?
+    let socket_address = address
+        .to_socket_addrs()
+        .unwrap()
         .next()
-        .ok_or_else(|| anyhow::anyhow!("Failed to resolve address"))?;
+        .ok_or_else(|| anyhow::anyhow!("Failed to resolve address"))
+        .unwrap();
     let sock_addr = socket2::SockAddr::from(socket_address);
 
     // Connect and convert to Tokio TcpStream.parse()?
-    socket.connect(&sock_addr)?;
-    let tcp_stream = TcpStream::from_std(socket.into())?;
+    socket.connect(&sock_addr).unwrap();
+    let tcp_stream = TcpStream::from_std(socket.into()).unwrap();
     let stream_connector = TlsConnector::from(connector);
 
     // Apply TLS wrapping
     let tls_stream = stream_connector
-        .connect(address.as_str(), tcp_stream)
-        .await?;
+        .connect(address.strip_suffix(":4444").unwrap(), tcp_stream)
+        .await
+        .unwrap();
 
     //Config to ensure the correct max frame size is enforced, related to issue #56
     let conf = WebSocketConfig {
@@ -516,14 +529,17 @@ pub(crate) async fn open_ws_connection_to_server_as_client(
         ..WebSocketConfig::default()
     };
 
-    let (ws_stream, _) = client_async_with_config(ws_req, tls_stream, Some(conf)).await?;
+    println!("{:?}", ws_req);
+    let (ws_stream, _) = client_async_with_config(ws_req, tls_stream, Some(conf))
+        .await
+        .unwrap();
 
     Ok(ws_stream)
 }
 
 //A bit overengineered for a single certificate, but it should be kept in case more certificates are added
 fn get_certs() -> Result<Vec<Certificate>> {
-    let path = "../server/cert/rootCA.crt";
+    let path = "server/cert/rootCA.crt";
     Ok(vec![Certificate::from_pem(&fs::read(path)?)?])
 }
 
@@ -556,8 +572,6 @@ mod websocket_tests {
             Some(KeepAliveOptions {
                 path: Some("/v1/keepalive".to_string()),
             }),
-            env::var("SERVER_ADDRESS").unwrap(),
-            env::var("HTTPS_PORT").unwrap(),
             env::var("TEST_USERNAME").unwrap(),
             env::var("TEST_PASSWORD").unwrap(),
         )
