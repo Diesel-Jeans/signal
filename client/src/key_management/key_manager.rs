@@ -3,7 +3,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use axum::async_trait;
 use common::pre_key::PreKeyType;
 use libsignal_protocol::{
     kem, GenericSignedPreKey, IdentityKeyStore, KeyPair, KyberPreKeyRecord, KyberPreKeyStore,
@@ -12,10 +11,7 @@ use libsignal_protocol::{
 };
 use rand::{CryptoRng, Rng};
 
-use crate::storage::{
-    protocol_store::{self, GenericProtocolStore},
-    serializations::signed_pre_key_map_serde,
-};
+use crate::storage::protocol_store::{GenericProtocolStore};
 
 fn time_now() -> Timestamp {
     Timestamp::from_epoch_millis(
@@ -79,24 +75,20 @@ impl<'a> KeyManager<'a> {
         let signature = self
             .identity_key_store
             .get_identity_key_pair()
-            .await
-            .unwrap()
+            .await?
             .private_key()
-            .calculate_signature(&signed_pre_key_pair.public_key.serialize(), csprng)
-            .unwrap();
+            .calculate_signature(&signed_pre_key_pair.public_key.serialize(), csprng)?;
         let id = self.get_new_key_id(&PreKeyType::Signed).into();
         let record = SignedPreKeyRecord::new(id, time_now(), &signed_pre_key_pair, &signature);
 
         self.signed_pre_key_store
             .save_signed_pre_key(id, &record)
-            .await
-            .unwrap();
+            .await?;
 
         Ok(record)
     }
-    pub async fn generate_kyber_prekey<R: Rng + CryptoRng>(
+    pub async fn generate_kyber_prekey(
         &mut self,
-        csprng: &mut R,
     ) -> Result<KyberPreKeyRecord, SignalProtocolError> {
         let id = self.get_new_key_id(&PreKeyType::Kyber).into();
         let record = KyberPreKeyRecord::generate(
@@ -108,7 +100,9 @@ impl<'a> KeyManager<'a> {
                 .private_key(),
         )?;
 
-        self.kyber_pre_key_store.save_kyber_pre_key(id, &record);
+        self.kyber_pre_key_store
+            .save_kyber_pre_key(id, &record)
+            .await?;
         Ok(record)
     }
     fn get_new_key_id(&mut self, key_type: &PreKeyType) -> u32 {

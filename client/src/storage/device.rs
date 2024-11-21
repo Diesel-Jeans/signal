@@ -1,17 +1,8 @@
-use crate::errors::LoginError;
 use anyhow::Result;
-use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::{fs, u32};
+use std::u32;
 
-use super::protocol_store::{self, GenericProtocolStore};
-use super::serializations::{
-    aci_serde, identity_key_pair_serde, identity_map_serde, kyber_pre_key_map_serde, pni_serde,
-    pre_key_map_serde, private_key_serde, public_key_serde, sender_key_map_serde,
-    session_map_serde, signed_pre_key_map_serde,
-};
+use super::protocol_store::{GenericProtocolStore};
 use super::storage_trait::Storage;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use base64::Engine;
@@ -21,7 +12,7 @@ use libsignal_core::{Aci, Pni, ProtocolAddress};
 use libsignal_protocol::{
     Direction, GenericSignedPreKey as _, IdentityKey, IdentityKeyPair, IdentityKeyStore,
     KyberPreKeyId, KyberPreKeyRecord, KyberPreKeyStore, PreKeyId, PreKeyRecord, PreKeyStore,
-    PrivateKey, PublicKey, SenderKeyRecord, SenderKeyStore, SessionRecord, SessionStore,
+    PrivateKey, SenderKeyRecord, SenderKeyStore, SessionRecord, SessionStore,
     SignalProtocolError, SignedPreKeyId, SignedPreKeyRecord, SignedPreKeyStore,
 };
 use serde;
@@ -466,7 +457,7 @@ impl SessionStore for DeviceSessionStore {
         .await
         {
             Ok(row) => SessionRecord::deserialize(row.session_record.as_bytes())
-                .map(|res| Some(res))
+                .map(Some)
                 .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err))),
             Err(err) => Ok(None),
         }
@@ -557,7 +548,7 @@ impl SenderKeyStore for DeviceSenderKeyStore {
         .await
         {
             Ok(row) => SenderKeyRecord::deserialize(row.sender_key_record.as_bytes())
-                .map(|res| Some(res))
+                .map(Some)
                 .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err))),
             Err(err) => Ok(None),
         }
@@ -593,14 +584,14 @@ impl DeviceStorage {
             .await
             .unwrap();
 
-        let storage = Self {
+        
+        Self {
             aci,
             pni,
             password,
             protocol_store: DeviceProtocolStore::new(identity_key_pair, aci_registration_id).await,
             pool,
-        };
-        storage
+        }
     }
 }
 
@@ -645,18 +636,18 @@ impl
 
 #[cfg(test)]
 mod device_protocol_test {
-    use async_once_cell::Lazy;
-    use base64::{prelude::BASE64_STANDARD, Engine as _};
+    
+    
     use libsignal_core::{Aci, ProtocolAddress};
     use libsignal_protocol::{
-        Direction, IdentityKey, IdentityKeyPair, IdentityKeyStore, KeyPair, PreKeyId, PreKeyRecord,
-        PreKeyStore, PrivateKey, PublicKey,
+        Direction, IdentityKeyPair, IdentityKeyStore, KeyPair, PreKeyId, PreKeyRecord,
+        PreKeyStore,
     };
     use rand::rngs::OsRng;
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
     use uuid::Uuid;
 
-    use crate::storage::device::{DeviceIdentityKeyStore, DevicePreKeyStore, DeviceProtocolStore};
+    use crate::storage::device::{DeviceIdentityKeyStore, DevicePreKeyStore};
 
     async fn connect() -> SqlitePool {
         dotenv::dotenv().unwrap();
@@ -693,12 +684,11 @@ mod device_protocol_test {
         );
 
         // Test that a new identity have been added
-        assert_eq!(
+        assert!(
             device_identity_key_store
                 .save_identity(&address, other_key_pair.identity_key())
                 .await
-                .unwrap(),
-            true
+                .unwrap()
         );
 
         assert_eq!(
@@ -711,12 +701,11 @@ mod device_protocol_test {
         );
 
         // Test we did not overwrite our identity
-        assert_eq!(
-            device_identity_key_store
+        assert!(
+            !device_identity_key_store
                 .save_identity(&address, other_key_pair.identity_key())
                 .await
-                .unwrap(),
-            false
+                .unwrap()
         );
 
         assert_eq!(
@@ -729,12 +718,11 @@ mod device_protocol_test {
         );
 
         // Test we overwrite our identity
-        assert_eq!(
-            device_identity_key_store
+        assert!(
+            !device_identity_key_store
                 .save_identity(&address, new_other_key_pair.identity_key())
                 .await
-                .unwrap(),
-            false
+                .unwrap()
         );
 
         assert_eq!(
@@ -759,12 +747,11 @@ mod device_protocol_test {
         let random_key_pair = IdentityKeyPair::generate(&mut OsRng);
 
         // First use
-        assert_eq!(
+        assert!(
             device_identity_key_store
                 .is_trusted_identity(&address, other_key_pair.identity_key(), Direction::Sending)
                 .await
-                .unwrap(),
-            true
+                .unwrap()
         );
 
         // Added identity
@@ -773,12 +760,11 @@ mod device_protocol_test {
             .await
             .unwrap();
 
-        assert_eq!(
+        assert!(
             device_identity_key_store
                 .is_trusted_identity(&address, other_key_pair.identity_key(), Direction::Sending)
                 .await
-                .unwrap(),
-            true
+                .unwrap()
         );
 
         // Not trusted
@@ -787,12 +773,11 @@ mod device_protocol_test {
             .await
             .unwrap();
 
-        assert_eq!(
-            device_identity_key_store
+        assert!(
+            !device_identity_key_store
                 .is_trusted_identity(&address, random_key_pair.identity_key(), Direction::Sending)
                 .await
-                .unwrap(),
-            false
+                .unwrap()
         );
     }
 

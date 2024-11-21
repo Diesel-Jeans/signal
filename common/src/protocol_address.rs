@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{error::Error, fmt::Display, num::ParseIntError};
 
-use libsignal_protocol::{ProtocolAddress, SignalProtocolError};
+use libsignal_protocol::ProtocolAddress;
 
 #[derive(Debug)]
 pub enum ParseProtocolAddressError {

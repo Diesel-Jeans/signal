@@ -19,7 +19,7 @@ use axum::{
     debug_handler,
     extract::{
         connect_info::ConnectInfo,
-        ws::{WebSocket, WebSocketUpgrade},
+        ws::WebSocketUpgrade,
         Host, Path, State,
     },
     handler::HandlerWithoutStateExt,
@@ -47,12 +47,7 @@ use std::{
     str::FromStr,
     time::{Duration, SystemTime},
 };
-use tower::ServiceBuilder;
-use tower_http::{
-    cors::CorsLayer,
-    trace::{self, TraceLayer},
-};
-use tracing::Level;
+use tower_http::cors::CorsLayer;
 
 pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
     state: &SignalServerState<T, U>,
@@ -388,7 +383,7 @@ async fn create_websocket_endpoint(
         let mut wmgr = state.websocket_manager.clone();
         async move {
             let wrap = SignalWebSocket::new(socket);
-            let (mut sender, mut receiver) = wrap.split();
+            let (sender, receiver) = wrap.split();
             let ws = WebSocketConnection::new(
                 UserIdentity::AuthenticatedDevice(authenticated_device.into()),
                 addr,

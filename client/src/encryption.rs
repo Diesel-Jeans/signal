@@ -68,11 +68,11 @@ fn get_padded_message_length(length: usize) -> usize {
     let message_length_with_terminator = length + 1;
     let mut message_part_count = message_length_with_terminator.div_euclid(160);
 
-    if (message_length_with_terminator % 160 != 0) {
+    if message_length_with_terminator % 160 != 0 {
         message_part_count += 1;
     }
 
-    return message_part_count * 160;
+    message_part_count * 160
 }
 
 pub fn pad_message(message: &[u8]) -> Vec<u8> {
@@ -83,7 +83,7 @@ pub fn pad_message(message: &[u8]) -> Vec<u8> {
     }
     plaintext[message.len()] = 0x80;
 
-    return plaintext;
+    plaintext
 }
 
 pub fn unpad_message(message: &[u8]) -> Result<Vec<u8>, PaddingError> {

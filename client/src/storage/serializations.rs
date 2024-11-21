@@ -120,14 +120,14 @@ pub(crate) mod identity_key_pair_serde {
         use serde::de::Error;
         let bytes = Vec::<u8>::deserialize(deserializer)?;
 
-        Ok(IdentityKeyPair::try_from(bytes.as_ref())
-            .map_err(|_| Error::custom("Failed to decode IdentityKeyPair"))?)
+        IdentityKeyPair::try_from(bytes.as_ref())
+            .map_err(|_| Error::custom("Failed to decode IdentityKeyPair"))
     }
 }
 
 pub(crate) mod identity_map_serde {
     use core::fmt;
-    use std::{collections::HashMap, num::ParseIntError};
+    use std::collections::HashMap;
 
     use common::protocol_address::parse_protocol_address;
     use libsignal_core::ProtocolAddress;
@@ -194,7 +194,7 @@ pub(crate) mod identity_map_serde {
             }
         }
 
-        Ok(deserializer.deserialize_map(MapVisitor)?)
+        deserializer.deserialize_map(MapVisitor)
     }
 }
 
@@ -225,7 +225,7 @@ pub(crate) mod pre_key_map_serde {
             map.serialize_entry(
                 &k,
                 &v.serialize()
-                    .map_err(|err| Error::custom("Could not serialize PreKeyRecord: {err}"))?,
+                    .map_err(|err| Error::custom(format!("Could not serialize PreKeyRecord: {err}")))?,
             )?;
         }
         map.end()
@@ -265,7 +265,7 @@ pub(crate) mod pre_key_map_serde {
             }
         }
 
-        Ok(deserializer.deserialize_map(MapVisitor)?)
+        deserializer.deserialize_map(MapVisitor)
     }
 }
 
@@ -296,7 +296,7 @@ pub(crate) mod signed_pre_key_map_serde {
             map.serialize_entry(
                 &k,
                 &v.serialize().map_err(|err| {
-                    Error::custom("Could not serialize SignedPreKeyRecord: {err}")
+                    Error::custom(format!("Could not serialize SignedPreKeyRecord: {err}"))
                 })?,
             )?;
         }
@@ -341,7 +341,7 @@ pub(crate) mod signed_pre_key_map_serde {
             }
         }
 
-        Ok(deserializer.deserialize_map(MapVisitor)?)
+        deserializer.deserialize_map(MapVisitor)
     }
 }
 
@@ -406,7 +406,7 @@ pub(crate) mod kyber_pre_key_map_serde {
                     map.insert(
                         key.into(),
                         KyberPreKeyRecord::deserialize(value.as_ref()).map_err(|err| {
-                            Error::custom(format!("Could not derserialize KyberPreKeyRecord"))
+                            Error::custom("Could not derserialize KyberPreKeyRecord".to_string())
                         })?,
                     );
                 }
@@ -415,13 +415,13 @@ pub(crate) mod kyber_pre_key_map_serde {
             }
         }
 
-        Ok(deserializer.deserialize_map(MapVisitor)?)
+        deserializer.deserialize_map(MapVisitor)
     }
 }
 
 pub(crate) mod session_map_serde {
     use core::fmt;
-    use std::{collections::HashMap, num::ParseIntError, u32};
+    use std::collections::HashMap;
 
     use common::protocol_address::parse_protocol_address;
     use libsignal_core::ProtocolAddress;
@@ -493,13 +493,13 @@ pub(crate) mod session_map_serde {
             }
         }
 
-        Ok(deserializer.deserialize_map(MapVisitor)?)
+        deserializer.deserialize_map(MapVisitor)
     }
 }
 
 pub(crate) mod sender_key_map_serde {
     use core::fmt;
-    use std::{borrow::Cow, collections::HashMap, num::ParseIntError, u32};
+    use std::{borrow::Cow, collections::HashMap};
 
     use common::protocol_address::parse_protocol_address;
     use libsignal_core::ProtocolAddress;
@@ -578,6 +578,6 @@ pub(crate) mod sender_key_map_serde {
             }
         }
 
-        Ok(deserializer.deserialize_map(MapVisitor)?)
+        deserializer.deserialize_map(MapVisitor)
     }
 }

@@ -1,39 +1,32 @@
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use bon::{vec, Builder};
 use common::protocol_address::parse_protocol_address;
-use common::signalservice::data_message::contact;
-use common::signalservice::{envelope, Content, DataMessage, Envelope};
-use common::{
-    signalservice::WebSocketResponseMessage,
-    web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse},
+use common::signalservice::{envelope, Content, DataMessage};
+use common::web_api::{
+    AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse,
 };
 use core::str;
 use libsignal_core::{Aci, Pni, ServiceId};
 use prost::Message;
 use rand::CryptoRng;
-use serde::de::value;
 use std::collections::HashMap;
-use std::convert::identity;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use common::web_api::{SignalMessage, SignalMessages};
 use libsignal_protocol::{
-    message_decrypt, CiphertextMessage, CiphertextMessageType, IdentityKey, IdentityKeyPair,
-    IdentityKeyStore, InMemSignalProtocolStore, KeyPair, KyberPreKeyRecord, KyberPreKeyStore,
-    PreKeyStore, SenderKeyStore, SessionStore, SignalMessage as SignalSignalMessage,
-    SignalProtocolError, SignedPreKeyRecord, SignedPreKeyStore,
+    message_decrypt, CiphertextMessage, CiphertextMessageType, IdentityKeyPair, KyberPreKeyRecord,
+    SignalProtocolError, SignedPreKeyRecord,
 };
 use rand::{rngs::OsRng, Rng};
 use surf::StatusCode;
 
-use crate::contact_manager::{Contact, ContactManager, Device};
-use crate::encryption::{decrypt, encrypt, pad_message};
+use crate::contact_manager::{Contact, ContactManager};
+use crate::encryption::{encrypt, pad_message};
 use crate::errors::{ClientError, LoginError, RegistrationError};
 use crate::key_management::key_manager::KeyManager;
 use crate::server::{Server, ServerAPI};
 use crate::storage::device::{DeviceProtocolStore, DeviceStorage};
-use crate::storage::{self, protocol_store};
-use crate::storage::{protocol_store::GenericProtocolStore, storage_trait::Storage};
+use crate::storage::storage_trait::Storage;
 
 pub struct Client {
     aci: Aci,
@@ -148,14 +141,10 @@ impl Client {
             .await
             .unwrap();
 
-        let aci_pq_last_resort: KyberPreKeyRecord = key_manager
-            .generate_kyber_prekey(&mut csprng)
-            .await
-            .unwrap();
-        let pni_pq_last_resort: KyberPreKeyRecord = key_manager
-            .generate_kyber_prekey(&mut csprng)
-            .await
-            .unwrap();
+        let aci_pq_last_resort: KyberPreKeyRecord =
+            key_manager.generate_kyber_prekey().await.unwrap();
+        let pni_pq_last_resort: KyberPreKeyRecord =
+            key_manager.generate_kyber_prekey().await.unwrap();
 
         let mut password = [0u8; PASSWORD_LENGTH];
         csprng.fill(&mut password);
@@ -185,7 +174,7 @@ impl Client {
             .access_key(access_key)
             .build();
 
-        let mut server_api = ServerAPI::new(None, password.to_owned());
+        let server_api = ServerAPI::new(None, password.to_owned());
 
         let mut response = server_api
             .register_client(
@@ -262,7 +251,7 @@ impl Client {
             &mut protocol_store.session_store,
             &mut protocol_store.identity_key_store,
             to,
-            pad_message(message.as_bytes()).as_ref(),
+            pad_message(content.encode_to_vec().as_ref()).as_ref(),
             timestamp,
         )
         .await;
@@ -308,7 +297,7 @@ impl Client {
     }
 
     pub async fn receive_message(&mut self) -> Result<String, ClientError> {
-        ///I get Envelope from Server.
+        // I get Envelope from Server.
         let envelope = self
             .server_api
             .get_message()
@@ -321,7 +310,7 @@ impl Client {
         // The content of the envelope is base64 encoded.
         let bytes = BASE64_STANDARD
             .decode(ciphertext_content)
-            .map_err(|decode_err| ClientError::Base64MessageDecodeError(decode_err))?;
+            .map_err(ClientError::Base64MessageDecodeError)?;
 
         // The evelope contains information about which message type is received.
         let t_id = envelope.r#type.ok_or(ClientError::NoMessageType)?;
@@ -334,11 +323,10 @@ impl Client {
         }?;
 
         // Use the information from envelope to construct a CiphertextMessage.
-        let ciphertext =
-            decode_ciphertext(bytes, _type).map_err(|err| ClientError::DecryptionError(err))?;
+        let ciphertext = decode_ciphertext(bytes, _type).map_err(ClientError::DecryptionError)?;
 
         let address = parse_protocol_address(envelope.source_service_id())
-            .map_err(|err| ClientError::ParseProtocolAddress(err))?;
+            .map_err(ClientError::ParseProtocolAddress)?;
 
         let mut csprng = OsRng;
         let store = &mut self.storage.protocol_store;
@@ -355,11 +343,11 @@ impl Client {
             &mut csprng,
         )
         .await
-        .map_err(|err| ClientError::DecryptionError(err))?;
+        .map_err(ClientError::DecryptionError)?;
 
         // The final message is stored within a DataMessage inside a Content.
         Ok(Content::decode(plaintext.as_ref())
-            .map_err(|err| ClientError::ProtobufMessageDecodeError(err))?
+            .map_err(ClientError::ProtobufMessageDecodeError)?
             .data_message
             .ok_or_else(|| ClientError::InvalidContent)?
             .body()
@@ -367,7 +355,7 @@ impl Client {
     }
 
     #[cfg(test)]
-    fn test_client(name: &str) -> Self {
+    fn test_client(_name: &str) -> Self {
         todo!()
     }
 }
@@ -411,7 +399,7 @@ fn decode_ciphertext(
 fn handle_encryption_failed(
     msgs: HashMap<u32, Result<CiphertextMessage, SignalProtocolError>>,
 ) -> Result<HashMap<u32, CiphertextMessage>, ClientError> {
-    transform_hashmap_result(msgs).map_err(|err| ClientError::EncryptionError(err))
+    transform_hashmap_result(msgs).map_err(ClientError::EncryptionError)
 }
 
 fn transform_hashmap_result<K, T, E>(map: HashMap<K, Result<T, E>>) -> Result<HashMap<K, T>, E>
@@ -428,11 +416,11 @@ where
 
 #[cfg(test)]
 mod client_test {
-    use crate::test;
+
     use crate::Client;
 
     #[tokio::test]
     async fn test_client_send_and_receive() {
-        let alice = Client::test_client("alice");
+        let _alice = Client::test_client("alice");
     }
 }

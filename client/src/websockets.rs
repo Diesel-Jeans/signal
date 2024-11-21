@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use base64::{engine::general_purpose, Engine as _};
 use common::signalservice::{WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage};
-use dotenv::{dotenv, var};
+use dotenv::var;
 use futures_util::{SinkExt, StreamExt};
 use native_tls::{Certificate, TlsConnector as NativeTlsConnector};
 use prost::Message as ProstMessage;
@@ -237,7 +237,7 @@ impl WebsocketHandler {
         self.socket.lock().await.stream.send(msg).await?;
 
         println!("Sent message");
-        let mut self_clone = self.clone();
+        let self_clone = self.clone();
 
         let promise = spawn(async move {
             if self_clone.has_keepalive {
