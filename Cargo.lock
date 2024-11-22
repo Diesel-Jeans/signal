@@ -880,6 +880,7 @@ dependencies = [
  "serde",
  "serde_json",
  "socket2 0.5.7",
+ "sqlx",
  "surf",
  "tokio",
  "tokio-native-tls",

@@ -18,7 +18,10 @@ use crate::{
     errors::{LoginError, RegistrationError},
     key_manager::{InMemoryKeyManager, KeyManager},
     server::{Server, ServerAPI},
-    storage::{DeviceStorage, Storage},
+    storage::{
+        generic::{ProtocolStore, Storage},
+        in_memory::InMemory,
+    },
 };
 
 pub struct Client {
@@ -27,7 +30,7 @@ pub struct Client {
     contact_manager: ContactManager,
     server_api: ServerAPI,
     key_manager: InMemoryKeyManager,
-    storage: DeviceStorage,
+    storage: Storage<InMemory>,
 }
 
 pub struct VerifiedSession {
@@ -51,7 +54,7 @@ impl Client {
         contact_manager: ContactManager,
         server_api: ServerAPI,
         key_manager: InMemoryKeyManager,
-        storage: DeviceStorage,
+        storage: Storage<InMemory>,
     ) -> Self {
         Client {
             aci,
@@ -74,9 +77,8 @@ impl Client {
         let id_key = IdentityKey::new(aci_key_pair.public_key);
         let id_key_pair = IdentityKeyPair::new(id_key, aci_key_pair.private_key);
 
-        let storage = InMemSignalProtocolStore::new(id_key_pair, aci_registration_id)
-            .expect("Can always create a protocol store.");
-        let mut key_manager = InMemoryKeyManager::new(storage);
+        let proto_storage = ProtocolStore::new(id_key_pair, aci_registration_id)
+        let mut key_manager = InMemoryKeyManager::new(proto_storage);
 
         let aci_signed_pk: SignedPreKeyRecord = key_manager.generate(&mut csprng).await.unwrap();
         let pni_signed_pk: SignedPreKeyRecord = key_manager.generate(&mut csprng).await.unwrap();
@@ -141,16 +143,7 @@ impl Client {
                 let pni: Pni = body.pni.into();
 
                 let contact_manager = ContactManager::new();
-                let storage = DeviceStorage::builder()
-                    .set_aci(aci)
-                    .set_pni(pni)
-                    .set_password(password)
-                    .set_public_key(aci_key_pair.public_key)
-                    .set_private_key(aci_key_pair.private_key)
-                    .set_aci_registration_id(aci_registration_id)
-                    .set_pni_registration_id(pni_registration_id)
-                    .try_into()
-                    .expect("Missing field in builder");
+                let storage = Storage::new(password, aci, pni, proto_storage);
                 let client =
                     Client::new(aci, pni, contact_manager, server_api, key_manager, storage);
                 Ok(client)
@@ -160,24 +153,7 @@ impl Client {
     }
 
     pub async fn login() -> Result<Self, LoginError> {
-        let storage = DeviceStorage::load()?;
-
-        let key_pair = KeyPair::new(
-            storage.get_public_key().to_owned(),
-            storage.get_private_key().to_owned(),
-        );
-
-        let proto_store =
-            InMemSignalProtocolStore::new(key_pair.into(), storage.get_aci_registration_id())
-                .expect("Can construct Protocol Store from valid parts.");
-        Ok(Client::new(
-            storage.get_aci().to_owned(),
-            storage.get_pni().to_owned(),
-            ContactManager::new(),
-            ServerAPI::new(),
-            InMemoryKeyManager::new(proto_store),
-            storage,
-        ))
+        todo!("Implement when Storage<Device> is done")
     }
 
     pub async fn send_message(
