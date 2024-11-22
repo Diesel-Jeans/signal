@@ -6,17 +6,14 @@ use common::{
 };
 use core::str;
 use libsignal_core::{Aci, Pni};
-use libsignal_protocol::{
-    IdentityKey, IdentityKeyPair, InMemSignalProtocolStore, KeyPair, KyberPreKeyRecord,
-    SignedPreKeyRecord,
-};
+use libsignal_protocol::{IdentityKey, IdentityKeyPair, KeyPair};
 use rand::{rngs::OsRng, Rng};
 use surf::StatusCode;
 
 use crate::{
     contact_manager::ContactManager,
     errors::{LoginError, RegistrationError},
-    key_manager::{InMemoryKeyManager, KeyManager},
+    key_manager::KeyManager,
     server::{Server, ServerAPI},
     storage::{
         generic::{ProtocolStore, Storage},
@@ -29,7 +26,7 @@ pub struct Client {
     pni: Pni,
     contact_manager: ContactManager,
     server_api: ServerAPI,
-    key_manager: InMemoryKeyManager,
+    key_manager: KeyManager,
     storage: Storage<InMemory>,
 }
 
@@ -53,7 +50,7 @@ impl Client {
         pni: Pni,
         contact_manager: ContactManager,
         server_api: ServerAPI,
-        key_manager: InMemoryKeyManager,
+        key_manager: KeyManager,
         storage: Storage<InMemory>,
     ) -> Self {
         Client {
@@ -77,16 +74,40 @@ impl Client {
         let id_key = IdentityKey::new(aci_key_pair.public_key);
         let id_key_pair = IdentityKeyPair::new(id_key, aci_key_pair.private_key);
 
-        let proto_storage = ProtocolStore::new(id_key_pair, aci_registration_id)
-        let mut key_manager = InMemoryKeyManager::new(proto_storage);
+        let mut proto_storage = ProtocolStore::new(id_key_pair, aci_registration_id);
+        let mut key_manager = KeyManager::new();
 
-        let aci_signed_pk: SignedPreKeyRecord = key_manager.generate(&mut csprng).await.unwrap();
-        let pni_signed_pk: SignedPreKeyRecord = key_manager.generate(&mut csprng).await.unwrap();
+        let aci_signed_pk = key_manager
+            .generate_signed_pre_key(
+                &mut proto_storage.identity_key_store,
+                &mut proto_storage.signed_pre_key_store,
+                &mut csprng,
+            )
+            .await
+            .unwrap();
+        let pni_signed_pk = key_manager
+            .generate_signed_pre_key(
+                &mut proto_storage.identity_key_store,
+                &mut proto_storage.signed_pre_key_store,
+                &mut csprng,
+            )
+            .await
+            .unwrap();
 
-        let aci_pq_last_resort: KyberPreKeyRecord =
-            key_manager.generate(&mut csprng).await.unwrap();
-        let pni_pq_last_resort: KyberPreKeyRecord =
-            key_manager.generate(&mut csprng).await.unwrap();
+        let aci_pq_last_resort = key_manager
+            .generate_kyber_pre_key(
+                &mut proto_storage.identity_key_store,
+                &mut proto_storage.kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
+        let pni_pq_last_resort = key_manager
+            .generate_kyber_pre_key(
+                &mut proto_storage.identity_key_store,
+                &mut proto_storage.kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
 
         let mut password = [0u8; PASSWORD_LENGTH];
         csprng.fill(&mut password);
