@@ -303,7 +303,7 @@ impl Client {
         )
         .await;
 
-        let bundle = self
+        let bundle_map = self
             .server_api
             .fetch_bundle(service_id.service_id_string())
             .await;

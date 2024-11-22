@@ -4,6 +4,7 @@ use crate::{
 };
 use anyhow::Result;
 use axum::{async_trait, extract::ws::Message, Error};
+use common::websocket::wsstream::WSStream;
 use common::{
     signalservice::Envelope,
     web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
@@ -15,7 +16,6 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use common::websocket::wsstream::WSStream;
 
 #[derive(Clone)]
 pub struct MockDB {}

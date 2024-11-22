@@ -1,9 +1,6 @@
 use crate::account::Account;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-use common::{
-    signalservice::Envelope,
-    web_api::SignalMessage,
-};
+use common::{signalservice::Envelope, web_api::SignalMessage};
 use libsignal_core::ServiceId;
 use std::time::{SystemTime, UNIX_EPOCH};
 

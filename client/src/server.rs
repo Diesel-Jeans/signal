@@ -3,15 +3,17 @@ use crate::{client::VerifiedSession, contact_manager::Contact};
 use anyhow::{anyhow, Result};
 use async_native_tls::{Certificate, TlsConnector};
 use common::signalservice::{web_socket_message, WebSocketMessage};
+use common::web_api::PreKeyResponse;
 use common::websocket::net_helper::create_request;
 use common::{
     signalservice::{Envelope, WebSocketRequestMessage, WebSocketResponseMessage},
     web_api::{authorization::BasicAuthorizationHeader, RegistrationRequest, SignalMessages},
 };
 use http_client::h1::H1Client;
-use libsignal_core::ServiceId;
+use libsignal_core::{DeviceId, ServiceId};
 use prost::Message;
-use serde_json::to_vec;
+use serde_json::{from_str, to_vec};
+use std::collections::HashMap;
 use std::{
     env,
     fmt::Display,
@@ -73,7 +75,10 @@ pub trait Server {
         uuid: String, //registration_id: u32,
                       //bundle: &PreKeyBundle,
     ) -> Result<Response, Box<dyn std::error::Error>>; // should take keys as parameter or struct
-    async fn fetch_bundle(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
+    async fn fetch_bundle(
+        &self,
+        uuid: String,
+    ) -> Result<PreKeyResponse, Box<dyn std::error::Error>>;
     async fn register_client(
         &self,
         phone_number: String,
@@ -142,9 +147,19 @@ impl Server for ServerAPI {
         let uri = format!("{}/{}", BUNDLE_URI, uuid);
         self.make_request(ReqType::Post(payload), uri).await
     }
-    async fn fetch_bundle(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>> {
-        let uri = format!("{}/{}", BUNDLE_URI, uuid);
-        self.make_request(ReqType::Get, uri).await
+    async fn fetch_bundle(
+        &self,
+        uuid: String,
+    ) -> Result<PreKeyResponse, Box<dyn std::error::Error>> {
+        let uri = format!("{}/{}/*", BUNDLE_URI, uuid);
+
+        Ok(from_str(
+            self.make_request(ReqType::Get, uri)
+                .await?
+                .body_string()
+                .await?
+                .as_ref(),
+        )?)
     }
 
     async fn register_client(

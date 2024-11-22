@@ -224,8 +224,9 @@ pub(crate) mod pre_key_map_serde {
             map.serialize_key(&k)?;
             map.serialize_entry(
                 &k,
-                &v.serialize()
-                    .map_err(|err| Error::custom(format!("Could not serialize PreKeyRecord: {err}")))?,
+                &v.serialize().map_err(|err| {
+                    Error::custom(format!("Could not serialize PreKeyRecord: {err}"))
+                })?,
             )?;
         }
         map.end()

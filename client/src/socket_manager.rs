@@ -21,13 +21,8 @@ use std::time::Duration;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::Message;
 
-use common::signalservice::{
-    web_socket_message, WebSocketMessage,
-};
-use common::websocket::{
-    connection_state::ConnectionState,
-    wsstream::WSStream,
-};
+use common::signalservice::{web_socket_message, WebSocketMessage};
+use common::websocket::{connection_state::ConnectionState, wsstream::WSStream};
 
 const SECOND: u32 = 1000;
 const MINUTE: u32 = SECOND * 60;
