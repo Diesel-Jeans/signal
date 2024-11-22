@@ -6,7 +6,7 @@ use common::web_api::{
     AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse,
 };
 use core::str;
-use libsignal_core::{Aci, DeviceId, Pni, ServiceId};
+use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use prost::Message;
 use rand::CryptoRng;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -15,8 +15,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use common::web_api::{SignalMessage, SignalMessages};
 use libsignal_protocol::{
-    message_decrypt, CiphertextMessage, CiphertextMessageType, IdentityKeyPair, KyberPreKeyRecord,
-    SignalProtocolError, SignedPreKeyRecord,
+    message_decrypt, process_prekey_bundle, CiphertextMessage, CiphertextMessageType,
+    IdentityKeyPair, KyberPreKeyRecord, PreKeyBundle, SessionStore, SignalProtocolError,
+    SignedPreKeyRecord,
 };
 use rand::{rngs::OsRng, Rng};
 use surf::StatusCode;
@@ -251,7 +252,11 @@ impl Client {
     }
 
     /// Send a message to a specific contact using websockets.
-    pub async fn send_message(&mut self, message: &str, aci: &Aci) -> Result<(), ClientError> {
+    pub async fn send_message(
+        &mut self,
+        message: &str,
+        service_id: &ServiceId,
+    ) -> Result<(), ClientError> {
         let username = self.storage.aci().service_id_string();
         let password = self.storage.password();
         let url = "wss://127.0.0.1:4444/v1/websocket";
@@ -280,13 +285,39 @@ impl Client {
 
         let timestamp = SystemTime::now();
 
-        let service_id = &aci.to_owned().into();
         // Update the contact.
+
         let to = match self.contact_manager.get_contact(service_id) {
             Err(_) => {
                 self.contact_manager
                     .add_contact(service_id, 1.into())
                     .expect("Can add contact that does not exist yet");
+                let bundle = self
+                    .server_api
+                    .fetch_bundle(service_id.service_id_string())
+                    .await
+                    .unwrap();
+                let keys = bundle.keys();
+
+                for key_item in bundle.keys() {
+                    process_prekey_bundle(
+                        &ProtocolAddress::new(service_id.service_id_string(), key_item.device_id()),
+                        &mut self.storage.protocol_store.session_store,
+                        &mut self.storage.protocol_store.identity_key_store,
+                        todo!(),
+                        SystemTime::now(),
+                        &mut OsRng,
+                    )
+                    .await
+                    .unwrap();
+                }
+
+                self.contact_manager
+                    .update_contact(
+                        service_id,
+                        keys.into_iter().map(|x| x.device_id()).collect(),
+                    )
+                    .expect("Can update a contact that was just added");
                 self.contact_manager
                     .get_contact(service_id)
                     .expect("Can get contact that was just added.")
@@ -302,11 +333,6 @@ impl Client {
             timestamp,
         )
         .await;
-
-        let bundle_map = self
-            .server_api
-            .fetch_bundle(service_id.service_id_string())
-            .await;
 
         // TODO: What to do if encryption fails?
         let msgs = handle_encryption_failed(msgs)?;

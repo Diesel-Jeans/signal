@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Logged in, sending message to bob");
 
     alice
-        .send_message("Hello, World!", bob.aci())
+        .send_message("Hello, World!", &bob.aci().to_owned().into())
         .await
         .unwrap();
     println!("Sent message");
