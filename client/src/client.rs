@@ -6,7 +6,7 @@ use common::web_api::{
     AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse,
 };
 use core::str;
-use libsignal_core::{Aci, Pni, ServiceId};
+use libsignal_core::{Aci, DeviceId, Pni, ServiceId};
 use prost::Message;
 use rand::CryptoRng;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -21,13 +21,12 @@ use libsignal_protocol::{
 use rand::{rngs::OsRng, Rng};
 use surf::StatusCode;
 
-use crate::contact_manager::{Contact, ContactManager};
+use crate::contact_manager::ContactManager;
 use crate::encryption::{encrypt, pad_message};
 use crate::errors::{ClientError, LoginError, RegistrationError};
-use crate::key_management::key_manager::KeyManager;
+use crate::key_manager::KeyManager;
 use crate::server::{Server, ServerAPI};
 use crate::storage::device::{DeviceProtocolStore, DeviceStorage};
-use crate::storage::storage_trait::Storage;
 
 pub struct Client {
     aci: Aci,
@@ -281,16 +280,15 @@ impl Client {
 
         let timestamp = SystemTime::now();
 
-        let service_id = aci.service_id_string();
-
+        let service_id = &aci.to_owned().into();
         // Update the contact.
-        let to = match self.contact_manager.get_contact(&service_id) {
+        let to = match self.contact_manager.get_contact(service_id) {
             Err(_) => {
                 self.contact_manager
-                    .add_contact(&service_id)
+                    .add_contact(service_id, 1.into())
                     .expect("Can add contact that does not exist yet");
                 self.contact_manager
-                    .get_contact(&service_id)
+                    .get_contact(service_id)
                     .expect("Can get contact that was just added.")
             }
             Ok(contact) => contact,
@@ -305,7 +303,10 @@ impl Client {
         )
         .await;
 
-        let bundle = self.server_api.fetch_bundle(service_id).await;
+        let bundle = self
+            .server_api
+            .fetch_bundle(service_id.service_id_string())
+            .await;
 
         // TODO: What to do if encryption fails?
         let msgs = handle_encryption_failed(msgs)?;
@@ -327,7 +328,7 @@ impl Client {
                             envelope::Type::PlaintextContent.into()
                         }
                     },
-                    destination_device_id: id,
+                    destination_device_id: id.into(),
                     destination_registration_id: todo!(),
                     content: BASE64_STANDARD.encode(msg.serialize()),
                 })
@@ -340,10 +341,8 @@ impl Client {
                 .as_secs(),
         };
 
-        // TODO: Fix contact. It should not be a uuid string. it should be a ServiceId.
-        let user_id = ServiceId::parse_from_service_id_string(&to.uuid).unwrap();
         println!("Handing message off to websocket");
-        self.server_api.send_msg(msgs, user_id).await.unwrap();
+        self.server_api.send_msg(msgs, to.service_id).await.unwrap();
         Ok(())
     }
 
@@ -443,8 +442,8 @@ fn decode_ciphertext(
 /// and do not recover.
 /// TODO: Figure out how to recover when we cannot send to a device.
 fn handle_encryption_failed(
-    msgs: HashMap<u32, Result<CiphertextMessage, SignalProtocolError>>,
-) -> Result<HashMap<u32, CiphertextMessage>, ClientError> {
+    msgs: HashMap<DeviceId, Result<CiphertextMessage, SignalProtocolError>>,
+) -> Result<HashMap<DeviceId, CiphertextMessage>, ClientError> {
     transform_hashmap_result(msgs).map_err(ClientError::EncryptionError)
 }
 
