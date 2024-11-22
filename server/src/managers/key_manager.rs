@@ -131,7 +131,13 @@ impl<T: SignalDatabase> KeyManager<T> {
             ))
         }
 
-        // TODO: Verify account through auth device
+        database
+            .get_account(&auth_device.account().aci().into())
+            .await
+            .map_err(|_| ApiError {
+                status_code: StatusCode::UNAUTHORIZED,
+                message: "".into(),
+            })?;
 
         let target_account = database
             .get_account(&target_service_id)
@@ -283,19 +289,17 @@ mod key_manager_tests {
     };
     use base64::prelude::BASE64_STANDARD;
     use base64::Engine as _;
-    use libsignal_core::Pni;
     use libsignal_protocol::{IdentityKey, KeyPair};
     use rand::rngs::OsRng;
     use sha2::{Digest, Sha256};
-    use uuid::Uuid;
 
     pub fn new_account_from_identity_key(identity_key: IdentityKey) -> Account {
         Account::new(
-            Pni::from(Uuid::new_v4()),
+            new_pni(),
             new_device(),
             identity_key,
             identity_key,
-            Uuid::new_v4().into(),
+            new_uuid().into(),
             new_account_attributes(),
         )
     }
@@ -322,6 +326,7 @@ mod key_manager_tests {
             .unwrap();
 
         let auth_device1 = new_authenticated_device();
+        database.add_account(auth_device1.account()).await.unwrap();
 
         let keys = km
             .handle_get_keys(
@@ -404,6 +409,7 @@ mod key_manager_tests {
             .unwrap();
 
         let auth_device1 = new_authenticated_device();
+        database.add_account(auth_device1.account()).await.unwrap();
 
         let keys = km
             .handle_get_keys(&database, &auth_device1, target.aci().into(), "*".into())
