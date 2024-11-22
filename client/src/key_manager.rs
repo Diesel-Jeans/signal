@@ -104,3 +104,111 @@ fn time_now() -> Timestamp {
             .expect("Living in the future is not allowed"),
     )
 }
+
+#[cfg(test)]
+mod key_manager_tests {
+    use crate::storage::{generic::ProtocolStore, in_memory::InMemory};
+
+    use super::*;
+    use rand::rngs::OsRng;
+
+    fn store(reg: u32) -> ProtocolStore<InMemory> {
+        let mut rng = OsRng;
+        let p = KeyPair::generate(&mut rng).into();
+        ProtocolStore::new(p, reg)
+    }
+
+    #[test]
+    fn get_id_test() {
+        let mut manager = KeyManager::new();
+        let id0 = manager.get_new_key_id(&PreKeyType::OneTime);
+        assert_eq!(id0, 0);
+        let id1 = manager.get_new_key_id(&PreKeyType::OneTime);
+        assert_eq!(id1, 1);
+    }
+
+    #[tokio::test]
+    async fn generate_kyper_key() {
+        let mut store = store(0);
+        let mut manager = KeyManager::new();
+        let key = manager
+            .generate_kyber_pre_key(
+                &mut store.identity_key_store,
+                &mut store.kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
+
+        let stored_sign = store
+            .get_kyber_pre_key(
+                store
+                    .kyber_pre_key_store
+                    .all_kyber_pre_key_ids()
+                    .next()
+                    .unwrap()
+                    .to_owned(),
+            )
+            .await
+            .unwrap()
+            .signature()
+            .unwrap();
+
+        assert_eq!(key.signature().unwrap(), stored_sign);
+    }
+
+    #[tokio::test]
+    async fn generate_signed_key() {
+        let mut rng = OsRng;
+        let mut store = store(0);
+        let mut manager = KeyManager::new();
+        let key = manager
+            .generate_signed_pre_key(
+                &mut store.identity_key_store,
+                &mut store.signed_pre_key_store,
+                &mut rng,
+            )
+            .await
+            .unwrap();
+
+        let stored_sign = store
+            .get_signed_pre_key(
+                store
+                    .signed_pre_key_store
+                    .all_signed_pre_key_ids()
+                    .next()
+                    .unwrap()
+                    .to_owned(),
+            )
+            .await
+            .unwrap()
+            .signature()
+            .unwrap();
+
+        assert_eq!(key.signature().unwrap(), stored_sign);
+    }
+
+    #[tokio::test]
+    async fn generate_onetime_key() {
+        let mut rng = OsRng;
+        let mut store = store(0);
+        let mut manager = KeyManager::new();
+        let key = manager
+            .generate_pre_key(&mut store.pre_key_store, &mut rng)
+            .await
+            .unwrap();
+        let stored_key_pair = store
+            .get_pre_key(
+                store
+                    .pre_key_store
+                    .all_pre_key_ids()
+                    .next()
+                    .unwrap()
+                    .to_owned(),
+            )
+            .await
+            .unwrap()
+            .key_pair()
+            .unwrap();
+        assert_eq!(key.public_key().unwrap(), stored_key_pair.public_key);
+    }
+}
