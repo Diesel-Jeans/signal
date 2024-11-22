@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, time::Duration};
 
 use contact_manager::Contact;
 
@@ -23,16 +23,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
-    let mut client = Client::register("name", "a".to_string()).await.unwrap();
+    let mut alice = Client::register("alice", "a".to_string()).await.unwrap();
+    let mut bob = Client::register("bob", "b".to_string()).await.unwrap();
 
-    println!("Logged in, sending message to myself");
+    println!("Logged in, sending message to bob");
 
-    let me = Contact::new(client.aci().service_id_string());
-
-    client.send_message("Hello, World!", &me).await.unwrap();
+    alice
+        .send_message("Hello, World!", bob.aci())
+        .await
+        .unwrap();
     println!("Sent message");
 
-    println!("{}", client.receive_message().await.unwrap());
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    println!("{}", bob.receive_message().await.unwrap());
 
     Ok(())
 }

@@ -17,11 +17,7 @@ use anyhow::Result;
 use axum::extract::ws::Message;
 use axum::{
     debug_handler,
-    extract::{
-        connect_info::ConnectInfo,
-        ws::WebSocketUpgrade,
-        Host, Path, State,
-    },
+    extract::{connect_info::ConnectInfo, ws::WebSocketUpgrade, Host, Path, State},
     handler::HandlerWithoutStateExt,
     http::{
         header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
@@ -86,7 +82,6 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::E
         .iter()
         .map(|message| message.destination_device_id)
         .collect();
-    println!("here");
     DestinationDeviceValidator::validate_complete_device_list(
         &destination,
         &message_device_ids,

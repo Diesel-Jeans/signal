@@ -32,7 +32,7 @@ use crate::storage::storage_trait::Storage;
 pub struct Client {
     aci: Aci,
     pni: Pni,
-    contact_manager: ContactManager,
+    pub contact_manager: ContactManager,
     server_api: ServerAPI,
     key_manager: KeyManager,
     storage: DeviceStorage,
@@ -124,8 +124,8 @@ impl Client {
         }
     }
 
-    pub fn aci(&self) -> Aci {
-        self.aci
+    pub fn aci(&self) -> &Aci {
+        &self.aci
     }
 
     /// Register a new account with the server.
@@ -252,10 +252,10 @@ impl Client {
     }
 
     /// Send a message to a specific contact using websockets.
-    pub async fn send_message(&mut self, message: &str, to: &Contact) -> Result<(), ClientError> {
+    pub async fn send_message(&mut self, message: &str, aci: &Aci) -> Result<(), ClientError> {
         let username = self.storage.aci().service_id_string();
         let password = self.storage.password();
-        let url = "wss://127.0.0.1:443/v1/websocket";
+        let url = "wss://127.0.0.1:4444/v1/websocket";
         let tls_cert = "server/cert/rootCA.crt";
         self.server_api
             .connect(&username, password, url, tls_cert)
@@ -281,6 +281,21 @@ impl Client {
 
         let timestamp = SystemTime::now();
 
+        let service_id = aci.service_id_string();
+
+        // Update the contact.
+        let to = match self.contact_manager.get_contact(&service_id) {
+            Err(_) => {
+                self.contact_manager
+                    .add_contact(&service_id)
+                    .expect("Can add contact that does not exist yet");
+                self.contact_manager
+                    .get_contact(&service_id)
+                    .expect("Can get contact that was just added.")
+            }
+            Ok(contact) => contact,
+        };
+
         let msgs = encrypt(
             &mut protocol_store.session_store,
             &mut protocol_store.identity_key_store,
@@ -289,6 +304,8 @@ impl Client {
             timestamp,
         )
         .await;
+
+        let bundle = self.server_api.fetch_bundle(service_id).await;
 
         // TODO: What to do if encryption fails?
         let msgs = handle_encryption_failed(msgs)?;

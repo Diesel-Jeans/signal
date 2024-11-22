@@ -1,13 +1,17 @@
 use crate::socket_manager::{signal_ws_connect, SignalStream, SocketManager};
 use crate::{client::VerifiedSession, contact_manager::Contact};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_native_tls::{Certificate, TlsConnector};
+use common::signalservice::{web_socket_message, WebSocketMessage};
+use common::websocket::net_helper::create_request;
 use common::{
     signalservice::{Envelope, WebSocketRequestMessage, WebSocketResponseMessage},
     web_api::{authorization::BasicAuthorizationHeader, RegistrationRequest, SignalMessages},
 };
 use http_client::h1::H1Client;
 use libsignal_core::ServiceId;
+use prost::Message;
+use serde_json::to_vec;
 use std::{
     env,
     fmt::Display,
@@ -17,6 +21,9 @@ use std::{
     time::Duration,
 };
 use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
+use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 const CLIENT_URI: &str = "/client";
 const MSG_URI: &str = "/v1/messages";
@@ -27,6 +34,8 @@ const BUNDLE_URI: &str = "/bundle";
 pub struct ServerAPI {
     client: Client,
     socket_manager: SocketManager<SignalStream>,
+    message_queue: Arc<Mutex<Vec<Result<WebSocketMessage, RecvError>>>>,
+    recv_handle: Option<JoinHandle<()>>,
 }
 
 enum ReqType {
@@ -77,10 +86,10 @@ pub trait Server {
         client_info: &Contact,
     ) -> Result<Response, Box<dyn std::error::Error>>;
     async fn send_msg(
-        &self,
+        &mut self,
         msg: SignalMessages,
-        user_id: ServiceId,
-    ) -> Result<WebSocketResponseMessage>;
+        destination: ServiceId,
+    ) -> Result<WebSocketMessage>;
     async fn update_client(
         &self,
         new_client: &Contact,
@@ -105,7 +114,20 @@ impl Server for ServerAPI {
             .await
             .expect("Failed to connect");
         let wrap = SignalStream::new(ws);
-        self.socket_manager.set_stream(wrap).await;
+        self.socket_manager
+            .set_stream(wrap)
+            .await
+            .map_err(|err| anyhow!(err))?;
+
+        let mut receiver = self.socket_manager.subscribe();
+        let queue = self.message_queue.clone();
+        self.recv_handle = Some(tokio::spawn(async move {
+            loop {
+                let msg = receiver.recv().await;
+                println!("Received message: {:?}", msg);
+                queue.lock().await.push(msg);
+            }
+        }));
 
         println!("connected!");
         Ok(())
@@ -155,23 +177,20 @@ impl Server for ServerAPI {
     }
 
     async fn send_msg(
-        &self,
+        &mut self,
         msg: SignalMessages,
         destination: ServiceId,
-    ) -> Result<WebSocketResponseMessage> {
-        /*
-            let payload = to_vec(&msg).unwrap();
-            let uri = format!("{}/{}", MSG_URI, destination.service_id_string());
-            println!("Sending message to: {}", uri);
-            let options = SendRequestOptions::new("PUT", uri, payload);
+    ) -> Result<WebSocketMessage> {
+        let payload = to_vec(&msg).unwrap();
+        let uri = format!("{}/{}", MSG_URI, destination.service_id_string());
+        println!("Sending message to: {}", uri);
 
-            if let Some(ws) = &self.websocket {
-                Ok(ws.clone().send_request(options).await?)
-            } else {
-                anyhow::bail!("No websocket connection is active")
-            }
-        */
-        todo!()
+        let id = self.socket_manager.next_id();
+        Ok(self
+            .socket_manager
+            .send(id, create_request(id, "PUT", &uri, vec![], Some(payload)))
+            .await
+            .map_err(|err| anyhow!(err))?)
     }
 
     async fn update_client(
@@ -203,6 +222,7 @@ impl Server for ServerAPI {
         self.make_request(ReqType::Delete(payload), uri).await
     }
 }
+
 impl ServerAPI {
     pub fn new(username: Option<String>, password: String) -> Self {
         let cert_bytes = fs::read("server/cert/rootCA.crt").expect("Could not read certificate.");
@@ -225,6 +245,8 @@ impl ServerAPI {
         Self {
             client,
             socket_manager: SocketManager::new(5),
+            message_queue: Arc::default(),
+            recv_handle: None,
         }
     }
 
@@ -260,7 +282,24 @@ impl ServerAPI {
     }
 
     pub async fn get_message(&mut self) -> Option<Envelope> {
-        todo!()
+        let msg = tokio::time::timeout(Duration::from_secs(1), self.message_queue.lock())
+            .await
+            .ok()?
+            .pop()?;
+
+        println!("Got message");
+        if let Ok(msg) = msg {
+            match msg.r#type() {
+                web_socket_message::Type::Unknown => todo!(),
+                web_socket_message::Type::Request => todo!(),
+                web_socket_message::Type::Response => Some(
+                    Envelope::decode(msg.response.expect("Did not contain promised type.").body())
+                        .unwrap(),
+                ),
+            }
+        } else {
+            return None;
+        }
     }
     async fn get_incoming_messages(&mut self) -> Result<Vec<WebSocketRequestMessage>> {
         todo!()

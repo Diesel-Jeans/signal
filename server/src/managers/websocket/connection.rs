@@ -244,13 +244,15 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
                 ))
                 .await
                 .map_err(|err| err.to_string()),
-            Err(_) => self
-                .send(Message::Binary(
+            Err(_) => {
+                println!("ERROROROROE");
+                self.send(Message::Binary(
                     create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
                         .encode_to_vec(),
                 ))
                 .await
-                .map_err(|err| err.to_string()),
+                .map_err(|err| err.to_string())
+            }
         }
     }
 
