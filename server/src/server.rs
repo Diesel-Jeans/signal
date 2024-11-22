@@ -358,7 +358,7 @@ async fn post_keycheck_endpoint(
             check_keys_request.user_digest,
         )
         .await?
-        .then(|| ())
+        .then_some(())
         .ok_or_else(|| ApiError {
             status_code: StatusCode::CONFLICT,
             message: "".into(),
