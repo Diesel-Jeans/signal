@@ -1,7 +1,10 @@
 pub mod authorization;
+
 use base64::{prelude::BASE64_STANDARD, Engine};
 use libsignal_protocol::{
-    DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyRecord, SignedPreKeyRecord,
+    kem::{self},
+    DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyBundle, PreKeyId,
+    PreKeyRecord, PublicKey, SignedPreKeyRecord,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -363,6 +366,50 @@ impl PreKeyResponseItem {
     }
 }
 
+impl TryFrom<PreKeyResponse> for Vec<PreKeyBundle> {
+    type Error = String;
+
+    fn try_from(items: PreKeyResponse) -> Result<Vec<PreKeyBundle>, Self::Error> {
+        let identity_key = IdentityKey::decode(
+            BASE64_STANDARD
+                .decode(items.identity_key())
+                .map_err(|_| "Failed decoding identity key")?
+                .as_slice(),
+        )
+        .map_err(|_| "Failed decoding identity key")?;
+
+        let mut bundles = Vec::new();
+        for pre_key_items in items.keys() {
+            let pre_key: Option<(PreKeyId, PublicKey)> = Some((
+                pre_key_items.pre_key().key_id.into(),
+                PublicKey::deserialize(&pre_key_items.pre_key().public_key)
+                    .map_err(|_| "Failed decoding pre key")?,
+            ));
+            let bundle = PreKeyBundle::new(
+                pre_key_items.registration_id(),
+                pre_key_items.device_id(),
+                pre_key,
+                pre_key_items.signed_pre_key().key_id.into(),
+                PublicKey::deserialize(&pre_key_items.signed_pre_key().public_key)
+                    .map_err(|_| "Failed decoding signed pre key key")?,
+                pre_key_items.signed_pre_key().signature.to_vec(),
+                identity_key,
+            )
+            .map_err(|_| "Creation of key bundle failed")?;
+
+            bundles.push(
+                bundle.with_kyber_pre_key(
+                    pre_key_items.pq_pre_key().key_id.into(),
+                    kem::PublicKey::deserialize(&pre_key_items.pq_pre_key().public_key)
+                        .map_err(|_| "Failed decoding kem pre key key")?,
+                    pre_key_items.pq_pre_key().signature.to_vec(),
+                ),
+            )
+        }
+        Ok(bundles)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SignalMessages {
@@ -379,4 +426,42 @@ pub struct SignalMessage {
     pub destination_device_id: u32,
     pub destination_registration_id: u32,
     pub content: String,
+}
+
+#[cfg(test)]
+mod api_structs_tests {
+    use libsignal_protocol::{kem, IdentityKeyPair, KeyPair, PreKeyBundle};
+    use rand::rngs::OsRng;
+
+    use super::{PreKeyResponse, PreKeyResponseItem, UploadPreKey, UploadSignedPreKey};
+
+    #[test]
+    fn test_try_from_pre_key_response() {
+        let identity_key = IdentityKeyPair::generate(&mut OsRng);
+        let prekey = KeyPair::generate(&mut OsRng);
+        let pq_pre_key = kem::KeyPair::generate(kem::KeyType::Kyber1024);
+
+        let mut keys = Vec::new();
+        keys.push(PreKeyResponseItem::new(
+            1.into(),
+            1,
+            UploadPreKey {
+                key_id: 1,
+                public_key: prekey.public_key.serialize(),
+            },
+            UploadSignedPreKey {
+                key_id: 1,
+                public_key: pq_pre_key.public_key.serialize(),
+                signature: Box::new([1, 2, 3, 4]),
+            },
+            UploadSignedPreKey {
+                key_id: 1,
+                public_key: prekey.public_key.serialize(),
+                signature: Box::new([1, 2, 3, 4]),
+            },
+        ));
+
+        let res = PreKeyResponse::new(*identity_key.identity_key(), keys);
+        let _: Vec<PreKeyBundle> = res.try_into().unwrap();
+    }
 }

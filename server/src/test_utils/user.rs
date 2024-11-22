@@ -83,7 +83,7 @@ pub fn new_aci() -> Aci {
 }
 
 pub fn new_pni() -> Pni {
-    Pni::from(new_uuid()).into()
+    Pni::from(new_uuid())
 }
 
 pub fn new_device_id() -> DeviceId {
