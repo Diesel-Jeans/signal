@@ -2,6 +2,31 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::Display;
 
+pub enum SignalClientError {
+    RegistrationError(RegistrationError),
+    LoginError(LoginError),
+    SendMessageError(SendMessageError),
+}
+
+impl fmt::Debug for SignalClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self::Display::fmt(&self, f)
+    }
+}
+
+impl fmt::Display for SignalClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::RegistrationError(err) => format!("{err}"),
+            Self::LoginError(err) => format!("{err}"),
+            Self::SendMessageError(err) => format!("{err}"),
+        };
+        write!(f, "Could not register account - {}", message)
+    }
+}
+
+impl Error for SignalClientError {}
+
 pub enum RegistrationError {
     PhoneNumberTaken,
     NoResponse,
@@ -29,13 +54,17 @@ impl fmt::Display for RegistrationError {
 
 impl Error for RegistrationError {}
 
+impl From<RegistrationError> for SignalClientError {
+    fn from(value: RegistrationError) -> Self {
+        SignalClientError::RegistrationError(value)
+    }
+}
+
 pub enum LoginError {
     NoAccountInformation,
     MissingAccountInformation,
     LoadInfoError,
 }
-
-impl Error for LoginError {}
 
 impl fmt::Debug for LoginError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -54,24 +83,39 @@ impl fmt::Display for LoginError {
             }
             Self::LoadInfoError => "Could not load stored credentials. Maybe your credentials were corrupted.",
         };
-        write!(f, "Could not register account - {}", message)
+        write!(f, "Could not log in - {}", message)
     }
 }
 
-trait ClientError: Error {}
+impl Error for LoginError {}
 
-#[derive(Debug)]
-pub struct MissingFieldError {
-    field: String,
-}
-impl MissingFieldError {
-    pub fn new(field: String) -> Self {
-        Self { field }
+impl From<LoginError> for SignalClientError {
+    fn from(value: LoginError) -> Self {
+        SignalClientError::LoginError(value)
     }
 }
 
-impl From<&str> for MissingFieldError {
-    fn from(value: &str) -> Self {
-        MissingFieldError::new(value.to_owned())
+pub enum SendMessageError {}
+
+impl fmt::Debug for SendMessageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self::Display::fmt(&self, f)
+    }
+}
+
+impl fmt::Display for SendMessageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            _ => "hej",
+        };
+        write!(f, "Could not send message - {}", message)
+    }
+}
+
+impl Error for SendMessageError {}
+
+impl From<SendMessageError> for SignalClientError {
+    fn from(value: SendMessageError) -> Self {
+        SignalClientError::SendMessageError(value)
     }
 }

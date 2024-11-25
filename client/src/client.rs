@@ -1,18 +1,14 @@
 use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
-use common::{
-    signalservice::WebSocketResponseMessage,
-    web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse},
-};
+use common::web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest};
 use core::str;
 use libsignal_core::{Aci, Pni};
 use libsignal_protocol::{IdentityKey, IdentityKeyPair, KeyPair};
 use rand::{rngs::OsRng, Rng};
-use surf::StatusCode;
 
 use crate::{
     contact_manager::ContactManager,
-    errors::{LoginError, RegistrationError},
+    errors::{LoginError, RegistrationError, SignalClientError},
     key_manager::KeyManager,
     server::{Server, ServerAPI},
     storage::{
@@ -65,7 +61,7 @@ impl Client {
 
     /// Register a new account with the server.
     /// `phone_number` must be unique.
-    pub async fn register(name: &str, phone_number: String) -> Result<Self, RegistrationError> {
+    pub async fn register(name: &str, phone_number: String) -> Result<Self, SignalClientError> {
         let mut csprng = OsRng;
         let aci_registration_id = OsRng.gen_range(1..16383);
         let pni_registration_id = OsRng.gen_range(1..16383);
@@ -149,28 +145,23 @@ impl Client {
             None,
         );
 
-        let mut response = server_api
+        let response = server_api
             .register_client(phone_number, password.to_owned(), req, None)
-            .await
-            .map_err(|_| RegistrationError::NoResponse)?;
-        match response.status() {
-            StatusCode::Ok => {
-                let body: RegistrationResponse = response
-                    .body_json()
-                    .await
-                    .map_err(|_| RegistrationError::BadResponse)?;
+            .await?;
 
-                let aci: Aci = body.uuid.into();
-                let pni: Pni = body.pni.into();
+        let aci: Aci = response.uuid.into();
+        let pni: Pni = response.pni.into();
 
-                let contact_manager = ContactManager::new();
-                let storage = Storage::new(password, aci, pni, proto_storage);
-                let client =
-                    Client::new(aci, pni, contact_manager, server_api, key_manager, storage);
-                Ok(client)
-            }
-            _ => Err(RegistrationError::PhoneNumberTaken),
-        }
+        let contact_manager = ContactManager::new();
+        let storage = Storage::new(password, aci, pni, proto_storage);
+        Ok(Client::new(
+            aci,
+            pni,
+            contact_manager,
+            server_api,
+            key_manager,
+            storage,
+        ))
     }
 
     pub async fn login() -> Result<Self, LoginError> {
@@ -182,7 +173,7 @@ impl Client {
         message: &str,
         user_id: &str,
         device_id: u32,
-    ) -> Result<WebSocketResponseMessage> {
+    ) -> Result<(), SignalClientError> {
         self.server_api
             .send_msg(message.into(), user_id.into(), device_id)
             .await
