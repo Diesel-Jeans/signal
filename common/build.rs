@@ -1,5 +1,3 @@
-use prost_build;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     prost_build::Config::new()
         .type_attribute(

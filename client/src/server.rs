@@ -1,8 +1,8 @@
+use crate::socket_manager::{SignalStream, SocketManager};
 use crate::{
     client::VerifiedSession,
     contact_manager::Contact,
     errors::{RegistrationError, SignalClientError},
-    websockets::{KeepAliveOptions, SendRequestOptions, WebsocketHandler},
 };
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
@@ -27,7 +27,7 @@ const BUNDLE_URI: &str = "/bundle";
 
 pub struct ServerAPI {
     client: Client,
-    ws: Option<WebsocketHandler>,
+    socket_manager: SocketManager<SignalStream>,
 }
 
 enum ReqType {
@@ -205,7 +205,10 @@ impl Server for ServerAPI {
             .set_base_url(Url::parse(&address).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
-        ServerAPI { client, ws: None }
+        ServerAPI {
+            client,
+            socket_manager: SocketManager::new(5),
+        }
     }
 }
 
@@ -268,9 +271,6 @@ impl ServerAPI {
     }
 
     async fn get_incoming_messages(&mut self) -> Result<Vec<WebSocketRequestMessage>> {
-        match &self.ws {
-            Some(ws) => Ok(ws.clone().get_messages().await),
-            None => Err(anyhow::anyhow!("No websocket connection is active")),
-        }
+        todo!()
     }
 }

@@ -1,10 +1,8 @@
-use super::{
-    connection::{ClientConnection, ConnectionMap, WebSocketConnection},
-    wsstream::WSStream,
-};
+use super::connection::{ClientConnection, ConnectionMap, WebSocketConnection};
 use crate::database::SignalDatabase;
 use axum::extract::ws::Message;
 use common::signalservice::WebSocketMessage;
+use common::websocket::wsstream::WSStream;
 use futures_util::stream::{SplitStream, StreamExt};
 use libsignal_core::ProtocolAddress;
 use prost::{bytes::Bytes, Message as PMessage};
@@ -41,7 +39,7 @@ use tokio::sync::Mutex;
 #[derive(Default, Debug)]
 pub struct WebSocketManager<T, U>
 where
-    T: WSStream + Debug,
+    T: WSStream<Message, axum::Error> + Debug,
     U: SignalDatabase,
 {
     sockets: ConnectionMap<T, U>,
@@ -49,7 +47,7 @@ where
 
 impl<T, U> Clone for WebSocketManager<T, U>
 where
-    T: WSStream + Debug,
+    T: WSStream<Message, axum::Error> + Debug,
     U: SignalDatabase,
 {
     fn clone(&self) -> Self {
@@ -61,7 +59,7 @@ where
 
 impl<T, U> WebSocketManager<T, U>
 where
-    T: WSStream + Debug + Send + 'static,
+    T: WSStream<Message, axum::Error> + Debug + Send + 'static,
     U: SignalDatabase + Send + 'static,
 {
     pub fn new() -> Self {
@@ -152,14 +150,12 @@ mod test {
     use crate::{
         managers::{
             state::SignalServerState,
-            websocket::{
-                connection::{test::create_connection, ClientConnection},
-                net_helper,
-            },
+            websocket::connection::{test::create_connection, ClientConnection},
         },
         test_utils::websocket::{MockDB, MockSocket},
     };
     use axum::extract::ws::Message;
+    use common::websocket::net_helper;
     use prost::Message as PMessage;
 
     #[tokio::test]
