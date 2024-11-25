@@ -6,9 +6,11 @@ mod client;
 mod contact_manager;
 mod encryption;
 mod errors;
-mod key_management;
+mod key_manager;
 mod server;
 mod storage;
+#[cfg(test)]
+mod test_utils;
 mod websockets;
 
 #[tokio::main]

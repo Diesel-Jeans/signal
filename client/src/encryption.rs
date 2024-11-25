@@ -1,4 +1,5 @@
-use crate::contact_manager::{Contact, Device};
+use crate::contact_manager::Contact;
+use libsignal_core::{DeviceId, ProtocolAddress};
 use libsignal_protocol::{
     message_decrypt, message_encrypt, CiphertextMessage, InMemSignalProtocolStore,
     SignalProtocolError,
@@ -10,32 +11,34 @@ pub async fn encrypt(
     store: &mut InMemSignalProtocolStore,
     target: &Contact,
     msg: &[u8],
-) -> HashMap<u32, Result<CiphertextMessage, SignalProtocolError>> {
-    let mut msgs: HashMap<u32, Result<CiphertextMessage, SignalProtocolError>> = HashMap::new();
-    for (id, device) in target.devices.iter() {
+) -> Result<HashMap<DeviceId, Result<CiphertextMessage, SignalProtocolError>>, SignalProtocolError>
+{
+    let mut msgs: HashMap<DeviceId, Result<CiphertextMessage, SignalProtocolError>> =
+        HashMap::new();
+    for id in target.device_ids.clone() {
         let res = message_encrypt(
             msg,
-            &device.address,
+            &target.get_address(&id)?,
             &mut store.session_store,
             &mut store.identity_store,
             SystemTime::now(),
         )
         .await;
 
-        msgs.insert(*id, res);
+        msgs.insert(id, res);
     }
-    msgs
+    Ok(msgs)
 }
 
 pub async fn decrypt<R: Rng + CryptoRng>(
     store: &mut InMemSignalProtocolStore,
     rng: &mut R,
-    from_device: &Device,
+    from_address: &ProtocolAddress,
     msg: &CiphertextMessage,
 ) -> Result<Vec<u8>, SignalProtocolError> {
     message_decrypt(
         msg,
-        &from_device.address,
+        from_address,
         &mut store.session_store,
         &mut store.identity_store,
         &mut store.pre_key_store,
@@ -47,11 +50,12 @@ pub async fn decrypt<R: Rng + CryptoRng>(
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+pub mod test {
     use super::*;
     use crate::{
         contact_manager::ContactManager,
         encryption::{decrypt, encrypt},
+        test_utils::user::{new_device_id, new_service_id},
     };
     use libsignal_protocol::{
         kem, process_prekey_bundle, GenericSignedPreKey, KeyPair, KyberPreKeyRecord, PreKeyBundle,
@@ -59,7 +63,6 @@ pub(crate) mod test {
     };
     use rand::{rngs::OsRng, CryptoRng, Rng};
     use std::time::SystemTime;
-    use uuid::Uuid;
 
     pub fn store(reg: u32) -> InMemSignalProtocolStore {
         let mut rng = OsRng;
@@ -68,71 +71,9 @@ pub(crate) mod test {
         InMemSignalProtocolStore::new(p, reg).unwrap()
     }
 
-    #[tokio::test]
-    async fn test_encryption() {
-        let mut alice_store = store(1);
-        let mut bob_store = store(0);
-
-        let alice_id = Uuid::new_v4().to_string();
-        let bob_id = Uuid::new_v4().to_string();
-
-        let mut manager = ContactManager::new();
-
-        let _ = manager.add_contact(&alice_id);
-        let _ = manager.add_contact(&bob_id);
-
-        let mut rng = OsRng;
-
-        let alice_bundle = create_pre_key_bundle(&mut alice_store, 0, &mut rng)
-            .await
-            .unwrap();
-
-        let alice_bundle_content = alice_bundle.clone().try_into().unwrap();
-
-        let bob_bundle = create_pre_key_bundle(&mut bob_store, 1, &mut rng)
-            .await
-            .unwrap();
-
-        let bob_bundle_content = bob_bundle.clone().try_into().unwrap();
-
-        let _ = manager.update_contact(&alice_id, vec![(0, alice_bundle_content)]);
-        let _ = manager.update_contact(&bob_id, vec![(1, bob_bundle_content)]);
-
-        let bob = manager.get_contact(&bob_id).unwrap();
-        let bob_device = bob.devices.get(&1).unwrap();
-        let bob_pre_key_bundle = bob_device.bundle.clone().create_key_bundle().unwrap();
-
-        let _ = process_prekey_bundle(
-            &bob_device.address,
-            &mut alice_store.session_store,
-            &mut alice_store.identity_store,
-            &bob_pre_key_bundle,
-            SystemTime::now(),
-            &mut rng,
-        )
-        .await;
-
-        let msg_map = encrypt(&mut alice_store, bob, "Hello Bob".as_bytes()).await;
-
-        let to_bob_msg = msg_map.get(&1).unwrap().as_ref().unwrap();
-
-        let alice_device = manager
-            .get_contact(&alice_id)
-            .unwrap()
-            .devices
-            .get(&0)
-            .unwrap();
-
-        let bob_msg = decrypt(&mut bob_store, &mut rng, alice_device, to_bob_msg)
-            .await
-            .unwrap();
-
-        assert!(String::from_utf8(bob_msg).unwrap() == *"Hello Bob")
-    }
-
     pub async fn create_pre_key_bundle<R: Rng + CryptoRng>(
         store: &mut dyn ProtocolStore,
-        device_id: u32,
+        device_id: DeviceId,
         mut csprng: &mut R,
     ) -> Result<PreKeyBundle, SignalProtocolError> {
         // z is random
@@ -210,5 +151,60 @@ pub(crate) mod test {
             )
             .await?;
         Ok(pre_key_bundle)
+    }
+
+    #[tokio::test]
+    async fn test_encryption() {
+        let alice_id = new_service_id();
+        let bob_id = new_service_id();
+        let alice_device = new_device_id();
+        let bob_device = new_device_id();
+
+        let mut manager = ContactManager::new();
+        let _ = manager.add_contact(&alice_id, alice_device);
+        let _ = manager.add_contact(&bob_id, bob_device);
+
+        let mut alice_store = store(1);
+        let mut bob_store = store(0);
+
+        let mut rng = OsRng;
+
+        let bob_bundle_content = create_pre_key_bundle(&mut bob_store, bob_device, &mut rng)
+            .await
+            .unwrap();
+
+        let bob = manager.get_contact(&bob_id).unwrap();
+
+        let _ = process_prekey_bundle(
+            &manager
+                .get_contact(&bob_id)
+                .expect("Bob was not added")
+                .get_address(&bob_device)
+                .expect("Bob device id not added to contact"),
+            &mut alice_store.session_store,
+            &mut alice_store.identity_store,
+            &bob_bundle_content,
+            SystemTime::now(),
+            &mut rng,
+        )
+        .await;
+
+        let msg_map = encrypt(&mut alice_store, bob, "Hello Bob".as_bytes())
+            .await
+            .unwrap();
+
+        let to_bob_msg = msg_map.get(&bob_device).unwrap().as_ref().unwrap();
+
+        let alice_address = manager
+            .get_contact(&alice_id)
+            .unwrap()
+            .get_address(&alice_device)
+            .unwrap();
+
+        let bob_msg = decrypt(&mut bob_store, &mut rng, &alice_address, to_bob_msg)
+            .await
+            .unwrap();
+
+        assert!(String::from_utf8(bob_msg).unwrap() == *"Hello Bob")
     }
 }

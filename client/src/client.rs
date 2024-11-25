@@ -1,7 +1,7 @@
 use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use common::{
-    signal_protobuf::WebSocketResponseMessage,
+    signalservice::WebSocketResponseMessage,
     web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest, RegistrationResponse},
 };
 use core::str;
@@ -16,7 +16,7 @@ use surf::StatusCode;
 use crate::{
     contact_manager::ContactManager,
     errors::{LoginError, RegistrationError},
-    key_management::key_manager::{InMemoryKeyManager, KeyManager},
+    key_manager::{InMemoryKeyManager, KeyManager},
     server::{Server, ServerAPI},
     storage::{DeviceStorage, Storage},
 };

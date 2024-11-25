@@ -1,4 +1,5 @@
 pub mod authorization;
+use base64::{prelude::BASE64_STANDARD, Engine};
 use libsignal_protocol::{
     DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyRecord, SignedPreKeyRecord,
 };
@@ -296,18 +297,22 @@ pub struct SetKeyRequest {
     pub pq_last_resort_pre_key: Option<UploadSignedPreKey>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PreKeyResponse {
-    identity_key: IdentityKey,
+    identity_key: String, // Base64 endcoded
     keys: Vec<PreKeyResponseItem>,
 }
 
 impl PreKeyResponse {
     pub fn new(identity_key: IdentityKey, keys: Vec<PreKeyResponseItem>) -> Self {
-        Self { identity_key, keys }
+        Self {
+            identity_key: BASE64_STANDARD.encode(identity_key.serialize()),
+            keys,
+        }
     }
 
-    pub fn identity_key(&self) -> &IdentityKey {
+    pub fn identity_key(&self) -> &str {
         &self.identity_key
     }
     pub fn keys(&self) -> &Vec<PreKeyResponseItem> {
@@ -315,10 +320,10 @@ impl PreKeyResponse {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PreKeyResponseItem {
-    device_id: DeviceId, // Make a version which is serializable, then implement serde on the
-    // object
+    device_id: u32,
     registration_id: u32,
     pre_key: UploadPreKey,
     pq_pre_key: UploadSignedPreKey,
@@ -334,15 +339,15 @@ impl PreKeyResponseItem {
         signed_pre_key: UploadSignedPreKey,
     ) -> Self {
         Self {
-            device_id,
+            device_id: device_id.into(),
             registration_id,
             pre_key,
             pq_pre_key,
             signed_pre_key,
         }
     }
-    pub fn device_id(&self) -> &DeviceId {
-        &self.device_id
+    pub fn device_id(&self) -> DeviceId {
+        self.device_id.into()
     }
     pub fn registration_id(&self) -> u32 {
         self.registration_id

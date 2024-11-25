@@ -4,7 +4,7 @@ use super::{
 };
 use crate::database::SignalDatabase;
 use axum::extract::ws::Message;
-use common::signal_protobuf::WebSocketMessage;
+use common::signalservice::WebSocketMessage;
 use futures_util::stream::{SplitStream, StreamExt};
 use libsignal_core::ProtocolAddress;
 use prost::{bytes::Bytes, Message as PMessage};

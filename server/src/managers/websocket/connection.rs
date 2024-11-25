@@ -16,7 +16,7 @@ use axum::{
     extract::ws::{CloseFrame, Message},
     http::{StatusCode, Uri},
 };
-use common::signal_protobuf::{
+use common::signalservice::{
     web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
@@ -374,7 +374,7 @@ pub(crate) mod test {
     };
     use axum::{extract::ws::Message, http::StatusCode, Error};
     use base64::prelude::{Engine as _, BASE64_STANDARD};
-    use common::signal_protobuf::{Envelope, WebSocketMessage, WebSocketRequestMessage};
+    use common::signalservice::{Envelope, WebSocketMessage, WebSocketRequestMessage};
     use futures_util::{stream::SplitStream, StreamExt};
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};
