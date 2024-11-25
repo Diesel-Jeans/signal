@@ -1,12 +1,12 @@
 use super::connection::{ClientConnection, ConnectionMap, WebSocketConnection};
-use crate::{database::SignalDatabase, managers::state::SignalServerState};
+use crate::database::SignalDatabase;
 use axum::extract::ws::Message;
-use common::signal_protobuf::WebSocketMessage;
+use common::signalservice::WebSocketMessage;
 use common::websocket::wsstream::WSStream;
 use futures_util::stream::{SplitStream, StreamExt};
 use libsignal_core::ProtocolAddress;
 use prost::{bytes::Bytes, Message as PMessage};
-use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use tokio::sync::Mutex;
 
 /*const WS_ENDPOINTS: [&str; 24] = [
@@ -161,8 +161,7 @@ mod test {
     #[tokio::test]
     async fn test_insert() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("127.0.0.1:4043", state.clone()).await;
+        let (ws, _, _, mreceiver) = create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -173,8 +172,7 @@ mod test {
     #[tokio::test]
     async fn test_none_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("127.0.0.1:4043", state.clone()).await;
+        let (ws, sender, _, mreceiver) = create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -193,8 +191,7 @@ mod test {
     #[tokio::test]
     async fn test_error_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("127.0.0.1:4043", state.clone()).await;
+        let (ws, sender, _, mreceiver) = create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -203,7 +200,10 @@ mod test {
 
         assert!(ws.lock().await.is_active());
 
-        sender.send(Err(axum::Error::new("Error message"))).await;
+        sender
+            .send(Err(axum::Error::new("Error message")))
+            .await
+            .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         assert!(!mgr.is_connected(&address).await);
@@ -213,8 +213,7 @@ mod test {
     #[tokio::test]
     async fn test_close_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("127.0.0.1:4043", state.clone()).await;
+        let (ws, sender, _, mreceiver) = create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -223,7 +222,7 @@ mod test {
 
         assert!(ws.lock().await.is_active());
 
-        sender.send(Ok(Message::Close(None))).await;
+        sender.send(Ok(Message::Close(None))).await.unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         assert!(!mgr.is_connected(&address).await);
@@ -233,7 +232,7 @@ mod test {
     #[tokio::test]
     async fn test_text_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
+        let (ws, sender, mut receiver, mreceiver) =
             create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
@@ -243,7 +242,10 @@ mod test {
 
         assert!(ws.lock().await.is_active());
 
-        sender.send(Ok(Message::Text("hello".to_string()))).await;
+        sender
+            .send(Ok(Message::Text("hello".to_string())))
+            .await
+            .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
@@ -260,7 +262,7 @@ mod test {
     #[tokio::test]
     async fn test_binary_decode_error() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
+        let (ws, sender, mut receiver, mreceiver) =
             create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
@@ -272,7 +274,8 @@ mod test {
 
         sender
             .send(Ok(Message::Binary("hello".as_bytes().to_vec())))
-            .await;
+            .await
+            .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
@@ -309,7 +312,7 @@ mod test {
 "#;
 
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
+        let (ws, sender, receiver, mreceiver) =
             create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
@@ -328,7 +331,10 @@ mod test {
             Some(msg.as_bytes().to_vec()),
         );
 
-        sender.send(Ok(Message::Binary(req.encode_to_vec()))).await;
+        sender
+            .send(Ok(Message::Binary(req.encode_to_vec())))
+            .await
+            .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 

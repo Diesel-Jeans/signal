@@ -5,7 +5,7 @@ use crate::{
 use anyhow::{anyhow, bail, Result};
 use axum::async_trait;
 use common::{
-    signal_protobuf::Envelope,
+    signalservice::Envelope,
     web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
 };
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
@@ -19,7 +19,7 @@ pub struct PostgresDatabase {
 
 impl PostgresDatabase {
     pub async fn connect(database_url: String) -> Self {
-        dotenv::dotenv();
+        dotenv::dotenv().ok();
         let db_url = std::env::var(database_url).expect("Unable to read database url env var");
         Self {
             pool: PgPoolOptions::new()
@@ -948,9 +948,8 @@ async fn store_pq_pni_signed_pre_key(
 
 #[cfg(test)]
 mod db_tests {
-    use common::signal_protobuf::Envelope;
+    use common::signalservice::Envelope;
     use libsignal_core::{Aci, Pni, ProtocolAddress};
-    use rand::{rngs::StdRng, Rng, SeedableRng};
     use uuid::Uuid;
 
     use crate::{

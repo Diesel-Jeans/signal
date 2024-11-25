@@ -6,7 +6,7 @@ use anyhow::Result;
 use axum::{async_trait, extract::ws::Message, Error};
 use common::websocket::wsstream::WSStream;
 use common::{
-    signal_protobuf::Envelope,
+    signalservice::Envelope,
     web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
 };
 use futures_util::{stream::Stream, Sink};
@@ -24,117 +24,103 @@ pub struct MockDB {}
 impl SignalDatabase for MockDB {
     async fn store_signed_pre_key(
         &self,
-        spk: &UploadSignedPreKey,
-        address: &ProtocolAddress,
+        _: &UploadSignedPreKey,
+        _: &ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
 
     async fn store_pq_signed_pre_key(
         &self,
-        pq_spk: &UploadSignedPreKey,
-        address: &ProtocolAddress,
+        _: &UploadSignedPreKey,
+        _: &ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
-    async fn add_device(&self, service_id: &ServiceId, device: &Device) -> Result<()> {
+    async fn add_device(&self, _: &ServiceId, _: &Device) -> Result<()> {
         todo!()
     }
-    async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
+    async fn get_all_devices(&self, _: &ServiceId) -> Result<Vec<Device>> {
         todo!()
     }
-    async fn get_device(&self, address: &ProtocolAddress) -> Result<Device> {
+    async fn get_device(&self, _: &ProtocolAddress) -> Result<Device> {
         todo!()
     }
-    async fn delete_device(&self, address: &ProtocolAddress) -> Result<()> {
-        todo!()
-    }
-
-    async fn add_account(&self, account: &Account) -> Result<()> {
-        todo!()
-    }
-    async fn get_account(&self, service_id: &ServiceId) -> Result<Account> {
-        todo!()
-    }
-    async fn update_account_aci(&self, service_id: &ServiceId, new_aci: Aci) -> Result<()> {
-        todo!()
-    }
-    async fn update_account_pni(&self, service_id: &ServiceId, new_pni: Pni) -> Result<()> {
+    async fn delete_device(&self, _: &ProtocolAddress) -> Result<()> {
         todo!()
     }
 
-    async fn delete_account(&self, service_id: &ServiceId) -> Result<()> {
+    async fn add_account(&self, _: &Account) -> Result<()> {
+        todo!()
+    }
+    async fn get_account(&self, _: &ServiceId) -> Result<Account> {
+        todo!()
+    }
+    async fn update_account_aci(&self, _: &ServiceId, _: Aci) -> Result<()> {
+        todo!()
+    }
+    async fn update_account_pni(&self, _: &ServiceId, _: Pni) -> Result<()> {
         todo!()
     }
 
-    async fn push_message_queue(
-        &self,
-        address: &ProtocolAddress,
-        messages: Vec<Envelope>,
-    ) -> Result<()> {
-        todo!()
-    }
-    async fn pop_msg_queue(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
-        todo!()
-    }
-    async fn store_key_bundle(
-        &self,
-        data: &DevicePreKeyBundle,
-        owner_address: &ProtocolAddress,
-    ) -> Result<()> {
-        todo!()
-    }
-    async fn get_key_bundle(&self, address: &ProtocolAddress) -> Result<DevicePreKeyBundle> {
+    async fn delete_account(&self, _: &ServiceId) -> Result<()> {
         todo!()
     }
 
-    async fn get_one_time_ec_pre_key_count(&self, service_id: &ServiceId) -> Result<u32> {
+    async fn push_message_queue(&self, _: &ProtocolAddress, _: Vec<Envelope>) -> Result<()> {
+        todo!()
+    }
+    async fn pop_msg_queue(&self, _: &ProtocolAddress) -> Result<Vec<Envelope>> {
+        todo!()
+    }
+    async fn store_key_bundle(&self, _: &DevicePreKeyBundle, _: &ProtocolAddress) -> Result<()> {
+        todo!()
+    }
+    async fn get_key_bundle(&self, _: &ProtocolAddress) -> Result<DevicePreKeyBundle> {
         todo!()
     }
 
-    async fn get_one_time_pq_pre_key_count(&self, service_id: &ServiceId) -> Result<u32> {
+    async fn get_one_time_ec_pre_key_count(&self, _: &ServiceId) -> Result<u32> {
+        todo!()
+    }
+
+    async fn get_one_time_pq_pre_key_count(&self, _: &ServiceId) -> Result<u32> {
         todo!()
     }
 
     async fn store_one_time_ec_pre_keys(
         &self,
-        otpks: Vec<UploadPreKey>,
-        owner_address: &ProtocolAddress,
+        _: Vec<UploadPreKey>,
+        _: &ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
 
     async fn store_one_time_pq_pre_keys(
         &self,
-        otpks: Vec<UploadSignedPreKey>,
-        owner_address: &ProtocolAddress,
+        _: Vec<UploadSignedPreKey>,
+        _: &ProtocolAddress,
     ) -> Result<()> {
         todo!()
     }
 
-    async fn get_one_time_ec_pre_key(
-        &self,
-        owner_address: &ProtocolAddress,
-    ) -> Result<UploadPreKey> {
+    async fn get_one_time_ec_pre_key(&self, _: &ProtocolAddress) -> Result<UploadPreKey> {
         todo!()
     }
 
-    async fn get_one_time_pq_pre_key(
-        &self,
-        owner_address: &ProtocolAddress,
-    ) -> Result<UploadSignedPreKey> {
+    async fn get_one_time_pq_pre_key(&self, _: &ProtocolAddress) -> Result<UploadSignedPreKey> {
         todo!()
     }
 
-    async fn count_messages(&self, address: &ProtocolAddress) -> Result<u32> {
+    async fn count_messages(&self, _: &ProtocolAddress) -> Result<u32> {
         todo!()
     }
 
-    async fn get_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
+    async fn get_messages(&self, _: &ProtocolAddress) -> Result<Vec<Envelope>> {
         todo!()
     }
 
-    async fn delete_messages(&self, address: &ProtocolAddress) -> Result<Vec<Envelope>> {
+    async fn delete_messages(&self, _: &ProtocolAddress) -> Result<Vec<Envelope>> {
         todo!()
     }
 }
@@ -176,7 +162,7 @@ impl Sink<Message> for MockSocket {
         Poll::Ready(Ok(()))
     }
 
-    fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
         self.client_receiver
             .try_send(item)
             .map_err(|_| Error::new("Send failed".to_string()))
@@ -211,17 +197,13 @@ impl WSStream<Message, axum::Error> for MockSocket {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use std::time::Duration;
-
     use super::MockSocket;
-    use super::WSStream;
     use axum::extract::ws::Message;
-    use futures_util::SinkExt;
-    use futures_util::{stream::SplitStream, StreamExt};
+    use futures_util::{SinkExt, StreamExt};
+
     #[tokio::test]
     async fn test_mock_echo() {
-        let (mut mock, mut sender, mut receiver) = MockSocket::new();
-
+        let (mock, sender, mut receiver) = MockSocket::new();
         let (mut ms, mut mr) = mock.split();
 
         tokio::spawn(async move {
@@ -232,7 +214,10 @@ pub(crate) mod test {
             }
         });
 
-        sender.send(Ok(Message::Text("hello".to_string()))).await;
+        sender
+            .send(Ok(Message::Text("hello".to_string())))
+            .await
+            .unwrap();
 
         match receiver.recv().await.unwrap() {
             Message::Text(x) => assert!(x == "hello", "Expected 'hello' in test_mock"),
@@ -242,13 +227,13 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_mock_dropped_sender() {
-        let (mut mock, mut sender, mut receiver) = MockSocket::new();
+        let (mock, sender, _) = MockSocket::new();
 
-        let (mut ms, mut mr) = mock.split();
+        let (_, mut mr) = mock.split();
 
         drop(sender);
 
-        if let Some(res) = mr.next().await {
+        if mr.next().await.is_some() {
             panic!("Expected None");
         }
     }

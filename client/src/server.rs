@@ -3,7 +3,7 @@ use crate::{client::VerifiedSession, contact_manager::Contact};
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
 use common::{
-    signal_protobuf::{WebSocketRequestMessage, WebSocketResponseMessage},
+    signalservice::{WebSocketRequestMessage, WebSocketResponseMessage},
     web_api::{
         authorization::BasicAuthorizationHeader, AccountAttributes, RegistrationRequest,
         UploadSignedPreKey,
@@ -19,7 +19,6 @@ use std::{
     time::Duration,
 };
 use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
-use tokio_tungstenite::connect_async;
 
 const CLIENT_URI: &str = "/client";
 const MSG_URI: &str = "v1/messages";
@@ -141,9 +140,13 @@ impl Server for ServerAPI {
         client_info: &Contact,
     ) -> Result<Response, Box<dyn std::error::Error>> {
         let payload = json!({
-            "uuid": client_info.uuid
+            "uuid": client_info.service_id.service_id_string()
         });
-        let uri = format!("{}/{}", DEVICE_URI, client_info.uuid);
+        let uri = format!(
+            "{}/{}",
+            DEVICE_URI,
+            client_info.service_id.service_id_string()
+        );
 
         self.make_request(ReqType::Put(payload), uri).await
     }
@@ -162,7 +165,7 @@ impl Server for ServerAPI {
         client: &Contact,
     ) -> Result<Response, Box<dyn std::error::Error>> {
         let payload = json!({
-            "uuid": client.uuid
+            "uuid": client.service_id.service_id_string()
         });
         self.make_request(ReqType::Put(payload), CLIENT_URI.to_string())
             .await

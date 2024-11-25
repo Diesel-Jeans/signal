@@ -1,9 +1,11 @@
 use crate::{
     account::{Account, Device},
     database::SignalDatabase,
+    error::ApiError,
 };
 use anyhow::Result;
 use common::web_api::{AccountAttributes, DevicePreKeyBundle};
+use hyper::StatusCode;
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
@@ -30,7 +32,7 @@ where
         aci_identity_key: IdentityKey,
         pni_identity_key: IdentityKey,
         primary_device: Device,
-    ) -> Result<Account> {
+    ) -> Result<Account, ApiError> {
         let account = Account::new(
             Pni::from(Uuid::new_v4()),
             primary_device,
@@ -39,7 +41,19 @@ where
             phone_number,
             account_attributes,
         );
-        self.db.add_account(&account).await?;
+        self.db.add_account(&account).await.map_err(|err| {
+            let mut out_err = ApiError {
+                status_code: StatusCode::INTERNAL_SERVER_ERROR,
+                message: "Could not create account".into(),
+            };
+            if let Some(sqlx::Error::Database(database_err)) = err.downcast_ref() {
+                if (database_err.as_ref()).constraint() == Some("phone_number") {
+                    out_err.status_code = StatusCode::BAD_REQUEST;
+                    out_err.message += ", phone number already in use";
+                }
+            };
+            out_err
+        })?;
         Ok(account)
     }
 

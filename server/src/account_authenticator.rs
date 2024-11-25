@@ -18,7 +18,6 @@ use axum_extra::{
 use common::websocket::wsstream::WSStream;
 use libsignal_core::ServiceId;
 use rand::{rngs::OsRng, RngCore};
-use sha2::Sha256;
 use std::fmt::Debug;
 
 const SALT_SIZE: usize = 16;

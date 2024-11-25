@@ -1,11 +1,10 @@
 use crate::{
     database::SignalDatabase,
     message_cache::{MessageAvailabilityListener, MessageCache},
-    postgres::PostgresDatabase,
 };
 use anyhow::{Ok, Result};
-use common::signal_protobuf::Envelope;
-use libsignal_core::ProtocolAddress;
+use common::signalservice::{envelope, Envelope};
+use libsignal_core::{DeviceId, ProtocolAddress};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -56,11 +55,11 @@ where
         let cache_has_messages = self.message_cache.has_messages(address).await?;
         let db_has_messages = self.has_messages(address).await?;
 
-        let outcome = if (cache_has_messages && db_has_messages) {
+        let outcome = if cache_has_messages && db_has_messages {
             "both"
-        } else if (cache_has_messages) {
+        } else if cache_has_messages {
             "cached"
-        } else if (db_has_messages) {
+        } else if db_has_messages {
             "persisted"
         } else {
             "none"
@@ -154,10 +153,9 @@ pub mod message_manager_tests {
         test_utils::{
             database::database_connect,
             message_cache::{teardown, MockWebSocketConnection},
-            user::new_account_and_address,
+            user::{new_account_and_address, new_protocol_address},
         },
     };
-    use libsignal_core::ProtocolAddress;
 
     async fn init_manager() -> MessagesManager<PostgresDatabase, MockWebSocketConnection> {
         MessagesManager::<PostgresDatabase, MockWebSocketConnection> {
@@ -169,11 +167,11 @@ pub mod message_manager_tests {
     #[tokio::test]
     async fn test_may_have_cached_persisted_messages() {
         let msg_manager = init_manager().await;
-        let (account, address) = new_account_and_address();
+        let address = new_protocol_address();
         let mut envelope = Envelope::default();
 
         // Cache
-        msg_manager.insert(&address, &mut envelope).await;
+        msg_manager.insert(&address, &mut envelope).await.unwrap();
 
         // Act
         let may_have_messages = msg_manager
@@ -229,7 +227,7 @@ pub mod message_manager_tests {
         let mut envelope = Envelope::default();
 
         // Cache
-        msg_manager.insert(&address, &mut envelope).await;
+        msg_manager.insert(&address, &mut envelope).await.unwrap();
 
         // DB
         msg_manager.db.add_account(&account).await.unwrap();
@@ -298,9 +296,9 @@ pub mod message_manager_tests {
         let mut envelope2 = Envelope::default();
 
         // Cache
-        msg_manager.insert(&address, &mut envelope1).await;
+        msg_manager.insert(&address, &mut envelope1).await.unwrap();
 
-        msg_manager.insert(&address, &mut envelope2).await;
+        msg_manager.insert(&address, &mut envelope2).await.unwrap();
 
         // DB
         msg_manager.db.add_account(&account).await.unwrap();
@@ -339,7 +337,7 @@ pub mod message_manager_tests {
         let mut envelope = Envelope::default();
 
         // Cache
-        msg_manager.insert(&address, &mut envelope).await;
+        msg_manager.insert(&address, &mut envelope).await.unwrap();
 
         // DB
         msg_manager.db.add_account(&account).await.unwrap();
@@ -383,10 +381,10 @@ pub mod message_manager_tests {
         let msg_manager = init_manager().await;
         let (account, address) = new_account_and_address();
         let mut envelope1 = Envelope::default();
-        let mut envelope2 = Envelope::default();
+        let envelope2 = Envelope::default();
 
         // Cache
-        msg_manager.insert(&address, &mut envelope1).await;
+        msg_manager.insert(&address, &mut envelope1).await.unwrap();
 
         // DB
         msg_manager.db.add_account(&account).await.unwrap();
@@ -439,9 +437,9 @@ pub mod message_manager_tests {
         let mut envelope2 = Envelope::default();
 
         // Cache
-        msg_manager.insert(&address, &mut envelope1).await;
+        msg_manager.insert(&address, &mut envelope1).await.unwrap();
 
-        msg_manager.insert(&address, &mut envelope2).await;
+        msg_manager.insert(&address, &mut envelope2).await.unwrap();
 
         // DB
         msg_manager.db.add_account(&account).await.unwrap();

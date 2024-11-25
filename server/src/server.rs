@@ -11,6 +11,7 @@ use crate::{
         websocket::connection::{SignalWebSocket, UserIdentity, WebSocketConnection},
     },
     postgres::PostgresDatabase,
+    query::CheckKeysRequest,
     response::SendMessageResponse,
 };
 use anyhow::Result;
@@ -20,7 +21,7 @@ use axum::{
     extract::{
         connect_info::ConnectInfo,
         ws::{WebSocket, WebSocketUpgrade},
-        Host, Path, State,
+        Host, Path, Query, State,
     },
     handler::HandlerWithoutStateExt,
     http::{
@@ -34,8 +35,8 @@ use axum::{
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use common::web_api::{
-    authorization::BasicAuthorizationHeader, DevicePreKeyBundle, RegistrationRequest,
-    RegistrationResponse, SignalMessages,
+    authorization::BasicAuthorizationHeader, DevicePreKeyBundle, PreKeyResponse,
+    RegistrationRequest, RegistrationResponse, SetKeyRequest, SignalMessages,
 };
 use common::websocket::wsstream::WSStream;
 use futures_util::StreamExt;
@@ -180,11 +181,7 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream<Message, axum::
             registration.pni_identity_key().to_owned(),
             device.clone(),
         )
-        .await
-        .map_err(|err| ApiError {
-            message: format!("Could not create account:{}", err),
-            status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        })?;
+        .await?;
 
     let aci = account.aci();
     let address = ProtocolAddress::new(aci.service_id_string(), device.device_id());
@@ -193,7 +190,11 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream<Message, axum::
     state
         .account_manager
         .store_key_bundle(&device_pre_key_bundle, &address)
-        .await;
+        .await
+        .map_err(|err| ApiError {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            message: err.to_string(),
+        })?;
 
     Ok(RegistrationResponse {
         uuid: aci.into(),
@@ -325,24 +326,62 @@ async fn post_registration_endpoint(
 #[debug_handler]
 async fn get_keys_endpoint(
     State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
-) {
-    // TODO: Call `handle_get_keys`
+    authenticated_device: AuthenticatedDevice,
+    Path((identifier, device_id)): Path<(String, String)>,
+) -> Result<Json<PreKeyResponse>, ApiError> {
+    state
+        .key_manager
+        .handle_get_keys(
+            &state.db,
+            &authenticated_device,
+            ServiceId::parse_from_service_id_string(&identifier).ok_or_else(|| ApiError {
+                status_code: StatusCode::BAD_REQUEST,
+                message: "Identifier is not of right format".into(),
+            })?,
+            device_id,
+        )
+        .await
+        .map(Json)
 }
 
 /// Handler for the POST v2/keys/check endpoint.
 #[debug_handler]
 async fn post_keycheck_endpoint(
     State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
-) {
-    // TODO: Call `handle_post_keycheck`
+    authenticated_device: AuthenticatedDevice,
+    Json(check_keys_request): Json<CheckKeysRequest>,
+) -> Result<(), ApiError> {
+    state
+        .key_manager
+        .handle_post_keycheck(
+            &authenticated_device,
+            get_kind(check_keys_request.identity_type)?,
+            check_keys_request.user_digest,
+        )
+        .await?
+        .then(|| ())
+        .ok_or_else(|| ApiError {
+            status_code: StatusCode::CONFLICT,
+            message: "".into(),
+        })
 }
 
 /// Handler for the PUT v2/keys endpoint.
 #[debug_handler]
 async fn put_keys_endpoint(
     State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
-) {
-    // TODO: Call `handle_put_keys`
+    authenticated_device: AuthenticatedDevice,
+    Query(identity_type): Query<String>,
+    Json(set_keys_request): Json<SetKeyRequest>,
+) -> Result<(), ApiError> {
+    state
+        .key_manager
+        .handle_put_keys(
+            &authenticated_device,
+            set_keys_request,
+            get_kind(identity_type)?,
+        )
+        .await
 }
 
 /// Handler for the DELETE v1/accounts/me endpoint.
@@ -448,7 +487,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/messages", get(get_messages_endpoint))
         .route("/v1/messages/:destination", put(put_messages_endpoint))
         .route("/v1/registration", post(post_registration_endpoint))
-        .route("/v2/keys", get(get_keys_endpoint))
+        .route("/v2/keys/:identifier/:device_id", get(get_keys_endpoint))
         .route("/v2/keys/check", post(post_keycheck_endpoint))
         .route("/v2/keys", put(put_keys_endpoint))
         .route("/v1/accounts/me", delete(delete_account_endpoint))
@@ -486,7 +525,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
-    message_persister.stop();
+    message_persister.stop().await;
 
     Ok(())
 }
@@ -501,9 +540,21 @@ fn time_now() -> Result<u64, ApiError> {
         .as_secs())
 }
 
+fn get_kind(identity_string: String) -> Result<ServiceIdKind, ApiError> {
+    match identity_string.as_str() {
+        "aci" | "ACI" | "" => Ok(ServiceIdKind::Aci),
+        "pni" | "PNI" => Ok(ServiceIdKind::Pni),
+        _ => {
+             Err(ApiError {
+                status_code: StatusCode::BAD_REQUEST,
+                message: "Identity type needs to be either of: aci | pni | ACI | PNI or none which will default to aci".into(),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod server_tests {
-    use common::web_api::{AccountAttributes, DeviceCapabilities};
 
     #[ignore = "Not implemented"]
     #[tokio::test]

@@ -1,5 +1,3 @@
-#![allow(unused)]
-use chrono::prelude::*;
 mod account;
 mod account_authenticator;
 pub mod database;
@@ -12,6 +10,7 @@ mod postgres;
 mod query;
 mod response;
 mod server;
+#[cfg(test)]
 mod test_utils;
 
 #[tokio::main]

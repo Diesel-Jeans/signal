@@ -1,4 +1,3 @@
-#![allow(unused)]
 use std::error::Error;
 
 use crate::client::Client;
@@ -10,10 +9,12 @@ mod client;
 mod contact_manager;
 mod encryption;
 mod errors;
-mod key_management;
+mod key_manager;
 mod server;
 mod socket_manager;
 mod storage;
+#[cfg(test)]
+mod test_utils;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

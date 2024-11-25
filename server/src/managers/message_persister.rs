@@ -3,10 +3,8 @@ use crate::{
     database::SignalDatabase,
     managers::{account_manager::AccountManager, messages_manager::MessagesManager},
     message_cache::{MessageAvailabilityListener, MessageCache},
-    postgres::PostgresDatabase,
 };
 use anyhow::{anyhow, Result};
-use common::signal_protobuf::Envelope;
 use libsignal_core::{ProtocolAddress, ServiceId};
 use std::{
     sync::{
@@ -85,11 +83,7 @@ where
 
     // Finds the message queues where the oldest message is >10 minutes old.
     async fn persist_next_queues(&mut self) -> Result<()> {
-        let mut queues_to_persist: Vec<String> = Vec::new();
-        let time_in_secs: u64 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Failed to get time")
-            .as_secs();
+        let mut queues_to_persist = Vec::new();
 
         while {
             let time_in_secs: u64 = SystemTime::now()
@@ -99,7 +93,7 @@ where
 
             queues_to_persist = self
                 .message_cache
-                .get_message_queues_to_persist((time_in_secs - PERSIST_DELAY), QUEUE_BATCH_LIMIT)
+                .get_message_queues_to_persist(time_in_secs - PERSIST_DELAY, QUEUE_BATCH_LIMIT)
                 .await?;
 
             !queues_to_persist.is_empty()
@@ -132,8 +126,7 @@ where
 
     // Takes the message queues where the oldest message is >10 minutes old.
     async fn persist_queue(&mut self, account: &Account, device: &Device) -> Result<()> {
-        let message_count: u32 = 0;
-        let mut messages: Vec<Envelope> = Vec::new();
+        let mut messages = Vec::new();
         let protocol_address =
             ProtocolAddress::new(account.aci().service_id_string(), device.device_id());
 
@@ -149,8 +142,7 @@ where
 
             !messages.is_empty()
         } {
-            let messages_removed_from_cache = self
-                .messages_manager
+            self.messages_manager
                 .persist_messages(&protocol_address, messages)
                 .await?;
         }
@@ -164,8 +156,10 @@ where
 
 #[cfg(test)]
 mod message_persister_tests {
-    use super::*;
     use crate::{
+        database::SignalDatabase,
+        managers::{account_manager::AccountManager, messages_manager::MessagesManager},
+        message_cache::MessageCache,
         postgres::PostgresDatabase,
         test_utils::{
             database::database_connect,
@@ -173,9 +167,16 @@ mod message_persister_tests {
             user::new_account_and_address,
         },
     };
+    use common::signalservice::Envelope;
+    use libsignal_core::ProtocolAddress;
     use redis::cmd;
-    use std::time::Duration;
+    use std::{
+        sync::Arc,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
     use tokio::sync::Mutex;
+
+    use super::MessagePersister;
 
     fn time_now_secs() -> u64 {
         SystemTime::now()
@@ -231,7 +232,7 @@ mod message_persister_tests {
     }
 
     async fn has_messages(
-        mut cache: &MessageCache<MockWebSocketConnection>,
+        cache: &MessageCache<MockWebSocketConnection>,
         queue_keys: &Vec<String>,
     ) -> bool {
         let mut connection = cache.get_connection().await.unwrap();
@@ -265,7 +266,7 @@ mod message_persister_tests {
                 .await
                 .unwrap();
 
-            if let Some(queue_lock_key) = locked {
+            if locked.is_some() {
                 return false;
             }
         }
@@ -317,7 +318,7 @@ mod message_persister_tests {
             )
             .await;
 
-        let mut queue_keys_before_message_persister = check_queue_key_timestamp(
+        let queue_keys_before_message_persister = check_queue_key_timestamp(
             &cache,
             now_timestamp, // now time
             10,

@@ -24,7 +24,7 @@ use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::Message;
 
-use common::signal_protobuf::{
+use common::signalservice::{
     web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
 };
 use common::websocket::{
@@ -422,7 +422,7 @@ mod test {
 
     use axum::http::StatusCode;
     use common::{
-        signal_protobuf::WebSocketMessage,
+        signalservice::WebSocketMessage,
         websocket::{
             net_helper::{create_request, create_response},
             wsstream::WSStream,
