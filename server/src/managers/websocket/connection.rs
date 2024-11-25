@@ -10,7 +10,7 @@ use crate::{
     database::SignalDatabase,
     managers::{client_presence_manager::DisplacedPresenceListener, state::SignalServerState},
     message_cache::MessageAvailabilityListener,
-    server::handle_put_messages,
+    server::{handle_keepalive, handle_put_messages},
 };
 use axum::{
     extract::ws::{CloseFrame, Message},
@@ -195,7 +195,11 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
 
     async fn handle_request(&mut self, request_msq: WebSocketRequestMessage) -> Result<(), String> {
         let msq_id = request_msq.id.ok_or("Request id was not present")?;
-        if !request_msq.path().starts_with("/v1/messages") {
+        let path = request_msq
+            .path
+            .clone()
+            .ok_or("Request path was not present")?;
+        if !path.starts_with("/v1/messages") && !path.starts_with("/v1/keepalive") {
             self.send(Message::Binary(
                 create_response(msq_id, StatusCode::INTERNAL_SERVER_ERROR, vec![], None)?
                     .encode_to_vec(),
@@ -204,6 +208,25 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
             .map_err(|err| format!("{}", err))?;
 
             return Err(format!("Incorret path: {}", request_msq.path()));
+        }
+
+        if request_msq.path().starts_with("/v1/keepalive") {
+            let user = match &self.identity {
+                UserIdentity::ProtocolAddress(pa) => {
+                    todo!()
+                }
+                UserIdentity::AuthenticatedDevice(auth_device) => auth_device,
+            };
+
+            return match handle_keepalive(&self.state, user).await {
+                Ok(()) => self
+                    .send(Message::Binary(
+                        create_response(msq_id, StatusCode::OK, vec![], None)?.encode_to_vec(),
+                    ))
+                    .await
+                    .map_err(|err| err.to_string()),
+                _ => self.close_reason(1000, "OK").await, //This is extremely wrong and stupid, but it is what happens on line 54 in KeepAliveController.java
+            };
         }
 
         let res = match &self.identity {
@@ -335,6 +358,7 @@ pub type ConnectionMap<T, U> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnecti
 
 #[cfg(test)]
 pub(crate) mod test {
+    use super::{UserIdentity, WebSocketConnection};
     use crate::{
         database::SignalDatabase,
         managers::{
@@ -350,17 +374,15 @@ pub(crate) mod test {
     };
     use axum::{extract::ws::Message, http::StatusCode, Error};
     use base64::prelude::{Engine as _, BASE64_STANDARD};
-    use common::signalservice::{Envelope, WebSocketMessage};
+    use common::signalservice::{Envelope, WebSocketMessage, WebSocketRequestMessage};
     use futures_util::{stream::SplitStream, StreamExt};
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};
 
     use std::time::Duration;
-    use std::{net::SocketAddr, str::FromStr};
+    use std::{net::SocketAddr, str::FromStr, sync::Arc};
     use tokio::sync::mpsc::{Receiver, Sender};
     use tokio::time::sleep;
-
-    use super::{UserIdentity, WebSocketConnection};
 
     fn make_envelope() -> Envelope {
         Envelope {
@@ -560,7 +582,7 @@ pub(crate) mod test {
             .await;
 
         let sending_msg = format!(
-            r#" 
+            r#"
         {{
             "messages":[
                 {{
@@ -711,5 +733,75 @@ pub(crate) mod test {
         assert!(req.headers[0] == "X-Signal-Key: false");
         assert!(req.headers[1].starts_with("X-Signal-Timestamp:"));
         assert!(req.body.unwrap() == env.encode_to_vec());
+    }
+
+    #[tokio::test]
+    async fn test_keepalive_for_present_device() {
+        let mut state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver, mut mreceiver) =
+            create_connection("127.0.0.1:4042", state.clone()).await;
+
+        let addr = client.protocol_address();
+        let websocket = Arc::new(tokio::sync::Mutex::new(client));
+
+        state
+            .client_presence_manager
+            .set_present(&addr, websocket.clone())
+            .await;
+        websocket
+            .lock()
+            .await
+            .on_receive(create_request(1, "PUT", "/v1/keepalive", vec![], None))
+            .await
+            .unwrap();
+
+        let message_response = receiver.recv().await.unwrap();
+        let message = WebSocketMessage::decode(message_response.into_data().as_slice()).unwrap();
+        let response = message.response.unwrap();
+
+        assert!(state.client_presence_manager.is_locally_present(&addr));
+        assert_eq!(message.r#type.unwrap(), 2);
+        assert_eq!(response.status.unwrap(), 200);
+        assert_eq!(response.message.unwrap(), "OK");
+    }
+
+    #[tokio::test]
+    async fn test_keepalive_for_unpresent_device() {
+        let mut state = SignalServerState::<MockDB, MockSocket>::new();
+        let (mut client, sender, mut receiver, mut mreceiver) =
+            create_connection("127.0.0.1:4042", state.clone()).await;
+
+        state
+            .clone()
+            .client_presence_manager
+            .disconnect_presence_in_test(&client.protocol_address())
+            .await;
+
+        client
+            .on_receive(create_request(1, "PUT", "/v1/keepalive", vec![], None))
+            .await
+            .unwrap();
+
+        let message_response = receiver.recv().await.unwrap();
+        let message = WebSocketMessage::decode(message_response.into_data().as_slice()).unwrap();
+        let response = message.response.unwrap();
+
+        println!(
+            "Is locally present: {}",
+            state
+                .client_presence_manager
+                .is_locally_present(&client.protocol_address())
+        );
+        println!(
+            "Status: {}, Message: {}",
+            response.status.unwrap(),
+            response.message.unwrap()
+        );
+
+        assert!(!state
+            .client_presence_manager
+            .is_locally_present(&client.protocol_address()));
+        assert_eq!(message.r#type.unwrap(), 2);
+        assert_eq!(response.status.unwrap(), 200);
     }
 }
