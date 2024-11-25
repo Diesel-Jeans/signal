@@ -1,12 +1,8 @@
+use base64::{prelude::BASE64_STANDARD, Engine as _};
+use common::signalservice::{web_socket_message, WebSocketMessage};
+use common::websocket::{connection_state::ConnectionState, wsstream::WSStream};
 use futures_util::lock::Mutex;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
-use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
-use tokio_tungstenite::{
-    client_async_tls_with_config, tungstenite, Connector, MaybeTlsStream, WebSocketStream,
-};
-use base64::{prelude::BASE64_STANDARD, Engine as _};
 use prost::{bytes::Bytes, Message as PMessage};
 use rustls::pki_types::CertificateDer;
 use rustls::{ClientConfig, RootCertStore};
@@ -14,16 +10,20 @@ use rustls_pemfile::certs;
 use socket2::{SockRef, TcpKeepalive};
 use std::fs::File;
 use std::io::BufReader;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
+use tokio::net::TcpStream;
 use tokio::sync::broadcast::{self, Receiver, Sender};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
 use tokio_tungstenite::tungstenite::Message;
-use common::signalservice::{web_socket_message, WebSocketMessage};
-use common::websocket::{connection_state::ConnectionState, wsstream::WSStream};
-use std::pin::Pin;
-use std::task::{Poll, Context};
-use tungstenite::protocol::frame::coding::{CloseCode};
+use tokio_tungstenite::{
+    client_async_tls_with_config, tungstenite, Connector, MaybeTlsStream, WebSocketStream,
+};
+use tungstenite::protocol::frame::coding::CloseCode;
 
 fn rustls_cfg(ca_file_path: &str) -> Result<ClientConfig, String> {
     let ca_file = File::open(ca_file_path).map_err(|e| e.to_string())?;
@@ -47,7 +47,6 @@ fn rustls_cfg(ca_file_path: &str) -> Result<ClientConfig, String> {
     Ok(config)
 }
 
-
 type TLSWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 #[derive(Debug)]
 pub struct SignalStream(TLSWebSocket);
@@ -60,10 +59,7 @@ impl SignalStream {
 impl Stream for SignalStream {
     type Item = Result<Message, tungstenite::Error>;
 
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Pin::new(&mut self.0).poll_next(cx)
     }
 }
@@ -71,10 +67,7 @@ impl Stream for SignalStream {
 impl Sink<Message> for SignalStream {
     type Error = tungstenite::Error;
 
-    fn poll_ready(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Pin::new(&mut self.0).poll_ready(cx)
     }
 
@@ -82,17 +75,11 @@ impl Sink<Message> for SignalStream {
         Pin::new(&mut self.0).start_send(item)
     }
 
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Pin::new(&mut self.0).poll_flush(cx)
     }
 
-    fn poll_close(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Pin::new(&mut self.0).poll_close(cx)
     }
 }
@@ -263,11 +250,7 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<T
         }
     }
 
-    async fn close_reason(
-        &mut self,
-        code: CloseCode,
-        reason: String,
-    ) {
+    async fn close_reason(&mut self, code: CloseCode, reason: String) {
         let mut guard = self.connection.lock().await;
         if let ConnectionState::Active(mut socket) =
             std::mem::replace(&mut *guard, ConnectionState::Closed)

@@ -15,11 +15,11 @@ use common::signalservice::{
     web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
+use common::websocket::connection_state::ConnectionState;
 use common::websocket::net_helper::{
     create_request, create_response, current_millis, generate_req_id, unpack_messages,
     PathExtractor,
 };
-use common::websocket::connection_state::ConnectionState;
 use common::websocket::wsstream::WSStream;
 use futures_util::{stream::SplitSink, SinkExt};
 use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
