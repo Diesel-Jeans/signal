@@ -28,6 +28,7 @@ socket2 = "0.5.7"
 http-client = { version = "6.5.3", features = ["h1_client", "default"] }
 async-native-tls = "0.3.3"
 base64 = "0.22.1"
+sqlx = { version = "0.8.2", features = ["sqlite", "runtime-tokio"] }
 
 [build-dependencies]
 tonic-build = "0.12.3"

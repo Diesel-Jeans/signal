@@ -6,19 +6,19 @@ use common::{
 };
 use core::str;
 use libsignal_core::{Aci, Pni};
-use libsignal_protocol::{
-    IdentityKey, IdentityKeyPair, InMemSignalProtocolStore, KeyPair, KyberPreKeyRecord,
-    SignedPreKeyRecord,
-};
+use libsignal_protocol::{IdentityKey, IdentityKeyPair, KeyPair};
 use rand::{rngs::OsRng, Rng};
 use surf::StatusCode;
 
 use crate::{
     contact_manager::ContactManager,
     errors::{LoginError, RegistrationError},
-    key_manager::{InMemoryKeyManager, KeyManager},
+    key_manager::KeyManager,
     server::{Server, ServerAPI},
-    storage::{DeviceStorage, Storage},
+    storage::{
+        generic::{ProtocolStore, Storage},
+        in_memory::InMemory,
+    },
 };
 
 pub struct Client {
@@ -26,8 +26,8 @@ pub struct Client {
     pni: Pni,
     contact_manager: ContactManager,
     server_api: ServerAPI,
-    key_manager: InMemoryKeyManager,
-    storage: DeviceStorage,
+    key_manager: KeyManager,
+    storage: Storage<InMemory>,
 }
 
 pub struct VerifiedSession {
@@ -50,8 +50,8 @@ impl Client {
         pni: Pni,
         contact_manager: ContactManager,
         server_api: ServerAPI,
-        key_manager: InMemoryKeyManager,
-        storage: DeviceStorage,
+        key_manager: KeyManager,
+        storage: Storage<InMemory>,
     ) -> Self {
         Client {
             aci,
@@ -74,17 +74,40 @@ impl Client {
         let id_key = IdentityKey::new(aci_key_pair.public_key);
         let id_key_pair = IdentityKeyPair::new(id_key, aci_key_pair.private_key);
 
-        let storage = InMemSignalProtocolStore::new(id_key_pair, aci_registration_id)
-            .expect("Can always create a protocol store.");
-        let mut key_manager = InMemoryKeyManager::new(storage);
+        let mut proto_storage = ProtocolStore::new(id_key_pair, aci_registration_id);
+        let mut key_manager = KeyManager::new();
 
-        let aci_signed_pk: SignedPreKeyRecord = key_manager.generate(&mut csprng).await.unwrap();
-        let pni_signed_pk: SignedPreKeyRecord = key_manager.generate(&mut csprng).await.unwrap();
+        let aci_signed_pk = key_manager
+            .generate_signed_pre_key(
+                &mut proto_storage.identity_key_store,
+                &mut proto_storage.signed_pre_key_store,
+                &mut csprng,
+            )
+            .await
+            .unwrap();
+        let pni_signed_pk = key_manager
+            .generate_signed_pre_key(
+                &mut proto_storage.identity_key_store,
+                &mut proto_storage.signed_pre_key_store,
+                &mut csprng,
+            )
+            .await
+            .unwrap();
 
-        let aci_pq_last_resort: KyberPreKeyRecord =
-            key_manager.generate(&mut csprng).await.unwrap();
-        let pni_pq_last_resort: KyberPreKeyRecord =
-            key_manager.generate(&mut csprng).await.unwrap();
+        let aci_pq_last_resort = key_manager
+            .generate_kyber_pre_key(
+                &mut proto_storage.identity_key_store,
+                &mut proto_storage.kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
+        let pni_pq_last_resort = key_manager
+            .generate_kyber_pre_key(
+                &mut proto_storage.identity_key_store,
+                &mut proto_storage.kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
 
         let mut password = [0u8; PASSWORD_LENGTH];
         csprng.fill(&mut password);
@@ -141,16 +164,7 @@ impl Client {
                 let pni: Pni = body.pni.into();
 
                 let contact_manager = ContactManager::new();
-                let storage = DeviceStorage::builder()
-                    .set_aci(aci)
-                    .set_pni(pni)
-                    .set_password(password)
-                    .set_public_key(aci_key_pair.public_key)
-                    .set_private_key(aci_key_pair.private_key)
-                    .set_aci_registration_id(aci_registration_id)
-                    .set_pni_registration_id(pni_registration_id)
-                    .try_into()
-                    .expect("Missing field in builder");
+                let storage = Storage::new(password, aci, pni, proto_storage);
                 let client =
                     Client::new(aci, pni, contact_manager, server_api, key_manager, storage);
                 Ok(client)
@@ -160,24 +174,7 @@ impl Client {
     }
 
     pub async fn login() -> Result<Self, LoginError> {
-        let storage = DeviceStorage::load()?;
-
-        let key_pair = KeyPair::new(
-            storage.get_public_key().to_owned(),
-            storage.get_private_key().to_owned(),
-        );
-
-        let proto_store =
-            InMemSignalProtocolStore::new(key_pair.into(), storage.get_aci_registration_id())
-                .expect("Can construct Protocol Store from valid parts.");
-        Ok(Client::new(
-            storage.get_aci().to_owned(),
-            storage.get_pni().to_owned(),
-            ContactManager::new(),
-            ServerAPI::new(),
-            InMemoryKeyManager::new(proto_store),
-            storage,
-        ))
+        todo!("Implement when Storage<Device> is done")
     }
 
     pub async fn send_message(
