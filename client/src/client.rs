@@ -1,5 +1,6 @@
 use crate::{
     contact_manager::ContactManager,
+    encryption::{encrypt, pad_message},
     errors::{LoginError, SignalClientError},
     key_manager::KeyManager,
     server::{Backend, ServerAPI, SignalBackend},
@@ -10,13 +11,22 @@ use crate::{
 };
 use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
-use common::web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest};
+use common::{
+    signalservice::{envelope, Content, DataMessage},
+    web_api::{
+        AccountAttributes, DeviceCapabilities, RegistrationRequest, SignalMessage, SignalMessages,
+    },
+};
 use core::str;
 use dotenv::dotenv;
-use libsignal_core::{Aci, Pni};
-use libsignal_protocol::{IdentityKey, IdentityKeyPair, KeyPair};
+use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
+use libsignal_protocol::{
+    process_prekey_bundle, CiphertextMessage, IdentityKey, IdentityKeyPair, KeyPair,
+};
+use prost::Message;
 use rand::{rngs::OsRng, Rng};
 use sqlx::sqlite::SqlitePoolOptions;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct Client<S: StorageType, B: Backend> {
     aci: Aci,
@@ -182,11 +192,106 @@ impl<S: StorageType, B: Backend> Client<S, B> {
     pub async fn send_message(
         &mut self,
         message: &str,
-        user_id: &str,
-        device_id: u32,
-    ) -> Result<(), B::Error> {
+        service_id: &ServiceId,
+    ) -> Result<(), SignalClientError> {
+        let content = Content::builder()
+            .data_message(
+                DataMessage::builder()
+                    .body(message.to_owned())
+                    .contact(vec![])
+                    .body_ranges(vec![])
+                    .preview(vec![])
+                    .attachments(vec![])
+                    .build(),
+            )
+            .build();
+
+        // pad and encrypt message.
+
+        let timestamp = SystemTime::now();
+
+        // Update the contact.
+
+        let to = match self.contact_manager.get_contact(service_id) {
+            Err(_) => {
+                self.contact_manager
+                    .add_contact(service_id, 1.into())
+                    .expect("Can add contact that does not exist yet");
+                let bundles = self
+                    .server_api
+                    .fetch_pre_key_bundles(service_id.service_id_string())
+                    .await
+                    .unwrap();
+
+                let mut device_ids = Vec::new();
+                for ref bundle in bundles {
+                    device_ids.push(bundle.device_id().unwrap());
+                    process_prekey_bundle(
+                        &ProtocolAddress::new(
+                            service_id.service_id_string(),
+                            bundle.device_id().unwrap(),
+                        ),
+                        &mut self.storage.protocol_store.session_store,
+                        &mut self.storage.protocol_store.identity_key_store,
+                        bundle,
+                        SystemTime::now(),
+                        &mut OsRng,
+                    )
+                    .await
+                    .unwrap();
+                }
+
+                self.contact_manager
+                    .update_contact(service_id, device_ids)
+                    .expect("Can update a contact that was just added");
+                self.contact_manager
+                    .get_contact(service_id)
+                    .expect("Can get contact that was just added.")
+            }
+            Ok(contact) => contact,
+        };
+
+        let msgs = encrypt(
+            &mut self.storage.protocol_store.identity_key_store,
+            &mut self.storage.protocol_store.session_store,
+            to,
+            pad_message(content.encode_to_vec().as_ref()).as_ref(),
+            timestamp,
+        )
+        .await?;
+
+        // Put messages into structure ready.
+        let msgs = SignalMessages {
+            messages: msgs
+                .into_iter()
+                .map(|(id, msg)| SignalMessage {
+                    r#type: match msg {
+                        CiphertextMessage::SignalMessage(_) => envelope::Type::Ciphertext.into(),
+                        CiphertextMessage::SenderKeyMessage(_) => {
+                            envelope::Type::KeyExchange.into()
+                        }
+                        CiphertextMessage::PreKeySignalMessage(_) => {
+                            envelope::Type::PrekeyBundle.into()
+                        }
+                        CiphertextMessage::PlaintextContent(_) => {
+                            envelope::Type::PlaintextContent.into()
+                        }
+                    },
+                    destination_device_id: id.into(),
+                    destination_registration_id: todo!(),
+                    content: BASE64_STANDARD.encode(msg.serialize()),
+                })
+                .collect(),
+            online: false, // Should this be true?
+            urgent: true,
+            timestamp: timestamp
+                .duration_since(UNIX_EPOCH)
+                .expect("can get the time since epoch")
+                .as_secs(),
+        };
+
         self.server_api
-            .send_msg(message.into(), user_id.into(), device_id)
+            .send_msg(msgs, service_id.to_owned().service_id_string())
             .await
     }
 }

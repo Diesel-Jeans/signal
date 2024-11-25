@@ -4,14 +4,16 @@ use crate::{
     socket_manager::{signal_ws_connect, SignalStream, SocketManager},
 };
 use async_native_tls::{Certificate, TlsConnector};
+use common::web_api::SignalMessages;
 use common::{
     signalservice::{web_socket_message, Envelope, WebSocketMessage},
     web_api::{authorization::BasicAuthorizationHeader, RegistrationRequest, RegistrationResponse},
 };
 use http_client::h1::H1Client;
+use libsignal_core::ServiceId;
 use libsignal_protocol::PreKeyBundle;
 use serde_json::{from_slice, json};
-use std::{env, fs, sync::Arc, time::Duration};
+use std::{env, fmt::Debug, fs, sync::Arc, time::Duration};
 use surf::{Client, Config};
 use url::Url;
 
@@ -28,7 +30,6 @@ impl VerifiedSession {
 }
 
 pub trait Backend {
-    type Error;
     /// Connect with Websockets to the backend.
     async fn connect(
         &mut self,
@@ -36,13 +37,13 @@ pub trait Backend {
         password: &str,
         url: &str,
         tls_path: &str,
-    ) -> Result<(), Self::Error>;
+    ) -> Result<(), SignalClientError>;
 
     /// Publish a sigle [PreKeyBundle] for this device.
-    async fn publish_pre_key_bundle(&mut self, uuid: String) -> Result<(), Self::Error>;
+    async fn publish_pre_key_bundle(&mut self, uuid: String) -> Result<(), SignalClientError>;
 
     /// Fetch [PreKeyBundle] for all of a users devices.
-    async fn fetch_pre_key_bundles(&self, uuid: String) -> Result<PreKeyBundle, Self::Error>;
+    async fn fetch_pre_key_bundles(&self, uuid: String) -> Result<PreKeyBundle, SignalClientError>;
 
     /// Send a [RegistrationRequest] to the server.
     /// Verifying the session is not implemented.
@@ -52,15 +53,14 @@ pub trait Backend {
         password: String,
         registration_request: RegistrationRequest,
         session: Option<&VerifiedSession>,
-    ) -> Result<RegistrationResponse, Self::Error>;
+    ) -> Result<RegistrationResponse, SignalClientError>;
 
     /// Send a message to another user.
     async fn send_msg(
         &self,
-        msg: String,
-        user_id: String,
-        device_id: u32,
-    ) -> Result<(), Self::Error>;
+        messages: SignalMessages,
+        service_id: ServiceId,
+    ) -> Result<(), SignalClientError>;
 
     async fn get_message(&mut self) -> Option<Envelope>;
 }
@@ -80,17 +80,20 @@ impl<T: Backend> ServerAPI<T> {
         password: &str,
         url: &str,
         tls_path: &str,
-    ) -> Result<(), T::Error> {
+    ) -> Result<(), SignalClientError> {
         self.backend
             .connect(username, password, url, tls_path)
             .await
     }
 
-    pub async fn publish_pre_key_bundle(&mut self, uuid: String) -> Result<(), T::Error> {
+    pub async fn publish_pre_key_bundle(&mut self, uuid: String) -> Result<(), SignalClientError> {
         todo!()
     }
 
-    pub async fn fetch_pre_key_bundles(&self, uuid: String) -> Result<PreKeyBundle, T::Error> {
+    pub async fn fetch_pre_key_bundles(
+        &self,
+        uuid: String,
+    ) -> Result<Vec<PreKeyBundle>, SignalClientError> {
         todo!()
     }
 
@@ -100,7 +103,7 @@ impl<T: Backend> ServerAPI<T> {
         password: String,
         registration_request: RegistrationRequest,
         session: Option<&VerifiedSession>,
-    ) -> Result<RegistrationResponse, T::Error> {
+    ) -> Result<RegistrationResponse, SignalClientError> {
         self.backend
             .register_client(phone_number, password, registration_request, session)
             .await
@@ -108,10 +111,9 @@ impl<T: Backend> ServerAPI<T> {
 
     pub async fn send_msg(
         &self,
-        msg: String,
+        messages: SignalMessages,
         user_id: String,
-        device_id: u32,
-    ) -> Result<(), T::Error> {
+    ) -> Result<(), SignalClientError> {
         todo!()
     }
 
@@ -127,15 +129,13 @@ pub struct SignalBackend {
 }
 
 impl Backend for SignalBackend {
-    type Error = SignalClientError;
-
     async fn connect(
         &mut self,
         username: &str,
         password: &str,
         url: &str,
         tls_path: &str,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), SignalClientError> {
         if self.socket_manager.is_active().await {
             return Ok(());
         }
@@ -150,11 +150,11 @@ impl Backend for SignalBackend {
         Ok(())
     }
 
-    async fn publish_pre_key_bundle(&mut self, uuid: String) -> Result<(), Self::Error> {
+    async fn publish_pre_key_bundle(&mut self, uuid: String) -> Result<(), SignalClientError> {
         todo!()
     }
 
-    async fn fetch_pre_key_bundles(&self, uuid: String) -> Result<PreKeyBundle, Self::Error> {
+    async fn fetch_pre_key_bundles(&self, uuid: String) -> Result<PreKeyBundle, SignalClientError> {
         todo!()
     }
 
@@ -164,7 +164,7 @@ impl Backend for SignalBackend {
         password: String,
         registration_request: RegistrationRequest,
         session: Option<&VerifiedSession>,
-    ) -> Result<RegistrationResponse, Self::Error> {
+    ) -> Result<RegistrationResponse, SignalClientError> {
         let payload = json!(registration_request);
         let auth_header = BasicAuthorizationHeader::new(phone_number, 1, password);
         let mut res = self
@@ -185,10 +185,9 @@ impl Backend for SignalBackend {
 
     async fn send_msg(
         &self,
-        msg: String,
-        user_id: String,
-        device_id: u32,
-    ) -> Result<(), Self::Error> {
+        messages: SignalMessages,
+        recipient: ServiceId,
+    ) -> Result<(), SignalClientError> {
         todo!()
     }
 
