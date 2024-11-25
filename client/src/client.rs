@@ -147,8 +147,7 @@ impl Client {
 
         let response = server_api
             .register_client(phone_number, password.to_owned(), req, None)
-            .await
-            .map_err(|_| RegistrationError::NoResponse)?;
+            .await?;
 
         let aci: Aci = response.uuid.into();
         let pni: Pni = response.pni.into();
