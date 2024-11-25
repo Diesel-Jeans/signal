@@ -31,9 +31,9 @@ impl KeyManager {
             ]),
         }
     }
-    fn get_new_key_id(&mut self, key_type: &PreKeyType) -> u32 {
-        let id = *self.key_incrementer_map.get(key_type).unwrap();
-        *self.key_incrementer_map.get_mut(key_type).unwrap() += 1u32;
+    fn get_new_key_id(&mut self, key_type: PreKeyType) -> u32 {
+        let id = *self.key_incrementer_map.get(&key_type).unwrap();
+        *self.key_incrementer_map.get_mut(&key_type).unwrap() += 1u32;
         id
     }
     pub async fn generate_pre_key<R: Rng + CryptoRng, PK: PreKeyStore>(
@@ -41,7 +41,7 @@ impl KeyManager {
         pre_key_store: &mut PK,
         csprng: &mut R,
     ) -> Result<PreKeyRecord, SignalProtocolError> {
-        let id = self.get_new_key_id(&PreKeyType::Kyber).into();
+        let id = self.get_new_key_id(PreKeyType::OneTime).into();
 
         let key_pair = KeyPair::generate(csprng);
         let record = PreKeyRecord::new(id, &key_pair);
@@ -58,7 +58,7 @@ impl KeyManager {
         signed_pre_key_store: &mut SPK,
         csprng: &mut R,
     ) -> Result<SignedPreKeyRecord, SignalProtocolError> {
-        let id = self.get_new_key_id(&PreKeyType::Signed).into();
+        let id = self.get_new_key_id(PreKeyType::Signed).into();
         let signed_pre_key_pair = KeyPair::generate(csprng);
         let signature = identity_key_store
             .get_identity_key_pair()
@@ -79,7 +79,7 @@ impl KeyManager {
         identity_key_store: &mut IK,
         kyber_pre_key_store: &mut KPK,
     ) -> Result<KyberPreKeyRecord, SignalProtocolError> {
-        let id = self.get_new_key_id(&PreKeyType::Kyber).into();
+        let id = self.get_new_key_id(PreKeyType::Kyber).into();
         let record = KyberPreKeyRecord::generate(
             kem::KeyType::Kyber1024,
             id,
@@ -121,9 +121,9 @@ mod key_manager_tests {
     #[test]
     fn get_id_test() {
         let mut manager = KeyManager::new();
-        let id0 = manager.get_new_key_id(&PreKeyType::OneTime);
+        let id0 = manager.get_new_key_id(PreKeyType::OneTime);
         assert_eq!(id0, 0);
-        let id1 = manager.get_new_key_id(&PreKeyType::OneTime);
+        let id1 = manager.get_new_key_id(PreKeyType::OneTime);
         assert_eq!(id1, 1);
     }
 
