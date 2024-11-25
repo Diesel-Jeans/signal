@@ -6,7 +6,6 @@ use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
 use tokio_tungstenite::{
     client_async_tls_with_config, tungstenite, Connector, MaybeTlsStream, WebSocketStream,
 };
-
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use prost::{bytes::Bytes, Message as PMessage};
 use rustls::pki_types::CertificateDer;
@@ -20,39 +19,20 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::Message;
-
 use common::signalservice::{web_socket_message, WebSocketMessage};
 use common::websocket::{connection_state::ConnectionState, wsstream::WSStream};
-
-const SECOND: u32 = 1000;
-const MINUTE: u32 = SECOND * 60;
-const HOUR: u32 = MINUTE * 60;
-const DAY: u32 = HOUR * 24;
-const WEEK: u32 = DAY * 7;
-const MONTH: u32 = DAY * 30;
-
-// 30 seconds + 5 seconds for closing the socket above.
-const KEEPALIVE_INTERVAL_MS: u32 = 30 * SECOND;
-
-// If the machine was in suspended mode for more than 5 minutes - trigger
-// immediate disconnect.
-const STALE_THRESHOLD_MS: u32 = 5 * MINUTE;
-
-// If we don't receive a response to keepalive request within 30 seconds -
-// close the socket.
-const KEEPALIVE_TIMEOUT_MS: u32 = 30 * SECOND;
+use std::pin::Pin;
+use std::task::{Poll, Context};
+use tungstenite::protocol::frame::coding::{CloseCode};
 
 fn rustls_cfg(ca_file_path: &str) -> Result<ClientConfig, String> {
-    // Open and read the root CA certificate file
     let ca_file = File::open(ca_file_path).map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(ca_file);
 
-    // Parse PEM-encoded certificates
     let certs: Vec<CertificateDer<'static>> = certs(&mut reader)
         .collect::<Result<_, _>>()
         .map_err(|e| e.to_string())?;
 
-    // Add certificates to the RootCertStore
     let mut root_store = RootCertStore::empty();
     for cert in certs {
         root_store
@@ -60,7 +40,6 @@ fn rustls_cfg(ca_file_path: &str) -> Result<ClientConfig, String> {
             .map_err(|_| "Invalid Certificate".to_string())?;
     }
 
-    // Build the rustls ClientConfig
     let config = ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_no_client_auth();
@@ -68,10 +47,6 @@ fn rustls_cfg(ca_file_path: &str) -> Result<ClientConfig, String> {
     Ok(config)
 }
 
-#[async_trait::async_trait]
-trait ConnectWebSocket {
-    async fn connect() -> Self;
-}
 
 type TLSWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 #[derive(Debug)]
@@ -86,10 +61,10 @@ impl Stream for SignalStream {
     type Item = Result<Message, tungstenite::Error>;
 
     fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        std::pin::Pin::new(&mut self.0).poll_next(cx)
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.0).poll_next(cx)
     }
 }
 
@@ -97,28 +72,28 @@ impl Sink<Message> for SignalStream {
     type Error = tungstenite::Error;
 
     fn poll_ready(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::pin::Pin::new(&mut self.0).poll_ready(cx)
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.0).poll_ready(cx)
     }
 
-    fn start_send(mut self: std::pin::Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
-        std::pin::Pin::new(&mut self.0).start_send(item)
+    fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+        Pin::new(&mut self.0).start_send(item)
     }
 
     fn poll_flush(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::pin::Pin::new(&mut self.0).poll_flush(cx)
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.0).poll_flush(cx)
     }
 
     fn poll_close(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::pin::Pin::new(&mut self.0).poll_close(cx)
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.0).poll_close(cx)
     }
 }
 
@@ -193,7 +168,7 @@ pub struct SocketManager<T: WSStream<Message, tungstenite::Error> + std::fmt::De
     next_id: Arc<AtomicU64>,
     request_delegater: Sender<MessageType>,
     receiver: Receiver<MessageType>,
-    connection: Arc<Mutex<ConnectionState<Message, T>>>,
+    connection: Arc<Mutex<ConnectionState<T, Message>>>,
 }
 
 impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> Clone for SocketManager<T> {
@@ -271,51 +246,6 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<T
                 }
             }
         });
-        let mgr = self.clone();
-        /* Keepalive will not be implemented this time around
-        tokio::spawn(async move {
-            let mut last_alive = Instant::now();
-            let stale = STALE_THRESHOLD_MS.into();
-            loop {
-                if last_alive.elapsed().as_millis() > stale {
-                    mgr.close_reason(
-                        3001.into(),
-                        format!(
-                            "Last keepalive request was too far in the past: {}",
-                            last_alive.elapsed().as_millis()
-                        )).await;
-                    break;
-                }
-                last_alive = Instant::now();
-                if !mgr.connection.lock().await.is_active(){
-                    break;
-                }
-                let id = mgr.next_id();
-                let req_msg = create_request(id, "GET", "/v1/keepalive", vec![], None);
-                let req = mgr.send(id, req_msg);
-
-
-
-                let response = tokio::time::timeout(Duration::from_millis(KEEPALIVE_TIMEOUT_MS.into()), req).await;
-                match response {
-                    Ok(Ok(x)) => {
-                        let res = x.response.expect("Did not receive response to request");
-                        if !res.status.is_some_and(|x| x == 200){
-                            panic!("Did not receive 200: {:?}", res);
-                        }
-                    },
-                    Ok(Err(x)) => panic!("Keepalive ERROR: {}", x),
-
-                    Err(_) => {
-                        mgr.close_reason(3008.into(), "Timed out".into()).await;
-                        break;
-                    },
-                };
-
-                tokio::time::sleep(Duration::from_millis(KEEPALIVE_INTERVAL_MS.into())).await;
-            }
-        });*/
-
         Ok(())
     }
 
@@ -326,7 +256,7 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<T
         {
             let _ = socket
                 .send(Message::Close(Some(CloseFrame {
-                    code: tungstenite::protocol::frame::coding::CloseCode::Normal,
+                    code: CloseCode::Normal,
                     reason: "Goodbye".into(),
                 })))
                 .await;
@@ -335,7 +265,7 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<T
 
     async fn close_reason(
         &mut self,
-        code: tungstenite::protocol::frame::coding::CloseCode,
+        code: CloseCode,
         reason: String,
     ) {
         let mut guard = self.connection.lock().await;

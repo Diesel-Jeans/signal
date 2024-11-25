@@ -83,7 +83,6 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::E
         .iter()
         .map(|message| message.destination_device_id)
         .collect();
-    println!("here");
     DestinationDeviceValidator::validate_complete_device_list(
         &destination,
         &message_device_ids,
@@ -568,12 +567,6 @@ mod server_tests {
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_post_keycheck_test() {
-        todo!()
-    }
-
-    #[ignore = "Not implemented"]
-    #[tokio::test]
-    async fn handle_() {
         todo!()
     }
 

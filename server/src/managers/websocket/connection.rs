@@ -19,6 +19,7 @@ use common::websocket::net_helper::{
     create_request, create_response, current_millis, generate_req_id, unpack_messages,
     PathExtractor,
 };
+use common::websocket::connection_state::ConnectionState;
 use common::websocket::wsstream::WSStream;
 use futures_util::{stream::SplitSink, SinkExt};
 use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
@@ -42,7 +43,7 @@ pub enum UserIdentity {
 pub struct WebSocketConnection<W: WSStream<Message, Error> + Debug, DB: SignalDatabase> {
     identity: UserIdentity,
     socket_address: SocketAddr,
-    ws: ConnectionState<W>,
+    ws: ConnectionState<W, Message>,
     pending_requests: HashSet<u64>,
     state: SignalServerState<DB, W>,
 }
@@ -376,18 +377,6 @@ impl WSStream<Message, Error> for SignalWebSocket {
     }
     async fn close(self) -> Result<(), Error> {
         self.close().await
-    }
-}
-
-#[derive(Debug)]
-pub enum ConnectionState<T: WSStream<Message, Error>> {
-    Active(SplitSink<T, Message>),
-    Closed,
-}
-
-impl<T: WSStream<Message, Error> + Debug> ConnectionState<T> {
-    pub fn is_active(&self) -> bool {
-        matches!(self, ConnectionState::Active(_))
     }
 }
 

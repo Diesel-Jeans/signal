@@ -2,7 +2,7 @@ use futures_util::stream::SplitSink;
 use std::fmt::Debug;
 
 #[derive(Debug)]
-pub enum ConnectionState<M, T> {
+pub enum ConnectionState<T, M> {
     Active(SplitSink<T, M>),
     Closed,
 }
