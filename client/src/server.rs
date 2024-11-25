@@ -1,7 +1,7 @@
 use crate::{
     client::VerifiedSession,
     contact_manager::Contact,
-    errors::SignalClientError,
+    errors::{RegistrationError, SignalClientError},
     websockets::{KeepAliveOptions, SendRequestOptions, WebsocketHandler},
 };
 use anyhow::Result;
@@ -15,6 +15,7 @@ use common::{
 };
 use http_client::h1::H1Client;
 use libsignal_protocol::PreKeyBundle;
+use serde_json::from_slice;
 use std::{env, error::Error, fmt::Display, fs, sync::Arc, time::Duration};
 use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
 
@@ -113,17 +114,24 @@ impl Server for ServerAPI {
         phone_number: String,
         password: String,
         registration_request: RegistrationRequest,
-        session: Option<&VerifiedSession>,
+        _session: Option<&VerifiedSession>,
     ) -> Result<RegistrationResponse, Self::Error> {
         let payload = json!(registration_request);
         let auth_header = BasicAuthorizationHeader::new(phone_number, 1, password);
-        let res = self
+        let mut res = self
             .client
             .post(REGISTER_URI)
             .body(payload)
             .header("Authorization", auth_header.encode())
-            .await;
-        todo!("Handle the response")
+            .await
+            .map_err(|_| RegistrationError::NoResponse)?;
+        Ok(from_slice(
+            res.body_bytes()
+                .await
+                .map_err(|_| RegistrationError::BadResponse)?
+                .as_ref(),
+        )
+        .map_err(|_| RegistrationError::BadResponse)?)
     }
 
     async fn register_device(&self, client_info: &Contact) -> Result<(), Self::Error> {
