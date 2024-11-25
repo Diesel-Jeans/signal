@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
+use common::web_api::SignalMessages;
 use common::{
     signalservice::{WebSocketRequestMessage, WebSocketResponseMessage},
     web_api::{
@@ -14,6 +15,7 @@ use common::{
     },
 };
 use http_client::h1::H1Client;
+use libsignal_core::ServiceId;
 use libsignal_protocol::PreKeyBundle;
 use serde_json::from_slice;
 use std::{env, error::Error, fmt::Display, fs, sync::Arc, time::Duration};
@@ -62,7 +64,7 @@ pub trait Server {
         port: &str,
     ) -> Result<(), Self::Error>;
     async fn publish_bundle(&self, uuid: String) -> Result<(), Self::Error>;
-    async fn fetch_bundle(&self, uuid: String) -> Result<PreKeyBundle, Self::Error>;
+    async fn fetch_bundle(&self, uuid: String) -> Result<Vec<PreKeyBundle>, Self::Error>;
     async fn register_client(
         &self,
         phone_number: String,
@@ -73,9 +75,8 @@ pub trait Server {
     async fn register_device(&self, client_info: &Contact) -> Result<(), Self::Error>;
     async fn send_msg(
         &self,
-        msg: String,
-        user_id: String,
-        device_id: u32,
+        messages: SignalMessages,
+        service_id: ServiceId,
     ) -> Result<(), Self::Error>;
     async fn update_client(&self, new_client: &Contact) -> Result<(), Self::Error>;
     async fn delete_client(&self, uuid: String) -> Result<(), Self::Error>;
@@ -103,7 +104,7 @@ impl Server for ServerAPI {
         self.make_request(ReqType::Post(payload), uri).await;
         todo!("Handle response")
     }
-    async fn fetch_bundle(&self, uuid: String) -> Result<PreKeyBundle, Self::Error> {
+    async fn fetch_bundle(&self, uuid: String) -> Result<Vec<PreKeyBundle>, Self::Error> {
         let uri = format!("{}/{}", BUNDLE_URI, uuid);
         self.make_request(ReqType::Get, uri).await;
         todo!("Handle the response")
@@ -150,9 +151,8 @@ impl Server for ServerAPI {
 
     async fn send_msg(
         &self,
-        msg: String,
-        user_id: String,
-        device_id: u32,
+        messages: SignalMessages,
+        recipient: ServiceId,
     ) -> Result<(), Self::Error> {
         todo!("Needs Websockets")
     }

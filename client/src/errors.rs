@@ -2,7 +2,11 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::Display;
 
+use libsignal_core::DeviceId;
+use libsignal_protocol::SignalProtocolError;
+
 pub enum SignalClientError {
+    ContactManagerError(ContactManagerError),
     RegistrationError(RegistrationError),
     LoginError(LoginError),
     SendMessageError(SendMessageError),
@@ -16,16 +20,43 @@ impl fmt::Debug for SignalClientError {
 
 impl fmt::Display for SignalClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            Self::RegistrationError(err) => format!("{err}"),
-            Self::LoginError(err) => format!("{err}"),
-            Self::SendMessageError(err) => format!("{err}"),
-        };
-        write!(f, "Could not register account - {}", message)
+        match self {
+            Self::ContactManagerError(err) => write!(f, "{err}"),
+            Self::RegistrationError(err) => write!(f, "{err}"),
+            Self::LoginError(err) => write!(f, "{err}"),
+            Self::SendMessageError(err) => write!(f, "{err}"),
+        }
     }
 }
 
 impl Error for SignalClientError {}
+
+pub enum ContactManagerError {
+    DeviceNotFound(DeviceId),
+}
+
+impl fmt::Debug for ContactManagerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self::Display::fmt(&self, f)
+    }
+}
+
+impl fmt::Display for ContactManagerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::DeviceNotFound(id) => format!("The user did does not have a device with id {id}"),
+        };
+        write!(f, "Error in ContactManager - {}", message)
+    }
+}
+
+impl Error for ContactManagerError {}
+
+impl From<ContactManagerError> for SignalClientError {
+    fn from(value: ContactManagerError) -> Self {
+        SignalClientError::ContactManagerError(value)
+    }
+}
 
 pub enum RegistrationError {
     PhoneNumberTaken,
@@ -95,7 +126,9 @@ impl From<LoginError> for SignalClientError {
     }
 }
 
-pub enum SendMessageError {}
+pub enum SendMessageError {
+    EncryptionError(SignalProtocolError),
+}
 
 impl fmt::Debug for SendMessageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -106,7 +139,7 @@ impl fmt::Debug for SendMessageError {
 impl fmt::Display for SendMessageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
-            _ => "hej",
+            Self::EncryptionError(err) => err,
         };
         write!(f, "Could not send message - {}", message)
     }

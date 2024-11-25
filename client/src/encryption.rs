@@ -1,37 +1,42 @@
-use crate::contact_manager::Contact;
+use crate::{
+    contact_manager::Contact,
+    errors::{SendMessageError, SignalClientError},
+    storage::generic::{ProtocolStore, StorageType},
+};
 use libsignal_core::{DeviceId, ProtocolAddress};
 use libsignal_protocol::{
-    message_decrypt, message_encrypt, CiphertextMessage, InMemSignalProtocolStore,
+    message_decrypt, message_encrypt, CiphertextMessage, IdentityKeyStore, SessionStore,
     SignalProtocolError,
 };
 use rand::{CryptoRng, Rng};
-use std::{collections::HashMap, time::SystemTime};
+use std::{collections::HashMap, error::Error, fmt::Display, time::SystemTime};
 
 pub async fn encrypt(
-    store: &mut InMemSignalProtocolStore,
+    identity_store: &mut dyn IdentityKeyStore,
+    session_store: &mut dyn SessionStore,
     target: &Contact,
     msg: &[u8],
-) -> Result<HashMap<DeviceId, Result<CiphertextMessage, SignalProtocolError>>, SignalProtocolError>
-{
-    let mut msgs: HashMap<DeviceId, Result<CiphertextMessage, SignalProtocolError>> =
-        HashMap::new();
+    timestamp: SystemTime,
+) -> Result<HashMap<DeviceId, CiphertextMessage>, SignalClientError> {
+    let mut msgs = HashMap::new();
     for id in target.device_ids.clone() {
         let res = message_encrypt(
             msg,
             &target.get_address(&id)?,
-            &mut store.session_store,
-            &mut store.identity_store,
-            SystemTime::now(),
+            session_store,
+            identity_store,
+            timestamp,
         )
-        .await;
+        .await
+        .map_err(|err| SendMessageError::EncryptionError(err))?;
 
         msgs.insert(id, res);
     }
     Ok(msgs)
 }
 
-pub async fn decrypt<R: Rng + CryptoRng>(
-    store: &mut InMemSignalProtocolStore,
+pub async fn decrypt<R: Rng + CryptoRng, T: StorageType>(
+    store: &mut ProtocolStore<T>,
     rng: &mut R,
     from_address: &ProtocolAddress,
     msg: &CiphertextMessage,
@@ -40,13 +45,57 @@ pub async fn decrypt<R: Rng + CryptoRng>(
         msg,
         from_address,
         &mut store.session_store,
-        &mut store.identity_store,
+        &mut store.identity_key_store,
         &mut store.pre_key_store,
-        &store.signed_pre_key_store,
+        &mut store.signed_pre_key_store,
         &mut store.kyber_pre_key_store,
         rng,
     )
     .await
+}
+
+#[derive(Debug)]
+pub enum PaddingError {
+    UnpadError,
+}
+
+impl Display for PaddingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Could not unpad message - missing termination char 0x80")
+    }
+}
+
+impl Error for PaddingError {}
+
+fn get_padded_message_length(length: usize) -> usize {
+    let message_length_with_terminator = length + 1;
+    let mut message_part_count = message_length_with_terminator.div_euclid(160);
+
+    if message_length_with_terminator % 160 != 0 {
+        message_part_count += 1;
+    }
+
+    message_part_count * 160
+}
+
+pub fn pad_message(message: &[u8]) -> Vec<u8> {
+    let len = get_padded_message_length(message.len() + 1) - 1;
+    let mut plaintext = vec![0u8; len];
+    for i in 0..message.len() {
+        plaintext[i] = message[i];
+    }
+    plaintext[message.len()] = 0x80;
+
+    plaintext
+}
+
+pub fn unpad_message(message: &[u8]) -> Result<Vec<u8>, PaddingError> {
+    for i in 0..message.len() {
+        if message[i] == 0x80 {
+            return Ok(message[0..i].to_vec());
+        }
+    }
+    Err(PaddingError::UnpadError)
 }
 
 #[cfg(test)]
@@ -55,24 +104,26 @@ pub mod test {
     use crate::{
         contact_manager::ContactManager,
         encryption::{decrypt, encrypt},
+        storage::{generic::ProtocolStore, in_memory::InMemory},
         test_utils::user::{new_device_id, new_service_id},
     };
     use libsignal_protocol::{
-        kem, process_prekey_bundle, GenericSignedPreKey, KeyPair, KyberPreKeyRecord, PreKeyBundle,
-        PreKeyRecord, ProtocolStore, SignedPreKeyRecord, Timestamp,
+        kem, process_prekey_bundle, GenericSignedPreKey, KeyPair, KyberPreKeyRecord,
+        KyberPreKeyStore, PreKeyBundle, PreKeyRecord, PreKeyStore, SignedPreKeyRecord,
+        SignedPreKeyStore, Timestamp,
     };
     use rand::{rngs::OsRng, CryptoRng, Rng};
     use std::time::SystemTime;
 
-    pub fn store(reg: u32) -> InMemSignalProtocolStore {
+    pub fn store(reg: u32) -> ProtocolStore<InMemory> {
         let mut rng = OsRng;
         let p = KeyPair::generate(&mut rng).into();
 
-        InMemSignalProtocolStore::new(p, reg).unwrap()
+        ProtocolStore::new(p, reg)
     }
 
     pub async fn create_pre_key_bundle<R: Rng + CryptoRng>(
-        store: &mut dyn ProtocolStore,
+        store: &mut ProtocolStore<InMemory>,
         device_id: DeviceId,
         mut csprng: &mut R,
     ) -> Result<PreKeyBundle, SignalProtocolError> {
@@ -182,18 +233,24 @@ pub mod test {
                 .get_address(&bob_device)
                 .expect("Bob device id not added to contact"),
             &mut alice_store.session_store,
-            &mut alice_store.identity_store,
+            &mut alice_store.identity_key_store,
             &bob_bundle_content,
             SystemTime::now(),
             &mut rng,
         )
         .await;
 
-        let msg_map = encrypt(&mut alice_store, bob, "Hello Bob".as_bytes())
-            .await
-            .unwrap();
+        let msg_map = encrypt(
+            &mut alice_store.identity_key_store,
+            &mut alice_store.session_store,
+            bob,
+            "Hello Bob".as_bytes(),
+            SystemTime::now(),
+        )
+        .await
+        .unwrap();
 
-        let to_bob_msg = msg_map.get(&bob_device).unwrap().as_ref().unwrap();
+        let to_bob_msg = msg_map.get(&bob_device).unwrap();
 
         let alice_address = manager
             .get_contact(&alice_id)
@@ -206,5 +263,17 @@ pub mod test {
             .unwrap();
 
         assert!(String::from_utf8(bob_msg).unwrap() == *"Hello Bob")
+    }
+
+    #[test]
+    fn test_padding() {
+        let msg = [5u8; 32];
+        let padded = pad_message(&msg);
+
+        assert_eq!(padded.len(), 159);
+
+        let unpadded = unpad_message(padded.as_ref()).unwrap();
+
+        assert_eq!(msg.to_vec(), unpadded);
     }
 }
