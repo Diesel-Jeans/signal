@@ -231,7 +231,7 @@ impl ServerAPI {
         req_type: ReqType,
         uri: String,
     ) -> Result<Response, ServerRequestError> {
-        println!("Sent request {} {}", req_type, uri);
+        println!("Sent {} request to {}", req_type, uri);
         let mut res = match req_type {
             ReqType::Get => self.client.get(uri),
             ReqType::Post(payload) => self.client.post(uri).body(
