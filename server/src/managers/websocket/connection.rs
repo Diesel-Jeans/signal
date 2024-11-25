@@ -21,15 +21,11 @@ use common::websocket::net_helper::{
     PathExtractor,
 };
 use common::websocket::wsstream::WSStream;
-use futures_util::{stream::SplitSink, SinkExt};
+use futures_util::{stream::SplitSink, SinkExt, Sink, Stream};
 use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
 use prost::Message as PMessage;
 use std::{
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    net::SocketAddr,
-    sync::Arc,
-    time::SystemTimeError,
+    collections::{HashMap, HashSet}, fmt::Debug, net::SocketAddr, pin::Pin, sync::Arc, task::{Context, Poll}, time::SystemTimeError
 };
 use tokio::sync::Mutex;
 
@@ -327,43 +323,43 @@ impl SignalWebSocket {
     }
 }
 
-impl futures_util::Stream for SignalWebSocket {
+impl Stream for SignalWebSocket {
     type Item = Result<Message, Error>;
 
     fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        futures_util::Stream::poll_next(std::pin::Pin::new(&mut self.0), cx)
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        Stream::poll_next(Pin::new(&mut self.0), cx)
     }
 }
 
-impl futures_util::Sink<Message> for SignalWebSocket {
+impl Sink<Message> for SignalWebSocket {
     type Error = Error;
 
     fn poll_ready(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        futures_util::Sink::poll_ready(std::pin::Pin::new(&mut self.0), cx)
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        Sink::poll_ready(Pin::new(&mut self.0), cx)
     }
 
-    fn start_send(mut self: std::pin::Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
-        futures_util::Sink::start_send(std::pin::Pin::new(&mut self.0), item)
+    fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+        Sink::start_send(Pin::new(&mut self.0), item)
     }
 
     fn poll_flush(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        futures_util::Sink::poll_flush(std::pin::Pin::new(&mut self.0), cx)
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        Sink::poll_flush(Pin::new(&mut self.0), cx)
     }
 
     fn poll_close(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        futures_util::Sink::poll_close(std::pin::Pin::new(&mut self.0), cx)
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        Sink::poll_close(Pin::new(&mut self.0), cx)
     }
 }
 
