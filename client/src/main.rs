@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         vec![],
         Some(body),
     );
-    println!("{:?}", socket_manager.send(id, req).await.expect("benis"));
+    println!("{:?}", socket_manager.send(id, req).await.expect("Something went wrong when sending and receiving"));
 
     hdnl.await;
     Ok(())
