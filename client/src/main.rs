@@ -13,7 +13,6 @@ mod errors;
 mod key_management;
 mod server;
 mod storage;
-mod websockets;
 mod socket_manager;
 
 #[tokio::main]

@@ -269,8 +269,7 @@ impl <T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<
             }
         });
         let mut mgr = self.clone();
-        /*
-        UNCOMMENT THIS WHEN KEEPALIVE ENDPOINT IS UP AND RUNNING
+        /* Keepalive will not be implemented this time around
         tokio::spawn(async move {
             let mut last_alive = Instant::now();
             let stale = STALE_THRESHOLD_MS.into();
@@ -501,6 +500,7 @@ mod test {
         assert!(mgr.is_active().await);
     }
 
+    #[ignore = "Will not be implemented in this project"]
     #[tokio::test]
     async fn test_keepalive_is_sending(){
         let (mut mgr, ms, s, mut r) = get_socket_mgr();

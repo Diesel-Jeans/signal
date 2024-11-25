@@ -1,7 +1,6 @@
 use crate::{
     client::VerifiedSession,
     contact_manager::Contact,
-    websockets::{KeepAliveOptions, SendRequestOptions, WebsocketHandler},
 };
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
@@ -106,16 +105,7 @@ impl Server for ServerAPI {
         url: &str,
         tls_cert: &str,
     ) -> Result<()> {
-        if self.socket_manager.is_active().await {
-            return Ok(())
-        }
-
-        let ws = signal_ws_connect(tls_cert, url, username, password).await.expect("Failed to connect");
-        let wrap = SignalStream::new(ws);
-        self.socket_manager.set_stream(wrap).await;
-
-        println!("connected!");
-        Ok(())
+        todo!();
     }
     async fn publish_bundle(
         &self,
