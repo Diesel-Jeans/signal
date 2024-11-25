@@ -105,7 +105,7 @@ pub mod test {
 
         let pre_key_bundle = PreKeyBundle::new(
             store.get_local_registration_id().await?, // the users unique id
-            device_id.into(),
+            device_id,
             Some((pre_key_id.into(), pre_key_pair.public_key)),
             signed_pre_key_id.into(),
             signed_pre_key_pair.public_key,

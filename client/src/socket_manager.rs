@@ -1,8 +1,6 @@
 use futures_util::lock::Mutex;
-use futures_util::stream::SplitSink;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use tokio::net::TcpStream;
-use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
 use tokio_tungstenite::{
@@ -15,23 +13,16 @@ use rustls::pki_types::CertificateDer;
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pemfile::certs;
 use socket2::{SockRef, TcpKeepalive};
-use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::Message;
 
-use common::signalservice::{
-    web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
-};
-use common::websocket::{
-    connection_state::ConnectionState,
-    net_helper::{create_request, create_response},
-    wsstream::WSStream,
-};
+use common::signalservice::{web_socket_message, WebSocketMessage};
+use common::websocket::{connection_state::ConnectionState, wsstream::WSStream};
 
 const SECOND: u32 = 1000;
 const MINUTE: u32 = SECOND * 60;
@@ -280,7 +271,7 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<T
                 }
             }
         });
-        let mut mgr = self.clone();
+        let mgr = self.clone();
         /* Keepalive will not be implemented this time around
         tokio::spawn(async move {
             let mut last_alive = Instant::now();
@@ -484,7 +475,7 @@ mod test {
             Poll::Ready(Ok(()))
         }
 
-        fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+        fn start_send(self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
             self.client_receiver
                 .try_send(item)
                 .map_err(|_| Error::ConnectionClosed)
@@ -542,7 +533,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connect() {
-        let (mut mgr, ms, s, mut r) = get_socket_mgr();
+        let (mut mgr, ms, s, r) = get_socket_mgr();
         mgr.set_stream(ms).await.unwrap();
         assert!(mgr.is_active().await);
     }
@@ -560,7 +551,7 @@ mod test {
 
     #[tokio::test]
     async fn test_send_success() {
-        let (mut mgr, ms, s, mut r) = get_socket_mgr();
+        let (mut mgr, ms, s, r) = get_socket_mgr();
         mgr.set_stream(ms).await;
         let id = mgr.next_id();
         let mut mgr_c = mgr.clone();

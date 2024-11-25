@@ -1,9 +1,7 @@
 use std::error::Error;
 
-use crate::client::Client;
 use crate::socket_manager::{signal_ws_connect, SignalStream, SocketManager};
 use common::websocket::net_helper::create_request;
-use std::env;
 
 mod client;
 mod contact_manager;

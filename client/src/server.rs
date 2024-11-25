@@ -1,13 +1,10 @@
-use crate::socket_manager::{signal_ws_connect, SignalStream, SocketManager};
+use crate::socket_manager::{SignalStream, SocketManager};
 use crate::{client::VerifiedSession, contact_manager::Contact};
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
 use common::{
     signalservice::{WebSocketRequestMessage, WebSocketResponseMessage},
-    web_api::{
-        authorization::BasicAuthorizationHeader, AccountAttributes, RegistrationRequest,
-        UploadSignedPreKey,
-    },
+    web_api::{authorization::BasicAuthorizationHeader, RegistrationRequest},
 };
 use http_client::h1::H1Client;
 use std::{

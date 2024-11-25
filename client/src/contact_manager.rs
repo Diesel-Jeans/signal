@@ -55,7 +55,7 @@ impl ContactManager {
             ));
         }
         self.contacts
-            .insert(service_id.clone(), Contact::new(*service_id, device_id));
+            .insert(*service_id, Contact::new(*service_id, device_id));
         Ok(())
     }
 

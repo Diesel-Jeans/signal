@@ -6,6 +6,7 @@ use crate::{
     server::handle_put_messages,
 };
 use axum::extract::ws::WebSocket;
+use axum::Error;
 use axum::{
     extract::ws::{CloseFrame, Message},
     http::{StatusCode, Uri},
@@ -19,7 +20,7 @@ use common::websocket::net_helper::{
     PathExtractor,
 };
 use common::websocket::wsstream::WSStream;
-use futures_util::{stream::SplitSink, SinkExt, StreamExt};
+use futures_util::{stream::SplitSink, SinkExt};
 use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
 use prost::Message as PMessage;
 use std::{
@@ -30,7 +31,6 @@ use std::{
     time::SystemTimeError,
 };
 use tokio::sync::Mutex;
-use axum::Error;
 
 #[derive(Debug)]
 pub enum UserIdentity {
