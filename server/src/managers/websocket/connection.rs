@@ -21,11 +21,17 @@ use common::websocket::net_helper::{
     PathExtractor,
 };
 use common::websocket::wsstream::WSStream;
-use futures_util::{stream::SplitSink, SinkExt, Sink, Stream};
+use futures_util::{stream::SplitSink, Sink, SinkExt, Stream};
 use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
 use prost::Message as PMessage;
 use std::{
-    collections::{HashMap, HashSet}, fmt::Debug, net::SocketAddr, pin::Pin, sync::Arc, task::{Context, Poll}, time::SystemTimeError
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    net::SocketAddr,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::SystemTimeError,
 };
 use tokio::sync::Mutex;
 
@@ -326,10 +332,7 @@ impl SignalWebSocket {
 impl Stream for SignalWebSocket {
     type Item = Result<Message, Error>;
 
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Stream::poll_next(Pin::new(&mut self.0), cx)
     }
 }
@@ -337,10 +340,7 @@ impl Stream for SignalWebSocket {
 impl Sink<Message> for SignalWebSocket {
     type Error = Error;
 
-    fn poll_ready(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Sink::poll_ready(Pin::new(&mut self.0), cx)
     }
 
@@ -348,17 +348,11 @@ impl Sink<Message> for SignalWebSocket {
         Sink::start_send(Pin::new(&mut self.0), item)
     }
 
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Sink::poll_flush(Pin::new(&mut self.0), cx)
     }
 
-    fn poll_close(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Sink::poll_close(Pin::new(&mut self.0), cx)
     }
 }
