@@ -1,15 +1,13 @@
-use super::{
-    connection::{ClientConnection, ConnectionMap, WebSocketConnection},
-};
+use super::connection::{ClientConnection, ConnectionMap, WebSocketConnection};
 use crate::{database::SignalDatabase, managers::state::SignalServerState};
 use axum::extract::ws::Message;
 use common::signal_protobuf::WebSocketMessage;
+use common::websocket::wsstream::WSStream;
 use futures_util::stream::{SplitStream, StreamExt};
 use libsignal_core::ProtocolAddress;
 use prost::{bytes::Bytes, Message as PMessage};
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
-use common::websocket::wsstream::WSStream;
 
 /*const WS_ENDPOINTS: [&str; 24] = [
     "v4/attachments/form/upload",
@@ -152,15 +150,13 @@ mod test {
     use crate::{
         managers::{
             state::SignalServerState,
-            websocket::{
-                connection::{test::create_connection, ClientConnection},
-            },
+            websocket::connection::{test::create_connection, ClientConnection},
         },
         test_utils::websocket::{MockDB, MockSocket},
     };
     use axum::extract::ws::Message;
-    use prost::Message as PMessage;
     use common::websocket::net_helper;
+    use prost::Message as PMessage;
 
     #[tokio::test]
     async fn test_insert() {

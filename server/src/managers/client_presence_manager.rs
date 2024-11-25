@@ -148,12 +148,12 @@ impl<T: DisplacedPresenceListener> ClientPresenceManager<T> {
         let account_uuid = account_uuid.to_string();
 
         for device_id in device_ids {
-            let addr = ProtocolAddress::new(account_uuid.clone(), device_id.into());
+            let addr = ProtocolAddress::new(account_uuid.clone(), device_id);
             let presence_key = self.get_presence_key(&addr);
-            if (self.is_locally_present(&presence_key)) {
-                if self.displace_presence(&presence_key, false).await? {
-                    presence_keys.push(presence_key.to_string());
-                }
+            if (self.is_locally_present(&presence_key))
+                && self.displace_presence(&presence_key, false).await?
+            {
+                presence_keys.push(presence_key.to_string());
             }
         }
         Ok(presence_keys.len() as u8)
@@ -342,7 +342,7 @@ mod client_presence_manager_test {
         let websocket = Arc::new(Mutex::new(MockWebSocketConnection::new()));
         let account_id = Uuid::new_v4().to_string();
         let device_id = DeviceId::from(1);
-        let addr = ProtocolAddress::new(account_id.clone(), device_id.into());
+        let addr = ProtocolAddress::new(account_id.clone(), device_id);
 
         manager.set_present(&addr, websocket).await;
 

@@ -1,9 +1,3 @@
-use common::{
-    websocket::net_helper::{
-        create_request, create_response, current_millis, generate_req_id, unpack_messages,
-        PathExtractor,
-    },
-};
 use crate::{
     account::AuthenticatedDevice,
     database::SignalDatabase,
@@ -11,6 +5,7 @@ use crate::{
     message_cache::MessageAvailabilityListener,
     server::handle_put_messages,
 };
+use axum::extract::ws::WebSocket;
 use axum::{
     extract::ws::{CloseFrame, Message},
     http::{StatusCode, Uri},
@@ -20,6 +15,11 @@ use common::signal_protobuf::{
     web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
+use common::websocket::net_helper::{
+    create_request, create_response, current_millis, generate_req_id, unpack_messages,
+    PathExtractor,
+};
+use common::websocket::wsstream::WSStream;
 use futures_util::{stream::SplitSink, SinkExt, StreamExt};
 use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
 use prost::{bytes::Bytes, Message as PMessage};
@@ -31,8 +31,6 @@ use std::{
     time::SystemTimeError,
 };
 use tokio::sync::Mutex;
-use common::websocket::wsstream::WSStream;
-use axum::extract::ws::WebSocket;
 
 #[derive(Debug)]
 pub enum UserIdentity {
@@ -322,7 +320,7 @@ where
 pub struct SignalWebSocket(WebSocket);
 impl SignalWebSocket {
     pub fn new(w: WebSocket) -> Self {
-        Self (w)   
+        Self(w)
     }
 }
 
@@ -366,7 +364,6 @@ impl futures_util::Sink<Message> for SignalWebSocket {
     }
 }
 
-
 #[async_trait::async_trait]
 impl WSStream<Message, Error> for SignalWebSocket {
     async fn recv(&mut self) -> Option<Result<Message, Error>> {
@@ -399,9 +396,7 @@ pub type ConnectionMap<T, U> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnecti
 pub(crate) mod test {
     use crate::{
         database::SignalDatabase,
-        managers::{
-            state::SignalServerState,
-        },
+        managers::state::SignalServerState,
         postgres::PostgresDatabase,
         test_utils::{
             message_cache::teardown,
@@ -409,10 +404,10 @@ pub(crate) mod test {
             websocket::{MockDB, MockSocket},
         },
     };
-    use common::websocket::net_helper::{create_request, create_response};
     use axum::{extract::ws::Message, http::StatusCode, Error};
     use base64::prelude::{Engine as _, BASE64_STANDARD};
     use common::signal_protobuf::{Envelope, WebSocketMessage};
+    use common::websocket::net_helper::{create_request, create_response};
     use futures_util::{stream::SplitStream, StreamExt};
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};

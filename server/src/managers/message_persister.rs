@@ -220,11 +220,11 @@ mod message_persister_tests {
         cmd("ZRANGE")
             .arg(&queue_index_key)
             .arg(0)
-            .arg(&max_time)
+            .arg(max_time)
             .arg("BYSCORE")
             .arg("LIMIT")
             .arg(0)
-            .arg(&limit)
+            .arg(limit)
             .query_async::<Vec<String>>(&mut connection)
             .await
             .unwrap()
@@ -238,7 +238,7 @@ mod message_persister_tests {
 
         for queue_key in queue_keys {
             if cmd("ZCARD")
-                .arg(&queue_key)
+                .arg(queue_key)
                 .query_async::<u64>(&mut connection)
                 .await
                 .unwrap()
@@ -312,7 +312,7 @@ mod message_persister_tests {
 
         message_manager
             .add_message_availability_listener(
-                &protocol_addresses.first().unwrap(),
+                protocol_addresses.first().unwrap(),
                 websocket.clone(),
             )
             .await;
@@ -375,9 +375,9 @@ mod message_persister_tests {
             msg_after,
         ) = message_persister_test_setup_run(vec![time_now_secs() - 660]).await;
 
-        assert_eq!(handle_persisted_messages_evoked, true);
-        assert_eq!(no_queue_lock_keys_in_cache, true);
-        assert_eq!(old_msg_deleted, true);
+        assert!(handle_persisted_messages_evoked);
+        assert!(no_queue_lock_keys_in_cache);
+        assert!(old_msg_deleted);
         assert_eq!(msg_before.len(), 1);
         assert_eq!(msg_after.len(), 0);
     }
@@ -392,9 +392,9 @@ mod message_persister_tests {
             msg_after,
         ) = message_persister_test_setup_run(vec![time_now_secs() - 300]).await;
 
-        assert_eq!(handle_persisted_messages_evoked, false);
-        assert_eq!(no_queue_lock_keys_in_cache, true);
-        assert_eq!(old_msg_deleted, true);
+        assert!(!handle_persisted_messages_evoked);
+        assert!(no_queue_lock_keys_in_cache);
+        assert!(old_msg_deleted);
         assert_eq!(msg_before.len(), 1);
         assert_eq!(msg_after.len(), 1);
     }
@@ -419,9 +419,9 @@ mod message_persister_tests {
             msg_after,
         ) = message_persister_test_setup_run(message_times).await;
 
-        assert_eq!(handle_persisted_messages_evoked, true);
-        assert_eq!(no_queue_lock_keys_in_cache, true);
-        assert_eq!(old_msg_deleted, true);
+        assert!(handle_persisted_messages_evoked);
+        assert!(no_queue_lock_keys_in_cache);
+        assert!(old_msg_deleted);
         assert_eq!(msg_before.len(), 5);
         assert_eq!(msg_after.len(), 3);
     }

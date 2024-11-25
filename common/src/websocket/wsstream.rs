@@ -8,5 +8,3 @@ pub trait WSStream<M, E>:
     async fn send(&mut self, msg: M) -> Result<(), E>;
     async fn close(self) -> Result<(), E>;
 }
-
-

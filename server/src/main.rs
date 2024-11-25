@@ -18,9 +18,9 @@ mod test_utils;
 pub async fn main() {
     //Starting logger
     /*tracing_subscriber::fmt()
-        .log_internal_errors(true)
-        .with_max_level(tracing::Level::DEBUG)
-        .with_line_number(true)
-        .init();*/
+    .log_internal_errors(true)
+    .with_max_level(tracing::Level::DEBUG)
+    .with_line_number(true)
+    .init();*/
     server::start_server().await.unwrap();
 }

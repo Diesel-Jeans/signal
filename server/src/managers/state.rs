@@ -3,16 +3,14 @@ use super::{
     client_presence_manager::ClientPresenceManager,
     key_manager::KeyManager,
     messages_manager::MessagesManager,
-    websocket::{
-        connection::WebSocketConnection, websocket_manager::WebSocketManager,
-    },
+    websocket::{connection::WebSocketConnection, websocket_manager::WebSocketManager},
 };
 #[cfg(test)]
 use crate::test_utils::websocket::{MockDB, MockSocket};
 use crate::{database::SignalDatabase, message_cache::MessageCache, postgres::PostgresDatabase};
-use std::fmt::Debug;
-use common::websocket::wsstream::WSStream;
 use axum::extract::ws::Message;
+use common::websocket::wsstream::WSStream;
+use std::fmt::Debug;
 
 #[derive(Debug)]
 pub struct SignalServerState<T, U>

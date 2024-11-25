@@ -1,7 +1,5 @@
-use crate::{
-    client::VerifiedSession,
-    contact_manager::Contact,
-};
+use crate::socket_manager::{signal_ws_connect, SignalStream, SocketManager};
+use crate::{client::VerifiedSession, contact_manager::Contact};
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
 use common::{
@@ -22,7 +20,6 @@ use std::{
 };
 use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
 use tokio_tungstenite::connect_async;
-use crate::socket_manager::{SocketManager, signal_ws_connect, SignalStream};
 
 const CLIENT_URI: &str = "/client";
 const MSG_URI: &str = "v1/messages";
@@ -208,7 +205,10 @@ impl Server for ServerAPI {
             .set_base_url(Url::parse(&address).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
-        ServerAPI { client, socket_manager: SocketManager::new(5) }
+        ServerAPI {
+            client,
+            socket_manager: SocketManager::new(5),
+        }
     }
 }
 impl ServerAPI {

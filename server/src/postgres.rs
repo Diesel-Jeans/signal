@@ -1038,11 +1038,13 @@ mod db_tests {
         let secondary_device = new_device();
         db.add_device(&account.aci().into(), &secondary_device)
             .await
-            .expect(&format!(
-                "Should be other device_id: {}, {}",
-                account.devices()[0].device_id(),
-                secondary_device.device_id()
-            ));
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Should be other device_id: {}, {}",
+                    account.devices()[0].device_id(),
+                    secondary_device.device_id()
+                )
+            });
 
         let retrieved_device = db
             .get_device(&ProtocolAddress::new(
@@ -1065,11 +1067,13 @@ mod db_tests {
         db.add_account(&account).await.unwrap();
         db.add_device(&account.aci().into(), &device)
             .await
-            .expect(&format!(
-                "Should be other device_id: {}, {}",
-                account.devices()[0].device_id(),
-                device.device_id()
-            ));
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Should be other device_id: {}, {}",
+                    account.devices()[0].device_id(),
+                    device.device_id()
+                )
+            });
         account.add_device(device).unwrap();
         let retrieved_devices = db.get_all_devices(&account.aci().into()).await.unwrap();
         db.delete_account(&account.aci().into()).await.unwrap();
