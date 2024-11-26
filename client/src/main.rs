@@ -1,6 +1,7 @@
 use std::error::Error;
 
 use client::Client;
+use server::SignalBackend;
 use storage::device::Device;
 
 mod client;
@@ -17,7 +18,7 @@ mod test_utils;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    Client::<Device>::register("my_device", "b".into()).await?;
+    Client::<Device, SignalBackend>::register("my_device", "b".into()).await?;
 
     Ok(())
 }

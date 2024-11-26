@@ -1,3 +1,13 @@
+use crate::{
+    contact_manager::ContactManager,
+    errors::{LoginError, SignalClientError},
+    key_manager::KeyManager,
+    server::{Backend, ServerAPI, SignalBackend},
+    storage::{
+        device::Device,
+        generic::{ProtocolStore, Storage, StorageType},
+    },
+};
 use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use common::web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest};
@@ -8,48 +18,27 @@ use libsignal_protocol::{IdentityKey, IdentityKeyPair, KeyPair};
 use rand::{rngs::OsRng, Rng};
 use sqlx::sqlite::SqlitePoolOptions;
 
-use crate::{
-    contact_manager::ContactManager,
-    errors::{LoginError, SignalClientError},
-    key_manager::KeyManager,
-    server::{Server, ServerAPI},
-    storage::{
-        device::Device,
-        generic::{ProtocolStore, Storage, StorageType},
-    },
-};
-
-pub struct Client<T: StorageType> {
+pub struct Client<S: StorageType, B: Backend> {
     aci: Aci,
     pni: Pni,
     contact_manager: ContactManager,
-    server_api: ServerAPI,
+    server_api: ServerAPI<B>,
     key_manager: KeyManager,
-    storage: Storage<T>,
-}
-
-pub struct VerifiedSession {
-    session_id: String,
-}
-
-impl VerifiedSession {
-    pub fn session_id(&self) -> &String {
-        &self.session_id
-    }
+    storage: Storage<S>,
 }
 
 const PROFILE_KEY_LENGTH: usize = 32;
 const MASTER_KEY_LENGTH: usize = 32;
 const PASSWORD_LENGTH: usize = 16;
 
-impl<T: StorageType> Client<T> {
+impl<S: StorageType, B: Backend> Client<S, B> {
     fn new(
         aci: Aci,
         pni: Pni,
         contact_manager: ContactManager,
-        server_api: ServerAPI,
+        server_api: ServerAPI<B>,
         key_manager: KeyManager,
-        storage: Storage<T>,
+        storage: Storage<S>,
     ) -> Self {
         Client {
             aci,
@@ -66,7 +55,7 @@ impl<T: StorageType> Client<T> {
     pub async fn register(
         name: &str,
         phone_number: String,
-    ) -> Result<Client<Device>, SignalClientError> {
+    ) -> Result<Client<Device, SignalBackend>, SignalClientError> {
         let mut csprng = OsRng;
         let aci_registration_id = OsRng.gen_range(1..16383);
         let pni_registration_id = OsRng.gen_range(1..16383);
@@ -150,7 +139,7 @@ impl<T: StorageType> Client<T> {
             capabilities,
             Box::new(access_key),
         );
-        let server_api = ServerAPI::new();
+        let server_api = ServerAPI::new(SignalBackend::new());
         let req = RegistrationRequest::new(
             "".into(),
             "".into(),
@@ -195,7 +184,7 @@ impl<T: StorageType> Client<T> {
         message: &str,
         user_id: &str,
         device_id: u32,
-    ) -> Result<(), SignalClientError> {
+    ) -> Result<(), B::Error> {
         self.server_api
             .send_msg(message.into(), user_id.into(), device_id)
             .await
