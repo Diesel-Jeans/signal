@@ -4,7 +4,7 @@ pub struct PersistentReceiver<T>(mpsc::UnboundedReceiver<T>);
 
 impl<T> PersistentReceiver<T>
 where
-    T: Clone + Send + 'static
+    T: Clone + Send + 'static,
 {
     pub fn new<F>(mut r: broadcast::Receiver<T>, filter: Option<F>) -> Self
     where
