@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
+use common::signalservice::Envelope;
 use common::web_api::SignalMessages;
 use common::{
     signalservice::{WebSocketRequestMessage, WebSocketResponseMessage},
@@ -270,7 +271,7 @@ impl ServerAPI {
         }
     }
 
-    async fn get_incoming_messages(&mut self) -> Result<Vec<WebSocketRequestMessage>> {
+    pub async fn get_message(&mut self) -> Envelope {
         todo!()
     }
 }
