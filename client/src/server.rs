@@ -1,4 +1,4 @@
-use crate::socket_manager::{SignalStream, SocketManager};
+use crate::socket_manager::{SignalStream, SocketManager, signal_ws_connect};
 use crate::{
     client::VerifiedSession,
     contact_manager::Contact,
@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
+use common::signalservice::{web_socket_message, Envelope, WebSocketMessage};
 use common::{
     signalservice::{WebSocketRequestMessage, WebSocketResponseMessage},
     web_api::{
@@ -13,11 +14,15 @@ use common::{
         RegistrationResponse, UploadSignedPreKey,
     },
 };
+use futures_util::{FutureExt, TryFutureExt};
 use http_client::h1::H1Client;
 use libsignal_protocol::PreKeyBundle;
+use prost::Message as _;
 use serde_json::from_slice;
 use std::{env, error::Error, fmt::Display, fs, sync::Arc, time::Duration};
 use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
+
+use crate::persistent_receiver::PersistentReceiver;
 
 const CLIENT_URI: &str = "/client";
 const MSG_URI: &str = "v1/messages";
@@ -28,6 +33,7 @@ const BUNDLE_URI: &str = "/bundle";
 pub struct ServerAPI {
     client: Client,
     socket_manager: SocketManager<SignalStream>,
+    message_queue: PersistentReceiver<WebSocketMessage>
 }
 
 enum ReqType {
@@ -59,7 +65,7 @@ pub trait Server {
         username: &str,
         password: &str,
         url: &str,
-        port: &str,
+        tls_path: &str,
     ) -> Result<(), Self::Error>;
     async fn publish_bundle(&self, uuid: String) -> Result<(), Self::Error>;
     async fn fetch_bundle(&self, uuid: String) -> Result<PreKeyBundle, Self::Error>;
@@ -80,6 +86,7 @@ pub trait Server {
     async fn update_client(&self, new_client: &Contact) -> Result<(), Self::Error>;
     async fn delete_client(&self, uuid: String) -> Result<(), Self::Error>;
     async fn delete_device(&self, uuid: String) -> Result<(), Self::Error>;
+    async fn get_message(&mut self) -> Option<Envelope>;
     fn new() -> Self;
 }
 
@@ -90,11 +97,43 @@ impl Server for ServerAPI {
         username: &str,
         password: &str,
         url: &str,
-        port: &str,
+        tls_path: &str,
     ) -> Result<(), Self::Error> {
-        todo!("Implment when websockets are implemented");
+        if self.socket_manager.is_active().await {
+            return Ok(())
+        }
+        let ws = signal_ws_connect(tls_path, url, username, password).await.map_err(|e| SignalClientError::WebSocketError(e))?;
+        let ws = SignalStream::new(ws);
+        self.socket_manager.set_stream(ws).await.map_err(|e| SignalClientError::WebSocketError(e))?;
         Ok(())
     }
+
+    async fn send_msg(
+        &self,
+        msg: String,
+        user_id: String,
+        device_id: u32,
+    ) -> Result<(), Self::Error> {
+        todo!("Needs Websockets")
+    }
+
+    async fn get_message(&mut self) -> Option<Envelope> {
+        let x = self.message_queue.recv().await?;
+
+        let req = match x.request {
+            Some(x) => x,
+            None => {return None}
+        };
+
+        match Envelope::decode(req.body()) {
+            Ok(e) => Some(e),
+            Err(e) => {
+                println!("Failed to decode envelope: {}", e);
+                None
+            }
+        }
+    }
+
     async fn publish_bundle(&self, uuid: String) -> Result<(), Self::Error> {
         let payload = json!({
             "key1": "value1"
@@ -148,15 +187,6 @@ impl Server for ServerAPI {
         todo!("Handle the response")
     }
 
-    async fn send_msg(
-        &self,
-        msg: String,
-        user_id: String,
-        device_id: u32,
-    ) -> Result<(), Self::Error> {
-        todo!("Needs Websockets")
-    }
-
     async fn update_client(&self, client: &Contact) -> Result<(), Self::Error> {
         let payload = json!({
             "uuid": client.service_id.service_id_string()
@@ -205,9 +235,25 @@ impl Server for ServerAPI {
             .set_base_url(Url::parse(&address).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
+
+        let socket_mgr = SocketManager::new(16);
+
+        let filter = |x: &WebSocketMessage| -> Option<WebSocketMessage> {
+            if x.r#type() != web_socket_message::Type::Request || x.request.is_none(){
+                None
+            } else if x.request.as_ref().unwrap().path() == "/api/v1/message" && x.request.as_ref().unwrap().verb() == "PUT" {
+                Some(x.clone())
+            } else  {
+                None
+            }
+        };
+
+        let msg_queue = PersistentReceiver::new(socket_mgr.subscribe(), Some(filter));
+
         ServerAPI {
             client,
-            socket_manager: SocketManager::new(5),
+            socket_manager: socket_mgr,
+            message_queue:  msg_queue
         }
     }
 }
@@ -268,9 +314,5 @@ impl ServerAPI {
                 res.body_string().await.unwrap_or("".to_owned()),
             )),
         }
-    }
-
-    async fn get_incoming_messages(&mut self) -> Result<Vec<WebSocketRequestMessage>> {
-        todo!()
     }
 }

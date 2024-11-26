@@ -11,6 +11,7 @@ mod key_manager;
 mod server;
 mod socket_manager;
 mod storage;
+mod persistent_receiver;
 #[cfg(test)]
 mod test_utils;
 
