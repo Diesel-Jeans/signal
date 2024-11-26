@@ -2,9 +2,11 @@ use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use common::web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest};
 use core::str;
+use dotenv::dotenv;
 use libsignal_core::{Aci, Pni};
 use libsignal_protocol::{IdentityKey, IdentityKeyPair, KeyPair};
 use rand::{rngs::OsRng, Rng};
+use sqlx::sqlite::SqlitePoolOptions;
 
 use crate::{
     contact_manager::ContactManager,
@@ -12,18 +14,18 @@ use crate::{
     key_manager::KeyManager,
     server::{Server, ServerAPI},
     storage::{
-        generic::{ProtocolStore, Storage},
-        in_memory::InMemory,
+        device::Device,
+        generic::{ProtocolStore, Storage, StorageType},
     },
 };
 
-pub struct Client {
+pub struct Client<T: StorageType> {
     aci: Aci,
     pni: Pni,
     contact_manager: ContactManager,
     server_api: ServerAPI,
     key_manager: KeyManager,
-    storage: Storage<InMemory>,
+    storage: Storage<T>,
 }
 
 pub struct VerifiedSession {
@@ -40,14 +42,14 @@ const PROFILE_KEY_LENGTH: usize = 32;
 const MASTER_KEY_LENGTH: usize = 32;
 const PASSWORD_LENGTH: usize = 16;
 
-impl Client {
+impl<T: StorageType> Client<T> {
     fn new(
         aci: Aci,
         pni: Pni,
         contact_manager: ContactManager,
         server_api: ServerAPI,
         key_manager: KeyManager,
-        storage: Storage<InMemory>,
+        storage: Storage<T>,
     ) -> Self {
         Client {
             aci,
@@ -61,7 +63,10 @@ impl Client {
 
     /// Register a new account with the server.
     /// `phone_number` must be unique.
-    pub async fn register(name: &str, phone_number: String) -> Result<Self, SignalClientError> {
+    pub async fn register(
+        name: &str,
+        phone_number: String,
+    ) -> Result<Client<Device>, SignalClientError> {
         let mut csprng = OsRng;
         let aci_registration_id = OsRng.gen_range(1..16383);
         let pni_registration_id = OsRng.gen_range(1..16383);
@@ -69,8 +74,25 @@ impl Client {
         let pni_key_pair = KeyPair::generate(&mut csprng);
         let id_key = IdentityKey::new(aci_key_pair.public_key);
         let id_key_pair = IdentityKeyPair::new(id_key, aci_key_pair.private_key);
+        dotenv().map_err(|err| SignalClientError::DotenvError(format!("{err}")))?;
+        let db_url =
+            std::env::var("DATABASE_URL").expect("Expected to read database url from .env file");
+        let pool = SqlitePoolOptions::new()
+            .connect(&db_url)
+            .await
+            .expect("Could not connect to database");
 
-        let mut proto_storage = ProtocolStore::new(id_key_pair, aci_registration_id);
+        sqlx::migrate!("client_db/migrations")
+            .run(&pool)
+            .await
+            .expect("Could not run migrations");
+
+        let mut proto_storage = ProtocolStore::create_device_protocol_store(
+            id_key_pair,
+            aci_registration_id,
+            pool.clone(),
+        )
+        .await;
         let mut key_manager = KeyManager::new();
 
         let aci_signed_pk = key_manager
@@ -153,7 +175,7 @@ impl Client {
         let pni: Pni = response.pni.into();
 
         let contact_manager = ContactManager::new();
-        let storage = Storage::new(password, aci, pni, proto_storage);
+        let storage = Storage::create(aci, pni, password, proto_storage, pool).await?;
         Ok(Client::new(
             aci,
             pni,

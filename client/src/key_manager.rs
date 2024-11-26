@@ -1,12 +1,9 @@
-use std::{
-    collections::HashMap,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::HashMap;
 
+use common::utils::time_now;
 use libsignal_protocol::{
     kem, GenericSignedPreKey, IdentityKeyStore, KeyPair, KyberPreKeyRecord, KyberPreKeyStore,
     PreKeyRecord, PreKeyStore, SignalProtocolError, SignedPreKeyRecord, SignedPreKeyStore,
-    Timestamp,
 };
 use rand::{CryptoRng, Rng};
 
@@ -92,17 +89,6 @@ impl KeyManager {
         kyber_pre_key_store.save_kyber_pre_key(id, &record).await?;
         Ok(record)
     }
-}
-
-fn time_now() -> Timestamp {
-    Timestamp::from_epoch_millis(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Now is later than epoch")
-            .as_millis()
-            .try_into()
-            .expect("Living in the future is not allowed"),
-    )
 }
 
 #[cfg(test)]
