@@ -1,4 +1,3 @@
-use crate::errors::ServerRequestError;
 use crate::socket_manager::{SignalStream, SocketManager};
 use crate::{
     errors::{RegistrationError, SignalClientError},
@@ -42,10 +41,16 @@ pub trait Backend {
     ) -> Result<(), SignalClientError>;
 
     /// Publish a sigle [PreKeyBundle] for this device.
-    async fn publish_pre_key_bundle(&mut self, uuid: String) -> Result<(), SignalClientError>;
+    async fn publish_pre_key_bundle(
+        &mut self,
+        pre_key_bundle: PreKeyBundle,
+    ) -> Result<(), SignalClientError>;
 
     /// Fetch [PreKeyBundle] for all of a users devices.
-    async fn fetch_pre_key_bundles(&self, uuid: String) -> Result<PreKeyBundle, SignalClientError>;
+    async fn fetch_pre_key_bundles(
+        &self,
+        uuid: String,
+    ) -> Result<Vec<PreKeyBundle>, SignalClientError>;
 
     /// Send a [RegistrationRequest] to the server.
     /// Verifying the session is not implemented.
@@ -59,9 +64,9 @@ pub trait Backend {
 
     /// Send a message to another user.
     async fn send_msg(
-        &self,
+        &mut self,
         messages: SignalMessages,
-        service_id: ServiceId,
+        service_id: &ServiceId,
     ) -> Result<(), SignalClientError>;
 
     async fn get_message(&mut self) -> Option<Envelope>;
@@ -88,15 +93,18 @@ impl<T: Backend> ServerAPI<T> {
             .await
     }
 
-    pub async fn publish_pre_key_bundle(&mut self, uuid: String) -> Result<(), SignalClientError> {
-        todo!()
+    pub async fn publish_pre_key_bundle(
+        &mut self,
+        pre_key_bundle: PreKeyBundle,
+    ) -> Result<(), SignalClientError> {
+        self.backend.publish_pre_key_bundle(pre_key_bundle).await
     }
 
     pub async fn fetch_pre_key_bundles(
         &self,
         uuid: String,
     ) -> Result<Vec<PreKeyBundle>, SignalClientError> {
-        todo!()
+        self.backend.fetch_pre_key_bundles(uuid).await
     }
 
     pub async fn register_client(
@@ -112,15 +120,15 @@ impl<T: Backend> ServerAPI<T> {
     }
 
     pub async fn send_msg(
-        &self,
+        &mut self,
         messages: SignalMessages,
-        user_id: String,
+        service_id: &ServiceId,
     ) -> Result<(), SignalClientError> {
-        todo!()
+        self.backend.send_msg(messages, service_id).await
     }
 
     pub async fn get_message(&mut self) -> Option<Envelope> {
-        todo!()
+        self.backend.get_message().await
     }
 }
 
@@ -152,11 +160,17 @@ impl Backend for SignalBackend {
         Ok(())
     }
 
-    async fn publish_pre_key_bundle(&mut self, uuid: String) -> Result<(), SignalClientError> {
+    async fn publish_pre_key_bundle(
+        &mut self,
+        pre_key_bundle: PreKeyBundle,
+    ) -> Result<(), SignalClientError> {
         todo!()
     }
 
-    async fn fetch_pre_key_bundles(&self, uuid: String) -> Result<PreKeyBundle, SignalClientError> {
+    async fn fetch_pre_key_bundles(
+        &self,
+        uuid: String,
+    ) -> Result<Vec<PreKeyBundle>, SignalClientError> {
         todo!()
     }
 
@@ -186,9 +200,9 @@ impl Backend for SignalBackend {
     }
 
     async fn send_msg(
-        &self,
+        &mut self,
         messages: SignalMessages,
-        recipient: ServiceId,
+        recipient: &ServiceId,
     ) -> Result<(), SignalClientError> {
         todo!()
     }
@@ -240,6 +254,134 @@ impl SignalBackend {
             http_client,
             socket_manager: socket_mgr,
             message_queue: msg_queue,
+        }
+    }
+}
+
+#[cfg(test)]
+pub mod server_api_test {
+    use crate::errors::SignalClientError;
+
+    use super::Backend;
+    use common::{protocol_address, signalservice::Envelope, web_api::SignalMessages};
+    use core::panic;
+    use libsignal_core::{ProtocolAddress, ServiceId};
+    use libsignal_protocol::PreKeyBundle;
+    use serde_json::to_vec;
+    use std::{collections::HashMap, sync::Arc};
+    use tokio::sync::Mutex;
+
+    #[derive(Default)]
+    pub struct MockBackendState {
+        pre_key_bundles: HashMap<String, Vec<PreKeyBundle>>,
+        message_queues: HashMap<ProtocolAddress, Vec<Envelope>>,
+    }
+
+    pub struct MockBackend {
+        address: ProtocolAddress,
+        state: Arc<Mutex<MockBackendState>>,
+    }
+
+    impl Backend for MockBackend {
+        async fn connect(
+            &mut self,
+            username: &str,
+            password: &str,
+            url: &str,
+            tls_path: &str,
+        ) -> Result<(), SignalClientError> {
+            Ok(())
+        }
+
+        async fn publish_pre_key_bundle(
+            &mut self,
+            pre_key_bundle: PreKeyBundle,
+        ) -> Result<(), SignalClientError> {
+            if !self
+                .state
+                .lock()
+                .await
+                .pre_key_bundles
+                .entry(self.address.name().to_owned())
+                .or_insert(vec![])
+                .iter()
+                .find(|x| x.device_id().unwrap() == pre_key_bundle.device_id().unwrap())
+                .is_none()
+            {
+                panic!("Cannot publish bundle twice for client. Not supported.")
+            }
+            self.state
+                .lock()
+                .await
+                .pre_key_bundles
+                .get_mut(&self.address.name().to_owned())
+                .unwrap()
+                .push(pre_key_bundle);
+            Ok(())
+        }
+
+        async fn fetch_pre_key_bundles(
+            &self,
+            uuid: String,
+        ) -> Result<Vec<PreKeyBundle>, SignalClientError> {
+            Ok(self
+                .state
+                .lock()
+                .await
+                .pre_key_bundles
+                .get(&uuid)
+                .unwrap()
+                .clone())
+        }
+
+        async fn register_client(
+            &self,
+            phone_number: String,
+            password: String,
+            registration_request: common::web_api::RegistrationRequest,
+            session: Option<&super::VerifiedSession>,
+        ) -> Result<common::web_api::RegistrationResponse, SignalClientError> {
+            todo!()
+        }
+
+        async fn send_msg(
+            &mut self,
+            messages: SignalMessages,
+            service_id: &ServiceId,
+        ) -> Result<(), SignalClientError> {
+            for message in messages.messages {
+                let envelope = Envelope::builder()
+                    .r#type(message.r#type)
+                    .content(to_vec(&message).unwrap())
+                    .build();
+                self.state
+                    .lock()
+                    .await
+                    .message_queues
+                    .entry(ProtocolAddress::new(
+                        service_id.service_id_string(),
+                        message.destination_device_id.into(),
+                    ))
+                    .or_insert(vec![])
+                    .push(envelope);
+            }
+            Ok(())
+        }
+
+        async fn get_message(&mut self) -> Option<common::signalservice::Envelope> {
+            self.state
+                .lock()
+                .await
+                .message_queues
+                .get_mut(&self.address)
+                .unwrap()
+                .pop()
+        }
+    }
+
+    impl MockBackend {
+        pub fn new(address: ProtocolAddress, state: Arc<Mutex<MockBackendState>>) -> Self {
+            Self { address, state }
         }
     }
 }

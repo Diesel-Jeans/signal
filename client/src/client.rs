@@ -286,9 +286,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
                 .as_secs(),
         };
 
-        self.server_api
-            .send_msg(msgs, service_id.to_owned().service_id_string())
-            .await
+        self.server_api.send_msg(msgs, service_id).await
     }
 
     pub async fn receive_message(&mut self) -> Result<String, SignalClientError> {
@@ -306,6 +304,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         let bytes = BASE64_STANDARD
             .decode(ciphertext_content)
             .map_err(|err| ReceiveMessageError::Base64DecodeError(err))?;
+        println!("First decode");
 
         // The evelope contains information about which message type is received.
         let _type = match envelope.r#type() {
@@ -366,5 +365,103 @@ fn decode_ciphertext(
         CiphertextMessageType::Plaintext => {
             Ok(CiphertextMessage::PlaintextContent((&*bytes).try_into()?))
         }
+    }
+}
+#[cfg(test)]
+mod test_client {
+    use std::sync::Arc;
+
+    use crate::{
+        client::Client,
+        contact_manager::ContactManager,
+        encryption::test::create_pre_key_bundle,
+        key_manager::KeyManager,
+        server::{
+            server_api_test::{MockBackend, MockBackendState},
+            ServerAPI,
+        },
+        storage::{
+            generic::{ProtocolStore, Storage},
+            in_memory::InMemory,
+        },
+    };
+    use common::signalservice::{envelope, Envelope};
+    use libsignal_core::{Aci, ProtocolAddress};
+    use libsignal_protocol::IdentityKeyPair;
+    use rand::rngs::OsRng;
+    use serde_json::to_vec;
+    use tokio::sync::Mutex;
+    use uuid::uuid;
+
+    fn get_alice(state: Arc<Mutex<MockBackendState>>) -> Client<InMemory, MockBackend> {
+        let aci: Aci = uuid!("0d76041e-54ce-4cea-a128-ebfa32171c29").into();
+        let pni = uuid!("93c5486c-5bba-437f-a9c1-0570cb619d27").into();
+        let contact_manager = ContactManager::new();
+        let server_api = ServerAPI::new(MockBackend::new(
+            ProtocolAddress::new(aci.service_id_string(), 1.into()),
+            state,
+        ));
+        let key_manager = KeyManager::new();
+        let id_key_pair = IdentityKeyPair::generate(&mut OsRng);
+        let aci_registration_id = 1u32;
+        let protocol_store = ProtocolStore::new(id_key_pair, aci_registration_id);
+        let storage = Storage::new("password".to_owned(), aci, pni, protocol_store);
+
+        Client::new(aci, pni, contact_manager, server_api, key_manager, storage)
+    }
+
+    fn get_bob(state: Arc<Mutex<MockBackendState>>) -> Client<InMemory, MockBackend> {
+        let aci: Aci = uuid!("7db772c1-5ae2-4d25-9daf-025be34aa7b1").into();
+        let pni = uuid!("2328ef13-246b-4ff9-9baf-e28933d0bc02").into();
+        let contact_manager = ContactManager::new();
+        let server_api = ServerAPI::new(MockBackend::new(
+            ProtocolAddress::new(aci.service_id_string(), 1.into()),
+            state,
+        ));
+        let key_manager = KeyManager::new();
+        let id_key_pair = IdentityKeyPair::generate(&mut OsRng);
+        let aci_registration_id = 1u32;
+        let protocol_store = ProtocolStore::new(id_key_pair, aci_registration_id);
+        let storage = Storage::new("password".to_owned(), aci, pni, protocol_store);
+        Client::new(aci, pni, contact_manager, server_api, key_manager, storage)
+    }
+
+    #[tokio::test]
+    async fn test_alice_send_bob_receive() {
+        dotenv::dotenv().ok().unwrap();
+        let state = Arc::new(Mutex::new(MockBackendState::default()));
+        let mut alice = get_alice(state.clone());
+        let mut bob = get_bob(state);
+        let mut csprng = OsRng;
+
+        let alice_bundle =
+            create_pre_key_bundle(&mut alice.storage.protocol_store, 1.into(), &mut csprng)
+                .await
+                .unwrap();
+
+        let bob_bundle =
+            create_pre_key_bundle(&mut bob.storage.protocol_store, 1.into(), &mut csprng)
+                .await
+                .unwrap();
+
+        alice
+            .server_api
+            .publish_pre_key_bundle(alice_bundle)
+            .await
+            .unwrap();
+
+        bob.server_api
+            .publish_pre_key_bundle(bob_bundle)
+            .await
+            .unwrap();
+
+        alice
+            .send_message("Hello, World!", &bob.aci.into())
+            .await
+            .unwrap();
+
+        let message = bob.receive_message().await.unwrap();
+
+        assert_eq!("Hello, World!".to_owned(), message);
     }
 }
