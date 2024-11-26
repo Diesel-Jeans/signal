@@ -1,4 +1,4 @@
-use crate::socket_manager::{SignalStream, SocketManager, signal_ws_connect};
+use crate::socket_manager::{signal_ws_connect, SignalStream, SocketManager};
 use crate::{
     client::VerifiedSession,
     contact_manager::Contact,
@@ -7,14 +7,10 @@ use crate::{
 use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
 use common::signalservice::{web_socket_message, Envelope, WebSocketMessage};
-use common::{
-    signalservice::{WebSocketRequestMessage, WebSocketResponseMessage},
-    web_api::{
-        authorization::BasicAuthorizationHeader, AccountAttributes, RegistrationRequest,
-        RegistrationResponse, UploadSignedPreKey,
-    },
+use common::web_api::{
+    authorization::BasicAuthorizationHeader, RegistrationRequest, RegistrationResponse,
 };
-use futures_util::{FutureExt, TryFutureExt};
+use futures_util::TryFutureExt;
 use http_client::h1::H1Client;
 use libsignal_protocol::PreKeyBundle;
 use prost::Message as _;
@@ -33,7 +29,7 @@ const BUNDLE_URI: &str = "/bundle";
 pub struct ServerAPI {
     client: Client,
     socket_manager: SocketManager<SignalStream>,
-    message_queue: PersistentReceiver<WebSocketMessage>
+    message_queue: PersistentReceiver<WebSocketMessage>,
 }
 
 enum ReqType {
@@ -100,11 +96,16 @@ impl Server for ServerAPI {
         tls_path: &str,
     ) -> Result<(), Self::Error> {
         if self.socket_manager.is_active().await {
-            return Ok(())
+            return Ok(());
         }
-        let ws = signal_ws_connect(tls_path, url, username, password).await.map_err(|e| SignalClientError::WebSocketError(e))?;
+        let ws = signal_ws_connect(tls_path, url, username, password)
+            .await
+            .map_err(SignalClientError::WebSocketError)?;
         let ws = SignalStream::new(ws);
-        self.socket_manager.set_stream(ws).await.map_err(|e| SignalClientError::WebSocketError(e))?;
+        self.socket_manager
+            .set_stream(ws)
+            .await
+            .map_err(SignalClientError::WebSocketError)?;
         Ok(())
     }
 
@@ -122,7 +123,7 @@ impl Server for ServerAPI {
 
         let req = match x.request {
             Some(x) => x,
-            None => {return None}
+            None => return None,
         };
 
         match Envelope::decode(req.body()) {
@@ -239,11 +240,13 @@ impl Server for ServerAPI {
         let socket_mgr = SocketManager::new(16);
 
         let filter = |x: &WebSocketMessage| -> Option<WebSocketMessage> {
-            if x.r#type() != web_socket_message::Type::Request || x.request.is_none(){
+            if x.r#type() != web_socket_message::Type::Request || x.request.is_none() {
                 None
-            } else if x.request.as_ref().unwrap().path() == "/api/v1/message" && x.request.as_ref().unwrap().verb() == "PUT" {
+            } else if x.request.as_ref().unwrap().path() == "/api/v1/message"
+                && x.request.as_ref().unwrap().verb() == "PUT"
+            {
                 Some(x.clone())
-            } else  {
+            } else {
                 None
             }
         };
@@ -253,7 +256,7 @@ impl Server for ServerAPI {
         ServerAPI {
             client,
             socket_manager: socket_mgr,
-            message_queue:  msg_queue
+            message_queue: msg_queue,
         }
     }
 }

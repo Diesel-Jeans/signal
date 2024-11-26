@@ -8,10 +8,10 @@ mod contact_manager;
 mod encryption;
 mod errors;
 mod key_manager;
+mod persistent_receiver;
 mod server;
 mod socket_manager;
 mod storage;
-mod persistent_receiver;
 #[cfg(test)]
 mod test_utils;
 

@@ -8,7 +8,7 @@ use rand::{rngs::OsRng, Rng};
 
 use crate::{
     contact_manager::ContactManager,
-    errors::{LoginError, RegistrationError, SignalClientError},
+    errors::{LoginError, SignalClientError},
     key_manager::KeyManager,
     server::{Server, ServerAPI},
     storage::{
