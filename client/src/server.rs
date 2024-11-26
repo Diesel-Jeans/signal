@@ -10,7 +10,6 @@ use common::signalservice::{web_socket_message, Envelope, WebSocketMessage};
 use common::web_api::{
     authorization::BasicAuthorizationHeader, RegistrationRequest, RegistrationResponse,
 };
-use futures_util::TryFutureExt;
 use http_client::h1::H1Client;
 use libsignal_protocol::PreKeyBundle;
 use prost::Message as _;

@@ -2,7 +2,10 @@ use tokio::sync::{broadcast, mpsc};
 
 pub struct PersistentReceiver<T>(mpsc::UnboundedReceiver<T>);
 
-impl<T: Clone + Send + 'static> PersistentReceiver<T> {
+impl<T> PersistentReceiver<T>
+where
+    T: Clone + Send + 'static
+{
     pub fn new<F>(mut r: broadcast::Receiver<T>, filter: Option<F>) -> Self
     where
         F: Fn(&T) -> Option<T> + Send + Sync + 'static,
