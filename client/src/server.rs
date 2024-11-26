@@ -1,7 +1,9 @@
+use crate::errors::ServerRequestError;
+use crate::socket_manager::{SignalStream, SocketManager};
 use crate::{
     errors::{RegistrationError, SignalClientError},
     persistent_receiver::PersistentReceiver,
-    socket_manager::{signal_ws_connect, SignalStream, SocketManager},
+    socket_manager::signal_ws_connect,
 };
 use async_native_tls::{Certificate, TlsConnector};
 use common::signalservice::Envelope;
@@ -13,10 +15,9 @@ use common::{
 use http_client::h1::H1Client;
 use libsignal_core::ServiceId;
 use libsignal_protocol::PreKeyBundle;
-use serde_json::{from_slice, json};
+use serde_json::from_slice;
 use std::{env, fmt::Debug, fs, sync::Arc, time::Duration};
-use surf::{Client, Config};
-use url::Url;
+use surf::{http::convert::json, Client, Config, Url};
 
 const REGISTER_URI: &str = "v1/registration";
 

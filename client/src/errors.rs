@@ -17,7 +17,32 @@ pub enum SignalClientError {
     DatabaseError(String),
     DotenvError(String),
     ReceiveMessageError(ReceiveMessageError),
+    ServerRequestError(ServerRequestError),
 }
+
+#[derive(Debug)]
+pub enum ServerRequestError {
+    /// The status code was not 200 - OK
+    StatusCodeError(u16, String),
+    BodyDecodeError(String),
+    TransmissionError(String),
+}
+
+impl Display for ServerRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StatusCodeError(code, body) => write!(f, "Response was {}: {}", code, body),
+            Self::BodyDecodeError(err) => {
+                write!(f, "Could not decode response body: {err}")
+            }
+            Self::TransmissionError(err) => {
+                write!(f, "HTTP communication with server failed: {err}")
+            }
+        }
+    }
+}
+
+impl Error for ServerRequestError {}
 
 impl fmt::Debug for SignalClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -36,6 +61,7 @@ impl fmt::Display for SignalClientError {
             Self::DatabaseError(err) => write!(f, "{err}"),
             Self::DotenvError(err) => write!(f, "{err}"),
             Self::ReceiveMessageError(err) => write!(f, "{err}"),
+            Self::ServerRequestError(err) => write!(f, "{err}"),
         }
     }
 }
@@ -167,7 +193,7 @@ impl From<SendMessageError> for SignalClientError {
 pub enum ReceiveMessageError {
     Base64DecodeError(base64::DecodeError),
     NoMessageTypeInEnvelope,
-    InvalidMessageTypeInEnvelope(i32),
+    InvalidMessageTypeInEnvelope,
     CiphertextDecodeError(SignalProtocolError),
     ParseProtocolAddressError(ParseProtocolAddressError),
     DecryptMessageError(SignalProtocolError),
@@ -189,8 +215,8 @@ impl fmt::Display for ReceiveMessageError {
             Self::NoMessageTypeInEnvelope => {
                 "A message was received but it did not contain the type of the message.".to_owned()
             }
-            Self::InvalidMessageTypeInEnvelope(t) => {
-                format!("A message was received but it had an invalid message type: {t}")
+            Self::InvalidMessageTypeInEnvelope => {
+                format!("A message was received but it had an invalid message type")
             }
             Self::CiphertextDecodeError(err) => format!("{err}"),
             Self::ParseProtocolAddressError(err) => format!("{err}"),
