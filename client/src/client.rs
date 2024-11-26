@@ -22,7 +22,7 @@ use core::str;
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{
     message_decrypt, process_prekey_bundle, CiphertextMessage, CiphertextMessageType, IdentityKey,
-    IdentityKeyPair, KeyPair, SignalProtocolError,
+    IdentityKeyPair, KeyPair, SessionStore, SignalProtocolError,
 };
 use prost::Message;
 use rand::{rngs::OsRng, Rng};
@@ -196,12 +196,9 @@ impl Client {
             )
             .build();
 
-        // pad and encrypt message.
-
         let timestamp = SystemTime::now();
 
         // Update the contact.
-
         let to = match self.contact_manager.get_contact(service_id) {
             Err(_) => {
                 self.contact_manager
@@ -232,9 +229,6 @@ impl Client {
                 }
 
                 self.contact_manager
-                    .update_contact(service_id, device_ids)
-                    .expect("Can update a contact that was just added");
-                self.contact_manager
                     .get_contact(service_id)
                     .expect("Can get contact that was just added.")
             }
@@ -255,7 +249,7 @@ impl Client {
             messages: msgs
                 .into_iter()
                 .map(|(id, msg)| SignalMessage {
-                    r#type: match msg {
+                    r#type: match msg.1 {
                         CiphertextMessage::SignalMessage(_) => envelope::Type::Ciphertext.into(),
                         CiphertextMessage::SenderKeyMessage(_) => {
                             envelope::Type::KeyExchange.into()
@@ -268,8 +262,8 @@ impl Client {
                         }
                     },
                     destination_device_id: id.into(),
-                    destination_registration_id: todo!(),
-                    content: BASE64_STANDARD.encode(msg.serialize()),
+                    destination_registration_id: msg.0,
+                    content: BASE64_STANDARD.encode(msg.1.serialize()),
                 })
                 .collect(),
             online: false, // Should this be true?
@@ -296,15 +290,12 @@ impl Client {
             .map_err(|err| ReceiveMessageError::Base64DecodeError(err))?;
 
         // The evelope contains information about which message type is received.
-        let t_id = envelope
-            .r#type
-            .ok_or(ReceiveMessageError::NoMessageTypeInEnvelope)?;
-        let _type = match t_id {
-            2 => Ok(CiphertextMessageType::Whisper),
-            3 => Ok(CiphertextMessageType::PreKey),
-            7 => Ok(CiphertextMessageType::SenderKey),
-            8 => Ok(CiphertextMessageType::Plaintext),
-            _ => Err(ReceiveMessageError::InvalidMessageTypeInEnvelope(t_id)),
+        let _type = match envelope.r#type() {
+            envelope::Type::Ciphertext => Ok(CiphertextMessageType::Whisper),
+            envelope::Type::PrekeyBundle => Ok(CiphertextMessageType::PreKey),
+            //7 => Ok(CiphertextMessageType::SenderKey),
+            envelope::Type::PlaintextContent => Ok(CiphertextMessageType::Plaintext),
+            _ => Err(ReceiveMessageError::InvalidMessageTypeInEnvelope),
         }?;
 
         // Use the information from envelope to construct a CiphertextMessage.

@@ -1,3 +1,4 @@
+use crate::errors::ServerRequestError;
 use crate::socket_manager::{SignalStream, SocketManager};
 use crate::{
     client::VerifiedSession,
@@ -8,18 +9,14 @@ use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
 use common::signalservice::Envelope;
 use common::web_api::SignalMessages;
-use common::{
-    signalservice::{WebSocketRequestMessage, WebSocketResponseMessage},
-    web_api::{
-        authorization::BasicAuthorizationHeader, AccountAttributes, RegistrationRequest,
-        RegistrationResponse, UploadSignedPreKey,
-    },
+use common::web_api::{
+    authorization::BasicAuthorizationHeader, RegistrationRequest, RegistrationResponse,
 };
 use http_client::h1::H1Client;
 use libsignal_core::ServiceId;
 use libsignal_protocol::PreKeyBundle;
-use serde_json::from_slice;
-use std::{env, error::Error, fmt::Display, fs, sync::Arc, time::Duration};
+use serde_json::{from_slice, from_str};
+use std::{env, fmt::Display, fs, sync::Arc, time::Duration};
 use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
 
 const CLIENT_URI: &str = "/client";
@@ -107,8 +104,8 @@ impl Server for ServerAPI {
     }
     async fn fetch_bundle(&self, uuid: String) -> Result<Vec<PreKeyBundle>, Self::Error> {
         let uri = format!("{}/{}", BUNDLE_URI, uuid);
-        self.make_request(ReqType::Get, uri).await;
-        todo!("Handle the response")
+        let res = self.make_request(ReqType::Get, uri).await;
+        todo!()
     }
 
     async fn register_client(
@@ -213,30 +210,6 @@ impl Server for ServerAPI {
     }
 }
 
-#[derive(Debug)]
-enum ServerRequestError {
-    /// The status code was not 200 - OK
-    StatusCodeError(StatusCode, String),
-    BodyDecodeError(String),
-    TransmissionError(String),
-}
-
-impl Display for ServerRequestError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::StatusCodeError(code, body) => write!(f, "Response was {}: {}", code, body),
-            Self::BodyDecodeError(err) => {
-                write!(f, "Could not decode response body: {err}")
-            }
-            Self::TransmissionError(err) => {
-                write!(f, "HTTP communication with server failed: {err}")
-            }
-        }
-    }
-}
-
-impl Error for ServerRequestError {}
-
 impl ServerAPI {
     async fn make_request(
         &self,
@@ -265,7 +238,7 @@ impl ServerAPI {
         match res.status() {
             StatusCode::Ok => Ok(res),
             _ => Err(ServerRequestError::StatusCodeError(
-                res.status(),
+                res.status().into(),
                 res.body_string().await.unwrap_or("".to_owned()),
             )),
         }

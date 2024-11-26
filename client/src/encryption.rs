@@ -17,9 +17,16 @@ pub async fn encrypt(
     target: &Contact,
     msg: &[u8],
     timestamp: SystemTime,
-) -> Result<HashMap<DeviceId, CiphertextMessage>, SignalClientError> {
+) -> Result<HashMap<DeviceId, (u32, CiphertextMessage)>, SignalClientError> {
     let mut msgs = HashMap::new();
     for id in target.device_ids.clone() {
+        let reg_id = session_store
+            .load_session(&target.get_address(&id).unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .remote_registration_id()
+            .unwrap();
         let res = message_encrypt(
             msg,
             &target.get_address(&id)?,
@@ -30,7 +37,7 @@ pub async fn encrypt(
         .await
         .map_err(|err| SendMessageError::EncryptionError(err))?;
 
-        msgs.insert(id, res);
+        msgs.insert(id, (reg_id, res));
     }
     Ok(msgs)
 }
@@ -258,7 +265,7 @@ pub mod test {
             .get_address(&alice_device)
             .unwrap();
 
-        let bob_msg = decrypt(&mut bob_store, &mut rng, &alice_address, to_bob_msg)
+        let bob_msg = decrypt(&mut bob_store, &mut rng, &alice_address, &to_bob_msg.1)
             .await
             .unwrap();
 
