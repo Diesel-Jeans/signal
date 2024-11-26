@@ -26,6 +26,40 @@ impl<T: SignalDatabase> KeyManager<T> {
             ServiceIdKind::Pni => auth_device.account().pni_identity_key(),
         };
 
+        let verify_key = |prekey: &UploadSignedPreKey| -> Result<(), ApiError> {
+            if !identity_key
+                .public_key()
+                .verify_signature(&prekey.public_key, &prekey.signature)
+                .unwrap()
+            {
+                return Err(ApiError {
+                    status_code: StatusCode::BAD_REQUEST,
+                    message: "Invalid signature".into(),
+                });
+            }
+            Ok(())
+        };
+
+        bundle
+            .signed_pre_key
+            .as_ref()
+            .map(|key| verify_key(key))
+            .transpose()?;
+        bundle
+            .pq_last_resort_pre_key
+            .as_ref()
+            .map(|key| verify_key(key))
+            .transpose()?;
+        bundle
+            .pq_pre_key
+            .as_ref()
+            .map(|keys| {
+                keys.iter()
+                    .map(|key| verify_key(key))
+                    .collect::<Result<(), ApiError>>()
+            })
+            .transpose()?;
+
         if let Some(prekeys) = bundle.pre_key {
             self.db
                 .store_one_time_ec_pre_keys(prekeys, &address)
@@ -36,22 +70,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 })?;
         }
 
-        let verify_key = |prekey: &UploadSignedPreKey, msg: &str| -> Result<(), ApiError> {
-            if !identity_key
-                .public_key()
-                .verify_signature(&prekey.public_key, &prekey.signature)
-                .unwrap()
-            {
-                return Err(ApiError {
-                    status_code: StatusCode::BAD_REQUEST,
-                    message: msg.into(),
-                });
-            }
-            Ok(())
-        };
-
         if let Some(ref prekey) = bundle.signed_pre_key {
-            verify_key(prekey, "Could not verify signature for signed prekey")?;
             self.db
                 .store_signed_pre_key(prekey, &address)
                 .await
@@ -62,10 +81,6 @@ impl<T: SignalDatabase> KeyManager<T> {
         }
 
         if let Some(prekeys) = bundle.pq_pre_key {
-            prekeys.iter().try_for_each(|prekey| {
-                verify_key(prekey, "Could not verify signature for kem prekey")
-            })?;
-
             self.db
                 .store_one_time_pq_pre_keys(prekeys, &address)
                 .await
@@ -76,7 +91,6 @@ impl<T: SignalDatabase> KeyManager<T> {
         }
 
         if let Some(ref prekey) = bundle.pq_last_resort_pre_key {
-            verify_key(prekey, "Could not verify signature for kem prekey")?;
             self.db
                 .store_pq_signed_pre_key(prekey, &address)
                 .await
