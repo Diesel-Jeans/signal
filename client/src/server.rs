@@ -4,9 +4,10 @@ use crate::{
     socket_manager::{signal_ws_connect, SignalStream, SocketManager},
 };
 use async_native_tls::{Certificate, TlsConnector};
+use common::signalservice::Envelope;
 use common::web_api::SignalMessages;
 use common::{
-    signalservice::{web_socket_message, Envelope, WebSocketMessage},
+    signalservice::{web_socket_message, WebSocketMessage},
     web_api::{authorization::BasicAuthorizationHeader, RegistrationRequest, RegistrationResponse},
 };
 use http_client::h1::H1Client;

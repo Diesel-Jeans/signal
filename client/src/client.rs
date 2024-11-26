@@ -1,7 +1,7 @@
 use crate::{
     contact_manager::ContactManager,
     encryption::{encrypt, pad_message},
-    errors::{LoginError, SignalClientError},
+    errors::{LoginError, ReceiveMessageError, SignalClientError},
     key_manager::KeyManager,
     server::{Backend, ServerAPI, SignalBackend},
     storage::{
@@ -12,6 +12,7 @@ use crate::{
 use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use common::{
+    protocol_address::parse_protocol_address,
     signalservice::{envelope, Content, DataMessage},
     web_api::{
         AccountAttributes, DeviceCapabilities, RegistrationRequest, SignalMessage, SignalMessages,
@@ -21,7 +22,8 @@ use core::str;
 use dotenv::dotenv;
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{
-    process_prekey_bundle, CiphertextMessage, IdentityKey, IdentityKeyPair, KeyPair,
+    message_decrypt, process_prekey_bundle, CiphertextMessage, CiphertextMessageType, IdentityKey,
+    IdentityKeyPair, KeyPair, SignalProtocolError,
 };
 use prost::Message;
 use rand::{rngs::OsRng, Rng};
@@ -293,5 +295,85 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         self.server_api
             .send_msg(msgs, service_id.to_owned().service_id_string())
             .await
+    }
+
+    pub async fn receive_message(&mut self) -> Result<String, SignalClientError> {
+        // I get Envelope from Server.
+        let envelope = self
+            .server_api
+            .get_message()
+            .await
+            .ok_or(ReceiveMessageError::NoMessageReceived)?;
+
+        // Envelope contains a ciphertext message; a so called `encrypted [Content]`
+        let ciphertext_content = envelope.content();
+
+        // The content of the envelope is base64 encoded.
+        let bytes = BASE64_STANDARD
+            .decode(ciphertext_content)
+            .map_err(|err| ReceiveMessageError::Base64DecodeError(err))?;
+
+        // The evelope contains information about which message type is received.
+        let t_id = envelope
+            .r#type
+            .ok_or(ReceiveMessageError::NoMessageTypeInEnvelope)?;
+        let _type = match t_id {
+            2 => Ok(CiphertextMessageType::Whisper),
+            3 => Ok(CiphertextMessageType::PreKey),
+            7 => Ok(CiphertextMessageType::SenderKey),
+            8 => Ok(CiphertextMessageType::Plaintext),
+            _ => Err(ReceiveMessageError::InvalidMessageTypeInEnvelope(t_id)),
+        }?;
+
+        // Use the information from envelope to construct a CiphertextMessage.
+        let ciphertext = decode_ciphertext(bytes, _type)
+            .map_err(|err| ReceiveMessageError::CiphertextDecodeError(err))?;
+
+        let address = parse_protocol_address(envelope.source_service_id())?;
+
+        let mut csprng = OsRng;
+        let store = &mut self.storage.protocol_store;
+
+        // Decrypt the message.
+        let plaintext = message_decrypt(
+            &ciphertext,
+            &address,
+            &mut store.session_store,
+            &mut store.identity_key_store,
+            &mut store.pre_key_store,
+            &mut store.signed_pre_key_store,
+            &mut store.kyber_pre_key_store,
+            &mut csprng,
+        )
+        .await
+        .map_err(|err| ReceiveMessageError::DecryptMessageError(err))?;
+
+        // The final message is stored within a DataMessage inside a Content.
+        Ok(Content::decode(plaintext.as_ref())
+            .map_err(ReceiveMessageError::ProtobufDecodeContentError)?
+            .data_message
+            .ok_or_else(|| ReceiveMessageError::InvalidMessageContent)?
+            .body()
+            .to_owned())
+    }
+}
+
+fn decode_ciphertext(
+    bytes: Vec<u8>,
+    _type: CiphertextMessageType,
+) -> Result<CiphertextMessage, SignalProtocolError> {
+    match _type {
+        CiphertextMessageType::Whisper => {
+            Ok(CiphertextMessage::SignalMessage((&*bytes).try_into()?))
+        }
+        CiphertextMessageType::PreKey => Ok(CiphertextMessage::PreKeySignalMessage(
+            (&*bytes).try_into()?,
+        )),
+        CiphertextMessageType::SenderKey => {
+            Ok(CiphertextMessage::SenderKeyMessage((&*bytes).try_into()?))
+        }
+        CiphertextMessageType::Plaintext => {
+            Ok(CiphertextMessage::PlaintextContent((&*bytes).try_into()?))
+        }
     }
 }
