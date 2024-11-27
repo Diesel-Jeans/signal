@@ -376,7 +376,10 @@ mod key_manager_tests {
             device_bundle[0].registration_id(),
             target_device.registration_id()
         );
-        assert_eq!(device_bundle[0].pre_key().clone(), one_time[0]);
+        assert_eq!(
+            device_bundle[0].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
         assert_eq!(
             device_bundle[0].signed_pre_key().clone(),
             key_bundle.pni_signed_pre_key
@@ -454,7 +457,10 @@ mod key_manager_tests {
             device_bundle[0].registration_id(),
             target_device.registration_id()
         );
-        assert_eq!(device_bundle[0].pre_key().clone(), one_time[0]);
+        assert_eq!(
+            device_bundle[0].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
         assert_eq!(
             device_bundle[0].signed_pre_key().clone(),
             key_bundle.pni_signed_pre_key
@@ -468,7 +474,10 @@ mod key_manager_tests {
             device_bundle[1].registration_id(),
             device2.registration_id()
         );
-        assert_eq!(device_bundle[1].pre_key().clone(), one_time[0]);
+        assert_eq!(
+            device_bundle[1].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
         assert_eq!(
             device_bundle[1].signed_pre_key().clone(),
             key_bundle.pni_signed_pre_key
@@ -537,7 +546,7 @@ mod key_manager_tests {
             .await
             .unwrap();
 
-        assert_eq!(prekey[0], prekey_db);
+        assert_eq!(Some(prekey[0].clone()), prekey_db);
         assert_eq!(signed_pre_key, signed_pre_key_db);
         assert_eq!(pq_pre_key, pq_pre_key_db);
         assert_eq!(pq_last_resort_pre_key, pq_last_resort_pre_key_db);

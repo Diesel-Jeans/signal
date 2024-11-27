@@ -328,7 +328,7 @@ impl PreKeyResponse {
 pub struct PreKeyResponseItem {
     device_id: u32,
     registration_id: u32,
-    pre_key: UploadPreKey,
+    pre_key: Option<UploadPreKey>,
     pq_pre_key: UploadSignedPreKey,
     signed_pre_key: UploadSignedPreKey,
 }
@@ -337,7 +337,7 @@ impl PreKeyResponseItem {
     pub fn new(
         device_id: DeviceId,
         registration_id: u32,
-        pre_key: UploadPreKey,
+        pre_key: Option<UploadPreKey>,
         pq_pre_key: UploadSignedPreKey,
         signed_pre_key: UploadSignedPreKey,
     ) -> Self {
@@ -355,7 +355,7 @@ impl PreKeyResponseItem {
     pub fn registration_id(&self) -> u32 {
         self.registration_id
     }
-    pub fn pre_key(&self) -> &UploadPreKey {
+    pub fn pre_key(&self) -> &Option<UploadPreKey> {
         &self.pre_key
     }
     pub fn pq_pre_key(&self) -> &UploadSignedPreKey {
@@ -380,11 +380,15 @@ impl TryFrom<PreKeyResponse> for Vec<PreKeyBundle> {
 
         let mut bundles = Vec::new();
         for pre_key_items in items.keys() {
-            let pre_key: Option<(PreKeyId, PublicKey)> = Some((
-                pre_key_items.pre_key().key_id.into(),
-                PublicKey::deserialize(&pre_key_items.pre_key().public_key)
-                    .map_err(|_| "Failed decoding pre key")?,
-            ));
+            let pre_key = if let Some(pre_key) = pre_key_items.pre_key() {
+                Some((
+                    pre_key.key_id.into(),
+                    PublicKey::deserialize(&pre_key.public_key)
+                        .map_err(|_| "Failed decoding pre key")?,
+                ))
+            } else {
+                None
+            };
             let bundle = PreKeyBundle::new(
                 pre_key_items.registration_id(),
                 pre_key_items.device_id(),
@@ -445,10 +449,10 @@ mod api_structs_tests {
         keys.push(PreKeyResponseItem::new(
             1.into(),
             1,
-            UploadPreKey {
+            Some(UploadPreKey {
                 key_id: 1,
                 public_key: prekey.public_key.serialize(),
-            },
+            }),
             UploadSignedPreKey {
                 key_id: 1,
                 public_key: pq_pre_key.public_key.serialize(),
