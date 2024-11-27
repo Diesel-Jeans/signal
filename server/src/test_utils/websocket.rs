@@ -104,7 +104,7 @@ impl SignalDatabase for MockDB {
         todo!()
     }
 
-    async fn get_one_time_ec_pre_key(&self, _: &ProtocolAddress) -> Result<UploadPreKey> {
+    async fn get_one_time_ec_pre_key(&self, _: &ProtocolAddress) -> Result<Option<UploadPreKey>> {
         todo!()
     }
 
