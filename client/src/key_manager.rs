@@ -3,11 +3,14 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::storage::generic::{ProtocolStore, StorageType};
+use common::web_api::{SetKeyRequest, UploadPreKey, UploadSignedPreKey};
 use libsignal_protocol::{
     kem, GenericSignedPreKey, IdentityKeyStore, KeyPair, KyberPreKeyRecord, KyberPreKeyStore,
     PreKeyRecord, PreKeyStore, SignalProtocolError, SignedPreKeyRecord, SignedPreKeyStore,
     Timestamp,
 };
+use rand::rngs::OsRng;
 use rand::{CryptoRng, Rng};
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -74,6 +77,7 @@ impl KeyManager {
         Ok(record)
     }
 
+    // always signed
     pub async fn generate_kyber_pre_key<IK: IdentityKeyStore, KPK: KyberPreKeyStore>(
         &mut self,
         identity_key_store: &mut IK,
@@ -91,6 +95,50 @@ impl KeyManager {
 
         kyber_pre_key_store.save_kyber_pre_key(id, &record).await?;
         Ok(record)
+    }
+
+    pub async fn generate_key_bundle<T: StorageType>(
+        &mut self,
+        store: &mut ProtocolStore<T>,
+    ) -> Result<SetKeyRequest, SignalProtocolError> {
+        let mut pre_keys: Vec<UploadPreKey> = Vec::new();
+        let mut pq_signed_pre_keys: Vec<UploadSignedPreKey> = Vec::new();
+        let mut rng = OsRng;
+
+        for _ in 0..100 {
+            pre_keys.push(UploadPreKey::from(
+                self.generate_pre_key(store, &mut rng).await?,
+            ));
+
+            pq_signed_pre_keys.push(UploadSignedPreKey::from(
+                self.generate_kyber_pre_key(
+                    &mut store.identity_key_store,
+                    &mut store.kyber_pre_key_store,
+                )
+                .await?,
+            ));
+        }
+
+        let signed_pre_key = self
+            .generate_signed_pre_key(
+                &mut store.identity_key_store,
+                &mut store.signed_pre_key_store,
+                &mut rng,
+            )
+            .await?;
+        let pq_last_resort_pre_key = self
+            .generate_kyber_pre_key(
+                &mut store.identity_key_store,
+                &mut store.kyber_pre_key_store,
+            )
+            .await?;
+
+        Ok(SetKeyRequest::new(
+            Some(pre_keys),
+            Some(UploadSignedPreKey::from(signed_pre_key)),
+            Some(pq_signed_pre_keys),
+            Some(UploadSignedPreKey::from(pq_last_resort_pre_key)),
+        ))
     }
 }
 

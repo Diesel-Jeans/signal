@@ -153,7 +153,15 @@ impl Client {
         let pni: Pni = response.pni.into();
 
         let contact_manager = ContactManager::new();
-        let storage = Storage::new(password, aci, pni, proto_storage);
+        let mut storage = Storage::new(password, aci, pni, proto_storage);
+
+        let key_bundle = key_manager
+            .generate_key_bundle(&mut storage.protocol_store)
+            .await
+            .expect("Should create key bundle");
+
+        server_api.publish_bundle(key_bundle).await?;
+
         Ok(Client::new(
             aci,
             pni,

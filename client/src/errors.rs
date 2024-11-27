@@ -3,6 +3,7 @@ use std::fmt;
 use std::fmt::Display;
 
 pub enum SignalClientError {
+    KeyError(String),
     RegistrationError(RegistrationError),
     LoginError(LoginError),
     SendMessageError(SendMessageError),
@@ -22,6 +23,7 @@ impl fmt::Display for SignalClientError {
             Self::LoginError(err) => format!("{err}"),
             Self::SendMessageError(err) => format!("{err}"),
             Self::WebSocketError(err) => err.to_string(),
+            Self::KeyError(err) => err.to_string(),
         };
         write!(f, "Could not register account - {}", message)
     }

@@ -1,3 +1,4 @@
+use crate::persistent_receiver::PersistentReceiver;
 use crate::socket_manager::{signal_ws_connect, SignalStream, SocketManager};
 use crate::{
     client::VerifiedSession,
@@ -8,7 +9,8 @@ use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
 use common::signalservice::{web_socket_message, Envelope, WebSocketMessage};
 use common::web_api::{
-    authorization::BasicAuthorizationHeader, RegistrationRequest, RegistrationResponse,
+    authorization::BasicAuthorizationHeader, PreKeyResponse, RegistrationRequest,
+    RegistrationResponse, SetKeyRequest,
 };
 use http_client::h1::H1Client;
 use libsignal_protocol::PreKeyBundle;
@@ -17,13 +19,11 @@ use serde_json::from_slice;
 use std::{env, error::Error, fmt::Display, fs, sync::Arc, time::Duration};
 use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
 
-use crate::persistent_receiver::PersistentReceiver;
-
 const CLIENT_URI: &str = "/client";
 const MSG_URI: &str = "v1/messages";
 const REGISTER_URI: &str = "v1/registration";
 const DEVICE_URI: &str = "/device";
-const BUNDLE_URI: &str = "/bundle";
+const KEY_BUNDLE_URI: &str = "/v2/keys";
 
 pub struct ServerAPI {
     client: Client,
@@ -62,8 +62,12 @@ pub trait Server {
         url: &str,
         tls_path: &str,
     ) -> Result<(), Self::Error>;
-    async fn publish_bundle(&self, uuid: String) -> Result<(), Self::Error>;
-    async fn fetch_bundle(&self, uuid: String) -> Result<PreKeyBundle, Self::Error>;
+    async fn publish_bundle(&self, bundle: SetKeyRequest) -> Result<(), Self::Error>;
+    async fn fetch_bundle(
+        &self,
+        account_id: String,
+        device_id: String,
+    ) -> Result<Vec<PreKeyBundle>, Self::Error>;
     async fn register_client(
         &self,
         phone_number: String,
@@ -134,18 +138,33 @@ impl Server for ServerAPI {
         }
     }
 
-    async fn publish_bundle(&self, uuid: String) -> Result<(), Self::Error> {
-        let payload = json!({
-            "key1": "value1"
-        });
-        let uri = format!("{}/{}", BUNDLE_URI, uuid);
-        self.make_request(ReqType::Post(payload), uri).await;
-        todo!("Handle response")
+    async fn publish_bundle(&self, bundle: SetKeyRequest) -> Result<(), Self::Error> {
+        self.make_request(ReqType::Put(json!(bundle)), KEY_BUNDLE_URI.to_string())
+            .await
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+        Ok(())
     }
-    async fn fetch_bundle(&self, uuid: String) -> Result<PreKeyBundle, Self::Error> {
-        let uri = format!("{}/{}", BUNDLE_URI, uuid);
-        self.make_request(ReqType::Get, uri).await;
-        todo!("Handle the response")
+    async fn fetch_bundle(
+        &self,
+        account_id: String,
+        device_id: String,
+    ) -> Result<Vec<PreKeyBundle>, Self::Error> {
+        let uri = format!("{}/{}/{}", KEY_BUNDLE_URI, account_id, device_id);
+
+        let mut res = self
+            .make_request(ReqType::Get, uri)
+            .await
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+
+        let pre_key_res: PreKeyResponse = res
+            .body_json()
+            .await
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+
+        let bundle: Vec<PreKeyBundle> = Vec::<PreKeyBundle>::try_from(pre_key_res)
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+
+        Ok(bundle)
     }
 
     async fn register_client(
