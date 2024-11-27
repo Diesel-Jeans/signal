@@ -259,4 +259,41 @@ mod key_manager_tests {
             .unwrap();
         assert_eq!(key.public_key().unwrap(), stored_key_pair.public_key);
     }
+
+    #[tokio::test]
+    async fn generate_key_bundle() {
+        let mut rng = OsRng;
+        let mut store = store(0);
+        let mut manager = KeyManager::new();
+        let keys = manager.generate_key_bundle(&mut store).await.unwrap();
+
+        assert_eq!(
+            &keys.pre_key.unwrap().len(),
+            &store.pre_key_store.all_pre_key_ids().count()
+        );
+
+        assert_eq!(
+            keys.pq_pre_key.unwrap().len() + keys.pq_last_resort_pre_key.iter().count(),
+            store.kyber_pre_key_store.all_kyber_pre_key_ids().count()
+        );
+
+        let stored_sign = store
+            .get_signed_pre_key(
+                store
+                    .signed_pre_key_store
+                    .all_signed_pre_key_ids()
+                    .next()
+                    .unwrap()
+                    .to_owned(),
+            )
+            .await
+            .unwrap()
+            .signature()
+            .unwrap();
+
+        assert_eq!(
+            Vec::from(keys.signed_pre_key.unwrap().signature),
+            stored_sign
+        );
+    }
 }
