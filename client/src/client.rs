@@ -1,6 +1,6 @@
 use crate::{
     contact_manager::ContactManager,
-    encryption::{encrypt, pad_message},
+    encryption::{encrypt, pad_message, unpad_message},
     errors::{LoginError, ReceiveMessageError, SignalClientError},
     key_manager::KeyManager,
     server::{Backend, ServerAPI, SignalBackend},
@@ -304,7 +304,6 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         let bytes = BASE64_STANDARD
             .decode(ciphertext_content)
             .map_err(|err| ReceiveMessageError::Base64DecodeError(err))?;
-        println!("First decode");
 
         // The evelope contains information about which message type is received.
         let _type = match envelope.r#type() {
@@ -319,7 +318,10 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         let ciphertext = decode_ciphertext(bytes, _type)
             .map_err(|err| ReceiveMessageError::CiphertextDecodeError(err))?;
 
-        let address = parse_protocol_address(envelope.source_service_id())?;
+        let address = ProtocolAddress::new(
+            envelope.source_service_id().to_string(),
+            envelope.source_device().into(),
+        );
 
         let mut csprng = OsRng;
         let store = &mut self.storage.protocol_store;
@@ -339,12 +341,14 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         .map_err(|err| ReceiveMessageError::DecryptMessageError(err))?;
 
         // The final message is stored within a DataMessage inside a Content.
-        Ok(Content::decode(plaintext.as_ref())
-            .map_err(ReceiveMessageError::ProtobufDecodeContentError)?
-            .data_message
-            .ok_or_else(|| ReceiveMessageError::InvalidMessageContent)?
-            .body()
-            .to_owned())
+        Ok(
+            Content::decode(unpad_message(plaintext.as_ref()).unwrap().as_ref())
+                .map_err(ReceiveMessageError::ProtobufDecodeContentError)?
+                .data_message
+                .ok_or_else(|| ReceiveMessageError::InvalidMessageContent)?
+                .body()
+                .to_owned(),
+        )
     }
 }
 
@@ -385,11 +389,11 @@ mod test_client {
             in_memory::InMemory,
         },
     };
-    use common::signalservice::{envelope, Envelope};
+    use common::signalservice::{envelope, Content, DataMessage, Envelope};
     use libsignal_core::{Aci, ProtocolAddress};
     use libsignal_protocol::IdentityKeyPair;
+    use prost::Message;
     use rand::rngs::OsRng;
-    use serde_json::to_vec;
     use tokio::sync::Mutex;
     use uuid::uuid;
 
@@ -463,5 +467,24 @@ mod test_client {
         let message = bob.receive_message().await.unwrap();
 
         assert_eq!("Hello, World!".to_owned(), message);
+    }
+
+    #[tokio::test]
+    async fn test_content_decode() {
+        let content = Content::builder()
+            .data_message(
+                DataMessage::builder()
+                    .body("Hello, World!".to_owned())
+                    .contact(vec![])
+                    .body_ranges(vec![])
+                    .preview(vec![])
+                    .attachments(vec![])
+                    .build(),
+            )
+            .build();
+        assert_eq!(
+            Content::decode(content.encode_to_vec().as_ref()).unwrap(),
+            content
+        )
     }
 }

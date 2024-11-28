@@ -352,7 +352,9 @@ pub mod server_api_test {
             for message in messages.messages {
                 let envelope = Envelope::builder()
                     .r#type(message.r#type)
-                    .content(to_vec(&message).unwrap())
+                    .content(message.content.as_bytes().to_vec())
+                    .source_service_id(self.address.name().to_owned())
+                    .source_device(self.address.device_id().into())
                     .build();
                 self.state
                     .lock()
