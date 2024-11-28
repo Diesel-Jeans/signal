@@ -6,6 +6,9 @@ pub enum SignalClientError {
     RegistrationError(RegistrationError),
     LoginError(LoginError),
     SendMessageError(SendMessageError),
+    WebSocketError(String),
+    DatabaseError(String),
+    DotenvError(String),
 }
 
 impl fmt::Debug for SignalClientError {
@@ -20,6 +23,9 @@ impl fmt::Display for SignalClientError {
             Self::RegistrationError(err) => format!("{err}"),
             Self::LoginError(err) => format!("{err}"),
             Self::SendMessageError(err) => format!("{err}"),
+            Self::WebSocketError(err) => err.to_string(),
+            Self::DatabaseError(err) => format!("{err}"),
+            Self::DotenvError(err) => format!("{err}"),
         };
         write!(f, "Could not register account - {}", message)
     }
@@ -105,9 +111,7 @@ impl fmt::Debug for SendMessageError {
 
 impl fmt::Display for SendMessageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            _ => "hej",
-        };
+        let message = "hej";
         write!(f, "Could not send message - {}", message)
     }
 }

@@ -10,8 +10,6 @@ Make sure you have `docker-compose` installed!
 docker-compose up
 ```
 
-2. (Optionally) Open the brower on `localhost:5050` and login using the PGADMIN email and password.
+2. If you havent generated certificates go into `server/cert` and run the shell script
 
-3. If you havent generated certificates go into `server/cert` and run the shell script
-
-4. Start the server, and it should successfully connect to the database. Enjoy!
+3. Start the server, and it should successfully connect to the database. Enjoy!

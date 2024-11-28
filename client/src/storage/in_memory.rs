@@ -1,5 +1,5 @@
 use super::generic::{ProtocolStore, SignalStore, Storage};
-use crate::storage::generic::StorageType;
+use crate::{errors::SignalClientError, storage::generic::StorageType};
 use axum::async_trait;
 use libsignal_core::{Aci, Pni};
 use libsignal_protocol::{
@@ -45,28 +45,33 @@ impl StorageType for InMemory {
 
 #[async_trait]
 impl SignalStore for Storage<InMemory> {
-    async fn set_password(&mut self, new_password: String) {
+    type Error = SignalClientError;
+
+    async fn set_password(&mut self, new_password: String) -> Result<(), Self::Error> {
         self.inner.password = new_password;
+        Ok(())
     }
 
-    async fn get_password(&self) -> &str {
-        &self.inner.password
+    async fn get_password(&self) -> Result<String, Self::Error> {
+        Ok(self.inner.password.to_string())
     }
 
-    async fn set_aci(&mut self, new_aci: Aci) {
-        self.inner.aci = new_aci
+    async fn set_aci(&mut self, new_aci: Aci) -> Result<(), Self::Error> {
+        self.inner.aci = new_aci;
+        Ok(())
     }
 
-    async fn get_aci(&self) -> &Aci {
-        &self.inner.aci
+    async fn get_aci(&self) -> Result<Aci, Self::Error> {
+        Ok(self.inner.aci)
     }
 
-    async fn set_pni(&mut self, new_pni: Pni) {
-        self.inner.pni = new_pni
+    async fn set_pni(&mut self, new_pni: Pni) -> Result<(), Self::Error> {
+        self.inner.pni = new_pni;
+        Ok(())
     }
 
-    async fn get_pni(&self) -> &Pni {
-        &self.inner.pni
+    async fn get_pni(&self) -> Result<Pni, Self::Error> {
+        Ok(self.inner.pni)
     }
 }
 

@@ -26,17 +26,7 @@ impl<T: SignalDatabase> KeyManager<T> {
             ServiceIdKind::Pni => auth_device.account().pni_identity_key(),
         };
 
-        if let Some(prekeys) = bundle.pre_key {
-            self.db
-                .store_one_time_ec_pre_keys(prekeys, &address)
-                .await
-                .map_err(|_| ApiError {
-                    status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    body: "Database fault".to_owned(),
-                })?;
-        }
-
-        let verify_key = |prekey: &UploadSignedPreKey, msg: &str| -> Result<(), ApiError> {
+        let verify_key = |prekey: &UploadSignedPreKey| -> Result<(), ApiError> {
             if !identity_key
                 .public_key()
                 .verify_signature(&prekey.public_key, &prekey.signature)
@@ -44,14 +34,43 @@ impl<T: SignalDatabase> KeyManager<T> {
             {
                 return Err(ApiError {
                     status_code: StatusCode::BAD_REQUEST,
-                    body: msg.to_owned(),
+                    body: "Invalid signature".to_owned(),
                 });
             }
             Ok(())
         };
 
+        bundle
+            .signed_pre_key
+            .as_ref()
+            .map(|key| verify_key(key))
+            .transpose()?;
+        bundle
+            .pq_last_resort_pre_key
+            .as_ref()
+            .map(|key| verify_key(key))
+            .transpose()?;
+        bundle
+            .pq_pre_key
+            .as_ref()
+            .map(|keys| {
+                keys.iter()
+                    .map(|key| verify_key(key))
+                    .collect::<Result<(), ApiError>>()
+            })
+            .transpose()?;
+
+        if let Some(prekeys) = bundle.pre_key {
+            self.db
+                .store_one_time_ec_pre_keys(prekeys, &address)
+                .await
+                .map_err(|_| ApiError {
+                    status_code: StatusCode::INTERNAL_SERVER_ERROR,
+                    message: "Database fault".into(),
+                })?;
+        }
+
         if let Some(ref prekey) = bundle.signed_pre_key {
-            verify_key(prekey, "Could not verify signature for signed prekey")?;
             self.db
                 .store_signed_pre_key(prekey, &address)
                 .await
@@ -62,10 +81,6 @@ impl<T: SignalDatabase> KeyManager<T> {
         }
 
         if let Some(prekeys) = bundle.pq_pre_key {
-            prekeys.iter().try_for_each(|prekey| {
-                verify_key(prekey, "Could not verify signature for kem prekey")
-            })?;
-
             self.db
                 .store_one_time_pq_pre_keys(prekeys, &address)
                 .await
@@ -76,7 +91,6 @@ impl<T: SignalDatabase> KeyManager<T> {
         }
 
         if let Some(ref prekey) = bundle.pq_last_resort_pre_key {
-            verify_key(prekey, "Could not verify signature for kem prekey")?;
             self.db
                 .store_pq_signed_pre_key(prekey, &address)
                 .await
@@ -362,7 +376,10 @@ mod key_manager_tests {
             device_bundle[0].registration_id(),
             target_device.registration_id()
         );
-        assert_eq!(device_bundle[0].pre_key().clone(), one_time[0]);
+        assert_eq!(
+            device_bundle[0].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
         assert_eq!(
             device_bundle[0].signed_pre_key().clone(),
             key_bundle.pni_signed_pre_key
@@ -440,7 +457,10 @@ mod key_manager_tests {
             device_bundle[0].registration_id(),
             target_device.registration_id()
         );
-        assert_eq!(device_bundle[0].pre_key().clone(), one_time[0]);
+        assert_eq!(
+            device_bundle[0].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
         assert_eq!(
             device_bundle[0].signed_pre_key().clone(),
             key_bundle.pni_signed_pre_key
@@ -454,7 +474,10 @@ mod key_manager_tests {
             device_bundle[1].registration_id(),
             device2.registration_id()
         );
-        assert_eq!(device_bundle[1].pre_key().clone(), one_time[0]);
+        assert_eq!(
+            device_bundle[1].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
         assert_eq!(
             device_bundle[1].signed_pre_key().clone(),
             key_bundle.pni_signed_pre_key
@@ -523,7 +546,7 @@ mod key_manager_tests {
             .await
             .unwrap();
 
-        assert_eq!(prekey[0], prekey_db);
+        assert_eq!(Some(prekey[0].clone()), prekey_db);
         assert_eq!(signed_pre_key, signed_pre_key_db);
         assert_eq!(pq_pre_key, pq_pre_key_db);
         assert_eq!(pq_last_resort_pre_key, pq_last_resort_pre_key_db);
