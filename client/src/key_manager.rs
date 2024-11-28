@@ -262,7 +262,7 @@ mod key_manager_tests {
 
     #[tokio::test]
     async fn generate_key_bundle() {
-        let mut rng = OsRng;
+        let rng = OsRng;
         let mut store = store(0);
         let mut manager = KeyManager::new();
         let keys = manager.generate_key_bundle(&mut store).await.unwrap();
