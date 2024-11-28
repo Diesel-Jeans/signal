@@ -161,8 +161,10 @@ pub mod test {
         let bob_device = new_device_id();
 
         let mut manager = ContactManager::new();
-        let _ = manager.add_contact(&alice_id, alice_device);
-        let _ = manager.add_contact(&bob_id, bob_device);
+        let _ = manager.add_contact(&alice_id);
+        let _ = manager.add_contact(&bob_id);
+        manager.update_contact(&alice_id, vec![alice_device]);
+        manager.update_contact(&bob_id, vec![bob_device]);
 
         let mut alice_store = store(1);
         let mut bob_store = store(0);

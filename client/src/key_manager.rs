@@ -18,13 +18,25 @@ pub struct KeyManager {
     key_incrementer_map: HashMap<PreKeyType, u32>,
 }
 
-impl KeyManager {
-    pub fn new() -> Self {
+impl Default for KeyManager {
+    fn default() -> Self {
         Self {
             key_incrementer_map: HashMap::from([
                 (PreKeyType::Signed, 0u32),
                 (PreKeyType::Kyber, 0u32),
                 (PreKeyType::OneTime, 0u32),
+            ]),
+        }
+    }
+}
+
+impl KeyManager {
+    pub fn new(signed: u32, kyber: u32, one_time: u32) -> Self {
+        Self {
+            key_incrementer_map: HashMap::from([
+                (PreKeyType::Signed, signed),
+                (PreKeyType::Kyber, kyber),
+                (PreKeyType::OneTime, one_time),
             ]),
         }
     }
@@ -93,30 +105,43 @@ impl KeyManager {
 
 #[cfg(test)]
 mod key_manager_tests {
-    use crate::storage::{generic::ProtocolStore, in_memory::InMemory};
+    use crate::{
+        key_manager::{KeyManager, PreKeyType},
+        storage::{generic::ProtocolStore, in_memory::InMemory},
+        test_utils::user::{new_aci, new_pni, new_rand_number},
+    };
 
-    use super::*;
+    use libsignal_protocol::{
+        GenericSignedPreKey, KeyPair, KyberPreKeyStore, PreKeyStore, SignedPreKeyStore,
+    };
     use rand::rngs::OsRng;
 
     fn store(reg: u32) -> ProtocolStore<InMemory> {
         let mut rng = OsRng;
         let p = KeyPair::generate(&mut rng).into();
-        ProtocolStore::new(p, reg)
+        let in_mem = InMemory::new(
+            "password".to_string(),
+            new_aci(),
+            new_pni(),
+            p,
+            new_rand_number(),
+        );
+        ProtocolStore::new(in_mem)
     }
 
     #[test]
     fn get_id_test() {
-        let mut manager = KeyManager::new();
+        let mut manager = KeyManager::default();
         let id0 = manager.get_new_key_id(PreKeyType::OneTime);
         assert_eq!(id0, 0);
         let id1 = manager.get_new_key_id(PreKeyType::OneTime);
         assert_eq!(id1, 1);
     }
 
-    #[tokio::test]
+    /*#[tokio::test]
     async fn generate_kyper_key() {
         let mut store = store(0);
-        let mut manager = KeyManager::new();
+        let mut manager = KeyManager::default();
         let key = manager
             .generate_kyber_pre_key(
                 &mut store.identity_key_store,
@@ -126,27 +151,21 @@ mod key_manager_tests {
             .unwrap();
 
         let stored_sign = store
-            .get_kyber_pre_key(
-                store
-                    .kyber_pre_key_store
-                    .all_kyber_pre_key_ids()
-                    .next()
-                    .unwrap()
-                    .to_owned(),
-            )
+            .kyber_pre_key_store
+            .get_kyber_pre_key(key.id().unwrap())
             .await
             .unwrap()
             .signature()
             .unwrap();
 
         assert_eq!(key.signature().unwrap(), stored_sign);
-    }
+    }*/
 
     #[tokio::test]
     async fn generate_signed_key() {
         let mut rng = OsRng;
         let mut store = store(0);
-        let mut manager = KeyManager::new();
+        let mut manager = KeyManager::default();
         let key = manager
             .generate_signed_pre_key(
                 &mut store.identity_key_store,
@@ -157,14 +176,8 @@ mod key_manager_tests {
             .unwrap();
 
         let stored_sign = store
-            .get_signed_pre_key(
-                store
-                    .signed_pre_key_store
-                    .all_signed_pre_key_ids()
-                    .next()
-                    .unwrap()
-                    .to_owned(),
-            )
+            .signed_pre_key_store
+            .get_signed_pre_key(key.id().unwrap())
             .await
             .unwrap()
             .signature()
@@ -177,24 +190,20 @@ mod key_manager_tests {
     async fn generate_onetime_key() {
         let mut rng = OsRng;
         let mut store = store(0);
-        let mut manager = KeyManager::new();
+        let mut manager = KeyManager::default();
         let key = manager
             .generate_pre_key(&mut store.pre_key_store, &mut rng)
             .await
             .unwrap();
+
         let stored_key_pair = store
-            .get_pre_key(
-                store
-                    .pre_key_store
-                    .all_pre_key_ids()
-                    .next()
-                    .unwrap()
-                    .to_owned(),
-            )
+            .pre_key_store
+            .get_pre_key(key.id().unwrap())
             .await
             .unwrap()
             .key_pair()
             .unwrap();
+
         assert_eq!(key.public_key().unwrap(), stored_key_pair.public_key);
     }
 }

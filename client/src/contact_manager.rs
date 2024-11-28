@@ -2,18 +2,17 @@ use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
 use libsignal_protocol::SignalProtocolError;
 use std::collections::{HashMap, HashSet};
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct Contact {
     pub service_id: ServiceId,
     pub device_ids: HashSet<DeviceId>,
 }
 
 impl Contact {
-    pub fn new(service_id: ServiceId, device_id: DeviceId) -> Contact {
-        let mut set = HashSet::new();
-        set.insert(device_id);
+    pub fn new(service_id: ServiceId) -> Contact {
         Self {
             service_id,
-            device_ids: set,
+            device_ids: HashSet::new(),
         }
     }
     pub fn get_address(
@@ -43,19 +42,18 @@ impl ContactManager {
         }
     }
 
-    pub fn add_contact(
-        &mut self,
-        service_id: &ServiceId,
-        device_id: DeviceId,
-    ) -> Result<(), String> {
+    pub fn new_with_contacts(contacts: HashMap<ServiceId, Contact>) -> Self {
+        Self { contacts }
+    }
+
+    pub fn add_contact(&mut self, service_id: &ServiceId) -> Result<(), String> {
         if self.contacts.contains_key(service_id) {
             return Err(format!(
                 "Contact with service id: '{}', already exists",
                 service_id.service_id_string()
             ));
         }
-        self.contacts
-            .insert(*service_id, Contact::new(*service_id, device_id));
+        self.contacts.insert(*service_id, Contact::new(*service_id));
         Ok(())
     }
 
@@ -110,17 +108,15 @@ mod test {
     fn test_cm_add() {
         let mut cm = ContactManager::new();
         let charlie = new_service_id();
-        let device_id: DeviceId = 0.into();
 
-        cm.add_contact(&charlie, device_id).unwrap();
+        cm.add_contact(&charlie).unwrap();
     }
 
     #[test]
     fn test_cm_remove() {
         let mut cm = ContactManager::new();
         let charlie = new_service_id();
-        let device_id: DeviceId = 0.into();
-        cm.add_contact(&charlie, device_id).unwrap();
+        cm.add_contact(&charlie).unwrap();
 
         cm.remove_contact(&charlie).unwrap()
     }
@@ -129,8 +125,9 @@ mod test {
     fn test_cm_get() {
         let mut cm = ContactManager::new();
         let charlie = new_service_id();
-        let device_id: DeviceId = 0.into();
-        cm.add_contact(&charlie, device_id).unwrap();
+        cm.add_contact(&charlie).unwrap();
+        let device_id: DeviceId = 1.into();
+        cm.update_contact(&charlie, vec![device_id]);
 
         let c = cm.get_contact(&charlie).unwrap();
         assert!(c.service_id == charlie);
@@ -141,18 +138,11 @@ mod test {
     async fn test_cm_update() {
         let mut cm = ContactManager::new();
         let charlie = new_service_id();
-        let device_id: DeviceId = 0.into();
-        cm.add_contact(&charlie, device_id).unwrap();
+        cm.add_contact(&charlie).unwrap();
 
         let new_device_id: DeviceId = 1.into();
         cm.update_contact(&charlie, vec![new_device_id]).unwrap();
         assert!(cm.get_contact(&charlie).is_ok(), "Charlie was not ok");
-        assert!(cm
-            .get_contact(&charlie)
-            .unwrap()
-            .device_ids
-            .get(&device_id)
-            .is_some());
         assert!(cm
             .get_contact(&charlie)
             .unwrap()
