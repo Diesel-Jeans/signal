@@ -431,7 +431,6 @@ mod test_client {
 
     #[tokio::test]
     async fn test_alice_send_bob_receive() {
-        dotenv::dotenv().ok().unwrap();
         let state = Arc::new(Mutex::new(MockBackendState::default()));
         let mut alice = get_alice(state.clone());
         let mut bob = get_bob(state);
