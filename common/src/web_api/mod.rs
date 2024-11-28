@@ -1,4 +1,5 @@
 pub mod authorization;
+pub mod errors;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use libsignal_protocol::{

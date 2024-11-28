@@ -55,7 +55,7 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::E
     if *destination_identifier == authenticated_device.account().pni() {
         return Err(ApiError {
             status_code: StatusCode::FORBIDDEN,
-            message: "".to_owned(),
+            body: "".to_owned(),
         });
     }
 
@@ -69,7 +69,7 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::E
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::NOT_FOUND,
-                message: "Destination account not found".to_owned(),
+                body: "Destination account not found".to_owned(),
             })?
     };
     let exclude_device_ids: Vec<u32> = if is_sync_message {
@@ -88,9 +88,9 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::E
         &message_device_ids,
         &exclude_device_ids,
     )
-    .map_err(|_| ApiError {
-        status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        message: "".to_owned(),
+    .map_err(|err| ApiError {
+        status_code: StatusCode::CONFLICT,
+        body: serde_json::to_string(&err).expect("Can serialize device ids"),
     })?;
 
     DestinationDeviceValidator::validate_registration_id_from_messages(
@@ -98,9 +98,9 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::E
         &payload.messages,
         destination_identifier.kind() == ServiceIdKind::Pni,
     )
-    .map_err(|_| ApiError {
-        status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        message: "".to_owned(),
+    .map_err(|err| ApiError {
+        status_code: StatusCode::GONE,
+        body: serde_json::to_string(&err).expect("Can serialize device ids"),
     })?;
 
     for message in payload.messages {
@@ -121,7 +121,7 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::E
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                message: "Could not insert message".to_owned(),
+                body: "Could not insert message".to_owned(),
             })?;
     }
 
@@ -183,7 +183,7 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream<Message, axum::
         .await
         .map_err(|err| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: err.to_string(),
+            body: err.to_string(),
         })?;
 
     Ok(RegistrationResponse {
@@ -232,15 +232,15 @@ fn parse_protocol_address(string: String) -> Result<ProtocolAddress, ApiError> {
     let (user_id, dev_id) = string
         .find(".")
         .ok_or(ApiError {
-            message: "Could not parse address. Address did not contain '.'".to_owned(),
             status_code: StatusCode::BAD_REQUEST,
+            body: "Could not parse address. Address did not contain '.'".to_owned(),
         })
         .map(|pos| string.split_at(pos))?;
     let device_id: DeviceId = dev_id[1..]
         .parse::<u32>()
         .map_err(|e| ApiError {
-            message: format!("Could not parse device_id: {}.", e),
             status_code: StatusCode::BAD_REQUEST,
+            body: format!("Could not parse device_id: {}.", e),
         })?
         .into();
 
@@ -249,8 +249,8 @@ fn parse_protocol_address(string: String) -> Result<ProtocolAddress, ApiError> {
 
 fn parse_service_id(string: String) -> Result<ServiceId, ApiError> {
     ServiceId::parse_from_service_id_string(&string).ok_or_else(|| ApiError {
-        message: "Could not parse service id".to_owned(),
         status_code: StatusCode::BAD_REQUEST,
+        body: "Could not parse service id".to_owned(),
     })
 }
 
@@ -290,21 +290,21 @@ async fn post_registration_endpoint(
     let auth_header = headers
         .get("Authorization")
         .ok_or_else(|| ApiError {
-            message: "Missing authorization header".to_owned(),
             status_code: StatusCode::UNAUTHORIZED,
+            body: "Missing authorization header".to_owned(),
         })?
         .to_str()
         .map_err(|err| ApiError {
-            message: format!(
+            status_code: StatusCode::UNAUTHORIZED,
+            body: format!(
                 "Authorization header could not be parsed as string: {}",
                 err
             ),
-            status_code: StatusCode::UNAUTHORIZED,
         })?
         .parse()
         .map_err(|err| ApiError {
-            message: format!("Authorization header could not be parsed: {}", err),
             status_code: StatusCode::UNAUTHORIZED,
+            body: format!("Authorization header could not be parsed: {}", err),
         })?;
 
     handle_post_registration(state, auth_header, registration)
@@ -326,7 +326,7 @@ async fn get_keys_endpoint(
             &authenticated_device,
             ServiceId::parse_from_service_id_string(&identifier).ok_or_else(|| ApiError {
                 status_code: StatusCode::BAD_REQUEST,
-                message: "Identifier is not of right format".into(),
+                body: "Identifier is not of right format".into(),
             })?,
             device_id,
         )
@@ -352,7 +352,7 @@ async fn post_keycheck_endpoint(
         .then_some(())
         .ok_or_else(|| ApiError {
             status_code: StatusCode::CONFLICT,
-            message: "".into(),
+            body: "".into(),
         })
 }
 
@@ -525,7 +525,7 @@ fn time_now() -> Result<u64, ApiError> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "".into(),
+            body: "".into(),
         })?
         .as_secs())
 }
@@ -537,7 +537,7 @@ fn get_kind(identity_string: String) -> Result<ServiceIdKind, ApiError> {
         _ => {
              Err(ApiError {
                 status_code: StatusCode::BAD_REQUEST,
-                message: "Identity type needs to be either of: aci | pni | ACI | PNI or none which will default to aci".into(),
+                body: "Identity type needs to be either of: aci | pni | ACI | PNI or none which will default to aci".into(),
             })
         }
     }
