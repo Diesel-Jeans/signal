@@ -1,6 +1,6 @@
 use crate::account::Account;
 use common::web_api::{
-    errors::{MismatchesDevicesError, StaleDevicesError},
+    errors::{MismatchedDevicesError, StaleDevicesError},
     SignalMessage,
 };
 
@@ -67,7 +67,7 @@ impl DestinationDeviceValidator {
         account: &Account,
         message_device_ids: &[u32],
         excluded_device_ids: &[u32],
-    ) -> Result<(), MismatchesDevicesError> {
+    ) -> Result<(), MismatchedDevicesError> {
         let account_device_ids: Vec<u32> = account
             .devices()
             .iter()
@@ -85,7 +85,7 @@ impl DestinationDeviceValidator {
             .cloned()
             .collect();
         if !missing_device_ids.is_empty() || !extra_device_ids.is_empty() {
-            return Err(MismatchesDevicesError {
+            return Err(MismatchedDevicesError {
                 missing_devices: missing_device_ids,
                 extra_devices: extra_device_ids,
             });
