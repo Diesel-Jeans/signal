@@ -394,16 +394,18 @@ impl TryFrom<PreKeyResponse> for Vec<PreKeyBundle> {
                 .as_slice(),
         )
         .map_err(|_| "Failed decoding identity key")?;
+
         let mut bundles = Vec::new();
         for pre_key_items in items.keys() {
-            let mut pre_key: Option<(PreKeyId, PublicKey)> = None;
-            if let Some(prekey) = pre_key_items.pre_key() {
-                pre_key = Some((
-                    prekey.key_id.into(),
-                    PublicKey::deserialize(&prekey.public_key)
+            let pre_key = if let Some(pre_key) = pre_key_items.pre_key() {
+                Some((
+                    pre_key.key_id.into(),
+                    PublicKey::deserialize(&pre_key.public_key)
                         .map_err(|_| "Failed decoding pre key")?,
                 ))
-            }
+            } else {
+                None
+            };
             let bundle = PreKeyBundle::new(
                 pre_key_items.registration_id(),
                 pre_key_items.device_id(),
