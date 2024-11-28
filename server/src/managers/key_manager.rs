@@ -34,7 +34,7 @@ impl<T: SignalDatabase> KeyManager<T> {
             {
                 return Err(ApiError {
                     status_code: StatusCode::BAD_REQUEST,
-                    message: "Invalid signature".into(),
+                    body: "Invalid signature".to_owned(),
                 });
             }
             Ok(())
@@ -66,7 +66,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
+                    body: "Database fault".into(),
                 })?;
         }
 
@@ -76,7 +76,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
+                    body: "Database fault".to_owned(),
                 })?;
         }
 
@@ -86,7 +86,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
+                    body: "Database fault".to_owned(),
                 })?;
         }
 
@@ -96,7 +96,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
+                    body: "Database fault".to_owned(),
                 })?;
         }
 
@@ -121,7 +121,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .await
                 .map_err(|err| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: format!("Could not fetch user key bundle: {}", err),
+                    body: format!("Could not fetch user key bundle: {}", err),
                 })?;
             let (pq_pre_key, signed_pre_key) = match service_id {
                 ServiceId::Aci(_) => (bundle.aci_pq_pre_key, bundle.aci_signed_pre_key),
@@ -133,7 +133,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Could not fetch user pre key".into(),
+                    body: "Could not fetch user pre key".to_owned(),
                 })?;
 
             Ok(PreKeyResponseItem::new(
@@ -150,7 +150,7 @@ impl<T: SignalDatabase> KeyManager<T> {
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::UNAUTHORIZED,
-                message: "".into(),
+                body: "".to_owned(),
             })?;
 
         let target_account = database
@@ -158,7 +158,7 @@ impl<T: SignalDatabase> KeyManager<T> {
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::BAD_REQUEST,
-                message: format!(
+                body: format!(
                     "Could not find account for service id: {}",
                     target_service_id.service_id_string()
                 ),
@@ -174,7 +174,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                     .await
                     .map_err(|_| ApiError {
                         status_code: StatusCode::BAD_REQUEST,
-                        message: format!("Device id does not exist: {}", device_id),
+                        body: format!("Device id does not exist: {}", device_id),
                     })?]
             }
             _ if target_device_id == "*" => database
@@ -182,12 +182,12 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Could not get all targets devices".into(),
+                    body: "Could not get all targets devices".into(),
                 })?,
             _ => {
                 return Err(ApiError {
                     status_code: StatusCode::BAD_REQUEST,
-                    message: "Target device id is not a u32 or '*'".into(),
+                    body: "Target device id is not a u32 or '*'".into(),
                 })
             }
         };
@@ -237,7 +237,7 @@ impl<T: SignalDatabase> KeyManager<T> {
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                message: "Could not fetch user key bundle".into(),
+                body: "Could not fetch user key bundle".to_owned(),
             })?;
 
         let mut digest = Sha256::new();
@@ -251,7 +251,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                         .public_key_bytes()
                         .map_err(|_| ApiError {
                             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                            message: "Could not convert key to bytes".into(),
+                            body: "Could not convert key to bytes".to_owned(),
                         })?,
                 );
                 digest.update(bundle.aci_signed_pre_key.key_id.to_be_bytes());
@@ -268,7 +268,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                         .public_key_bytes()
                         .map_err(|_| ApiError {
                             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                            message: "Could not convert key to bytes".into(),
+                            body: "Could not convert key to bytes".to_owned(),
                         })?,
                 );
                 digest.update(bundle.pni_signed_pre_key.key_id.to_be_bytes());
