@@ -16,9 +16,10 @@ use crate::{
 };
 use anyhow::Result;
 use axum::extract::ws::Message;
+use axum::extract::Query;
 use axum::{
     debug_handler,
-    extract::{connect_info::ConnectInfo, ws::WebSocketUpgrade, Host, Path, Query, State},
+    extract::{connect_info::ConnectInfo, ws::WebSocketUpgrade, Host, Path, State},
     handler::HandlerWithoutStateExt,
     http::{
         header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
@@ -37,6 +38,7 @@ use common::web_api::{
 use common::websocket::wsstream::WSStream;
 use futures_util::StreamExt;
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
+use std::collections::HashMap;
 use std::{
     env,
     fmt::Debug,
@@ -361,7 +363,7 @@ async fn post_keycheck_endpoint(
 async fn put_keys_endpoint(
     State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
     authenticated_device: AuthenticatedDevice,
-    Query(identity_type): Query<String>,
+    Query(params): Query<HashMap<String, String>>,
     Json(set_keys_request): Json<SetKeyRequest>,
 ) -> Result<(), ApiError> {
     state
@@ -369,7 +371,7 @@ async fn put_keys_endpoint(
         .handle_put_keys(
             &authenticated_device,
             set_keys_request,
-            get_kind(identity_type)?,
+            get_kind(params.get("identity_type").unwrap().to_owned())?,
         )
         .await
 }

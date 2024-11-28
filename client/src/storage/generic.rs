@@ -20,7 +20,7 @@ pub trait StorageType {
 
 pub struct Storage<T: StorageType> {
     pub(super) inner: T,
-    pub(super) protocol_store: ProtocolStore<T>,
+    pub protocol_store: ProtocolStore<T>,
 }
 
 #[async_trait]

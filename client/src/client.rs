@@ -4,19 +4,17 @@ use common::web_api::{AccountAttributes, DeviceCapabilities, RegistrationRequest
 use core::str;
 use dotenv::dotenv;
 use libsignal_core::{Aci, Pni};
-use libsignal_protocol::{IdentityKey, IdentityKeyPair, KeyPair};
+use libsignal_protocol::IdentityKeyPair;
 use rand::{rngs::OsRng, Rng};
 use sqlx::sqlite::SqlitePoolOptions;
 
+use crate::storage::in_memory::InMemory;
 use crate::{
     contact_manager::ContactManager,
     errors::{LoginError, SignalClientError},
     key_manager::KeyManager,
     server::{Server, ServerAPI},
-    storage::{
-        device::Device,
-        generic::{ProtocolStore, Storage, StorageType},
-    },
+    storage::generic::{ProtocolStore, Storage, StorageType},
 };
 
 pub struct Client<T: StorageType> {
@@ -66,14 +64,12 @@ impl<T: StorageType> Client<T> {
     pub async fn register(
         name: &str,
         phone_number: String,
-    ) -> Result<Client<Device>, SignalClientError> {
+    ) -> Result<Client<InMemory>, SignalClientError> {
         let mut csprng = OsRng;
         let aci_registration_id = OsRng.gen_range(1..16383);
         let pni_registration_id = OsRng.gen_range(1..16383);
-        let aci_key_pair = KeyPair::generate(&mut csprng);
-        let pni_key_pair = KeyPair::generate(&mut csprng);
-        let id_key = IdentityKey::new(aci_key_pair.public_key);
-        let id_key_pair = IdentityKeyPair::new(id_key, aci_key_pair.private_key);
+        let aci_id_key_pair = IdentityKeyPair::generate(&mut csprng);
+        let pni_id_key_pair = IdentityKeyPair::generate(&mut csprng);
         dotenv().map_err(|err| SignalClientError::DotenvError(format!("{err}")))?;
         let db_url =
             std::env::var("DATABASE_URL").expect("Expected to read database url from .env file");
@@ -87,12 +83,7 @@ impl<T: StorageType> Client<T> {
             .await
             .expect("Could not run migrations");
 
-        let mut proto_storage = ProtocolStore::create_device_protocol_store(
-            id_key_pair,
-            aci_registration_id,
-            pool.clone(),
-        )
-        .await;
+        let mut proto_storage = ProtocolStore::new(aci_id_key_pair, aci_registration_id);
         let mut key_manager = KeyManager::new();
 
         let aci_signed_pk = key_manager
@@ -150,15 +141,15 @@ impl<T: StorageType> Client<T> {
             capabilities,
             Box::new(access_key),
         );
-        let server_api = ServerAPI::new();
+        let mut server_api = ServerAPI::new();
         let req = RegistrationRequest::new(
             "".into(),
             "".into(),
             account_attributes,
             true, // Require atomic is always true
             true, // Skip device transfer is always true
-            IdentityKey::new(aci_key_pair.public_key),
-            IdentityKey::new(pni_key_pair.public_key),
+            aci_id_key_pair.identity_key().clone(),
+            pni_id_key_pair.identity_key().clone(),
             aci_signed_pk.into(),
             pni_signed_pk.into(),
             aci_pq_last_resort.into(),
@@ -168,14 +159,27 @@ impl<T: StorageType> Client<T> {
         );
 
         let response = server_api
-            .register_client(phone_number, password.to_owned(), req, None)
+            .register_client(phone_number, &password, req, None)
             .await?;
 
         let aci: Aci = response.uuid.into();
         let pni: Pni = response.pni.into();
 
+        server_api.create_auth_header(aci, &password, 1.into());
+
         let contact_manager = ContactManager::new();
-        let storage = Storage::create(aci, pni, password, proto_storage, pool).await?;
+        let mut storage = Storage::new(password, aci, pni, proto_storage);
+        let key_bundle = key_manager
+            .generate_key_bundle(&mut storage.protocol_store)
+            .await
+            .expect("Should create key bundle");
+
+        server_api.publish_bundle(key_bundle).await?;
+
+        server_api
+            .fetch_bundle(aci.service_id_string(), "1".to_string())
+            .await?;
+
         Ok(Client::new(
             aci,
             pni,

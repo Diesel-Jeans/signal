@@ -309,8 +309,8 @@ mod key_manager_tests {
 
     pub fn new_account_from_identity_key(identity_key: IdentityKey) -> Account {
         Account::new(
-            new_pni(),
             new_device(),
+            new_pni(),
             identity_key,
             identity_key,
             new_uuid().into(),
@@ -498,7 +498,7 @@ mod key_manager_tests {
         let account = new_account_from_identity_key(IdentityKey::from(identity_key.public_key));
         let device = account.devices()[0].clone();
         let auth_device = AuthenticatedDevice::new(account, device);
-        let target_address = auth_device.get_protocol_address(ServiceIdKind::Pni);
+        let target_address = auth_device.get_protocol_address(ServiceIdKind::Aci);
 
         let prekey = new_upload_pre_keys(1);
         let signed_pre_key = new_upload_signed_pre_key(Some(identity_key.private_key));
@@ -514,7 +514,7 @@ mod key_manager_tests {
 
         database.add_account(auth_device.account()).await.unwrap();
 
-        km.handle_put_keys(&auth_device, request.clone(), ServiceIdKind::Pni)
+        km.handle_put_keys(&auth_device, request.clone(), ServiceIdKind::Aci)
             .await
             .unwrap();
 
@@ -522,7 +522,7 @@ mod key_manager_tests {
             .get_one_time_ec_pre_key(&target_address)
             .await
             .unwrap();
-        let signed_pre_key_db = get_ec_pni_signed_pre_key(
+        let signed_pre_key_db = get_aci_signed_pre_key(
             &database,
             request.signed_pre_key.unwrap().key_id,
             &target_address,
@@ -533,7 +533,7 @@ mod key_manager_tests {
             .get_one_time_pq_pre_key(&target_address)
             .await
             .unwrap();
-        let pq_last_resort_pre_key_db = get_pq_last_resort_pre_key(
+        let pq_last_resort_pre_key_db = get_aci_pq_last_resort_pre_key(
             &database,
             request.pq_last_resort_pre_key.unwrap().key_id,
             &target_address,

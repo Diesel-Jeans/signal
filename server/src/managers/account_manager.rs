@@ -34,10 +34,10 @@ where
         primary_device: Device,
     ) -> Result<Account, ApiError> {
         let account = Account::new(
-            Pni::from(Uuid::new_v4()),
             primary_device,
-            pni_identity_key,
+            Pni::from(Uuid::new_v4()),
             aci_identity_key,
+            pni_identity_key,
             phone_number,
             account_attributes,
         );

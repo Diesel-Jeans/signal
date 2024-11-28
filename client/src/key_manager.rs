@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
+use crate::storage::generic::{ProtocolStore, StorageType};
 use common::utils::time_now;
+use common::web_api::{SetKeyRequest, UploadPreKey, UploadSignedPreKey};
 use libsignal_protocol::{
     kem, GenericSignedPreKey, IdentityKeyStore, KeyPair, KyberPreKeyRecord, KyberPreKeyStore,
     PreKeyRecord, PreKeyStore, SignalProtocolError, SignedPreKeyRecord, SignedPreKeyStore,
 };
+use rand::rngs::OsRng;
 use rand::{CryptoRng, Rng};
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -71,6 +74,7 @@ impl KeyManager {
         Ok(record)
     }
 
+    // always signed
     pub async fn generate_kyber_pre_key<IK: IdentityKeyStore, KPK: KyberPreKeyStore>(
         &mut self,
         identity_key_store: &mut IK,
@@ -88,6 +92,50 @@ impl KeyManager {
 
         kyber_pre_key_store.save_kyber_pre_key(id, &record).await?;
         Ok(record)
+    }
+
+    pub async fn generate_key_bundle<T: StorageType>(
+        &mut self,
+        store: &mut ProtocolStore<T>,
+    ) -> Result<SetKeyRequest, SignalProtocolError> {
+        let mut pre_keys: Vec<UploadPreKey> = Vec::new();
+        let mut pq_signed_pre_keys: Vec<UploadSignedPreKey> = Vec::new();
+        let mut rng = OsRng;
+
+        for _ in 0..100 {
+            pre_keys.push(UploadPreKey::from(
+                self.generate_pre_key(store, &mut rng).await?,
+            ));
+
+            pq_signed_pre_keys.push(UploadSignedPreKey::from(
+                self.generate_kyber_pre_key(
+                    &mut store.identity_key_store,
+                    &mut store.kyber_pre_key_store,
+                )
+                .await?,
+            ));
+        }
+
+        let signed_pre_key = self
+            .generate_signed_pre_key(
+                &mut store.identity_key_store,
+                &mut store.signed_pre_key_store,
+                &mut rng,
+            )
+            .await?;
+        let pq_last_resort_pre_key = self
+            .generate_kyber_pre_key(
+                &mut store.identity_key_store,
+                &mut store.kyber_pre_key_store,
+            )
+            .await?;
+
+        Ok(SetKeyRequest::new(
+            Some(pre_keys),
+            Some(UploadSignedPreKey::from(signed_pre_key)),
+            Some(pq_signed_pre_keys),
+            Some(UploadSignedPreKey::from(pq_last_resort_pre_key)),
+        ))
     }
 }
 
@@ -196,5 +244,42 @@ mod key_manager_tests {
             .key_pair()
             .unwrap();
         assert_eq!(key.public_key().unwrap(), stored_key_pair.public_key);
+    }
+
+    #[tokio::test]
+    async fn generate_key_bundle() {
+        let rng = OsRng;
+        let mut store = store(0);
+        let mut manager = KeyManager::new();
+        let keys = manager.generate_key_bundle(&mut store).await.unwrap();
+
+        assert_eq!(
+            &keys.pre_key.unwrap().len(),
+            &store.pre_key_store.all_pre_key_ids().count()
+        );
+
+        assert_eq!(
+            keys.pq_pre_key.unwrap().len() + keys.pq_last_resort_pre_key.iter().count(),
+            store.kyber_pre_key_store.all_kyber_pre_key_ids().count()
+        );
+
+        let stored_sign = store
+            .get_signed_pre_key(
+                store
+                    .signed_pre_key_store
+                    .all_signed_pre_key_ids()
+                    .next()
+                    .unwrap()
+                    .to_owned(),
+            )
+            .await
+            .unwrap()
+            .signature()
+            .unwrap();
+
+        assert_eq!(
+            Vec::from(keys.signed_pre_key.unwrap().signature),
+            stored_sign
+        );
     }
 }

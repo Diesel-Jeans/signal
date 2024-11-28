@@ -7,6 +7,7 @@ use libsignal_protocol::{
     DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyBundle, PreKeyId,
     PreKeyRecord, PublicKey, SignedPreKeyRecord,
 };
+use serde::de::IntoDeserializer;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -299,6 +300,22 @@ pub struct SetKeyRequest {
     pub signed_pre_key: Option<UploadSignedPreKey>,
     pub pq_pre_key: Option<Vec<UploadSignedPreKey>>,
     pub pq_last_resort_pre_key: Option<UploadSignedPreKey>,
+}
+
+impl SetKeyRequest {
+    pub fn new(
+        pre_key: Option<Vec<UploadPreKey>>,
+        signed_pre_key: Option<UploadSignedPreKey>,
+        pq_pre_key: Option<Vec<UploadSignedPreKey>>,
+        pq_last_resort_pre_key: Option<UploadSignedPreKey>,
+    ) -> Self {
+        Self {
+            pre_key,
+            signed_pre_key,
+            pq_pre_key,
+            pq_last_resort_pre_key,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
