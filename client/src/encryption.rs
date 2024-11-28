@@ -35,7 +35,7 @@ pub async fn encrypt(
             timestamp,
         )
         .await
-        .map_err(|err| SendMessageError::EncryptionError(err))?;
+        .map_err(SendMessageError::EncryptionError)?;
 
         msgs.insert(id, (reg_id, res));
     }

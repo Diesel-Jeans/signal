@@ -20,10 +20,12 @@ use surf::{http::convert::json, Client, Config, Url};
 
 const REGISTER_URI: &str = "v1/registration";
 
+#[allow(unused)]
 pub struct VerifiedSession {
     session_id: String,
 }
 
+#[allow(unused)]
 impl VerifiedSession {
     pub fn session_id(&self) -> &String {
         &self.session_id
@@ -263,11 +265,10 @@ pub mod server_api_test {
     use crate::errors::SignalClientError;
 
     use super::Backend;
-    use common::{protocol_address, signalservice::Envelope, web_api::SignalMessages};
+    use common::{signalservice::Envelope, web_api::SignalMessages};
     use core::panic;
     use libsignal_core::{ProtocolAddress, ServiceId};
     use libsignal_protocol::PreKeyBundle;
-    use serde_json::to_vec;
     use std::{collections::HashMap, sync::Arc};
     use tokio::sync::Mutex;
 

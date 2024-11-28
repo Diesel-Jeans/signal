@@ -628,7 +628,7 @@ impl SessionStore for DeviceSessionStore {
                     .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))?
                     .as_slice(),
             )
-            .map(|res| Some(res)),
+            .map(Some),
             Err(_) => Ok(None),
         }
     }
@@ -722,7 +722,7 @@ impl SenderKeyStore for DeviceSenderKeyStore {
                     .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))?
                     .as_slice(),
             )
-            .map(|res| Some(res)),
+            .map(Some),
             Err(_) => Ok(None),
         }
     }

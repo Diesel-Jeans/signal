@@ -216,7 +216,7 @@ impl fmt::Display for ReceiveMessageError {
                 "A message was received but it did not contain the type of the message.".to_owned()
             }
             Self::InvalidMessageTypeInEnvelope => {
-                format!("A message was received but it had an invalid message type")
+                "A message was received but it had an invalid message type".to_string()
             }
             Self::CiphertextDecodeError(err) => format!("{err}"),
             Self::ParseProtocolAddressError(err) => format!("{err}"),

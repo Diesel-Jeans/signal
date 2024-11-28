@@ -12,7 +12,6 @@ use crate::{
 use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use common::{
-    protocol_address::parse_protocol_address,
     signalservice::{envelope, Content, DataMessage},
     web_api::{
         AccountAttributes, DeviceCapabilities, RegistrationRequest, SignalMessage, SignalMessages,
@@ -23,7 +22,7 @@ use dotenv::dotenv;
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{
     message_decrypt, process_prekey_bundle, CiphertextMessage, CiphertextMessageType, IdentityKey,
-    IdentityKeyPair, KeyPair, SessionStore, SignalProtocolError,
+    IdentityKeyPair, KeyPair, SignalProtocolError,
 };
 use prost::Message;
 use rand::{rngs::OsRng, Rng};
@@ -303,7 +302,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         // The content of the envelope is base64 encoded.
         let bytes = BASE64_STANDARD
             .decode(ciphertext_content)
-            .map_err(|err| ReceiveMessageError::Base64DecodeError(err))?;
+            .map_err(ReceiveMessageError::Base64DecodeError)?;
 
         // The evelope contains information about which message type is received.
         let _type = match envelope.r#type() {
@@ -316,7 +315,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
 
         // Use the information from envelope to construct a CiphertextMessage.
         let ciphertext = decode_ciphertext(bytes, _type)
-            .map_err(|err| ReceiveMessageError::CiphertextDecodeError(err))?;
+            .map_err(ReceiveMessageError::CiphertextDecodeError)?;
 
         let address = ProtocolAddress::new(
             envelope.source_service_id().to_string(),
@@ -338,7 +337,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
             &mut csprng,
         )
         .await
-        .map_err(|err| ReceiveMessageError::DecryptMessageError(err))?;
+        .map_err(ReceiveMessageError::DecryptMessageError)?;
 
         // The final message is stored within a DataMessage inside a Content.
         Ok(
