@@ -117,8 +117,8 @@ impl SignalDatabase for PostgresDatabase {
         .await
         .map(|row| {
             Account::from_db(
-                Pni::parse_from_service_id_string(&row.pni).unwrap(),
                 Aci::parse_from_service_id_string(&row.aci).unwrap(),
+                Pni::parse_from_service_id_string(&row.pni).unwrap(),
                 IdentityKey::new(PublicKey::deserialize(row.aci_identity_key.as_slice()).unwrap()),
                 IdentityKey::new(PublicKey::deserialize(row.pni_identity_key.as_slice()).unwrap()),
                 devices,

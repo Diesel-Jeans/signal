@@ -17,38 +17,38 @@ pub struct Account {
 
 impl Account {
     pub fn new(
-        pni: Pni,
         device: Device,
-        pni_identity_key: IdentityKey,
+        pni: Pni,
         aci_identity_key: IdentityKey,
+        pni_identity_key: IdentityKey,
         phone_number: String,
         account_attr: AccountAttributes,
     ) -> Self {
         Self {
-            pni,
             aci: Uuid::new_v4().into(),
-            devices: vec![device],
-            pni_identity_key,
+            pni,
             aci_identity_key,
+            pni_identity_key,
+            devices: vec![device],
             phone_number,
             account_attr,
         }
     }
 
     pub fn from_db(
-        pni: Pni,
         aci: Aci,
-        pni_identity_key: IdentityKey,
+        pni: Pni,
         aci_identity_key: IdentityKey,
+        pni_identity_key: IdentityKey,
         devices: Vec<Device>,
         phone_number: String,
         account_attr: AccountAttributes,
     ) -> Self {
         Self {
-            pni,
             aci,
-            pni_identity_key,
+            pni,
             aci_identity_key,
+            pni_identity_key,
             devices,
             phone_number,
             account_attr,

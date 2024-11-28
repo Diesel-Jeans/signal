@@ -335,7 +335,10 @@ impl ServerAPI {
             None => Err(ServerRequestError::NoAuthDevice)?,
         };
         let mut res = match req_type {
-            ReqType::Get => self.client.get(uri),
+            ReqType::Get => self
+                .client
+                .get(uri)
+                .header("Authorization", header.encode()),
             ReqType::Post(payload) => self
                 .client
                 .post(uri)

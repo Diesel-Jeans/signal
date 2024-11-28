@@ -366,7 +366,6 @@ async fn put_keys_endpoint(
     Query(params): Query<HashMap<String, String>>,
     Json(set_keys_request): Json<SetKeyRequest>,
 ) -> Result<(), ApiError> {
-    println!("i am putting keys");
     state
         .key_manager
         .handle_put_keys(

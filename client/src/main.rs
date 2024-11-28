@@ -17,7 +17,7 @@ mod test_utils;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    Client::<Device>::register("my_device", "q".into()).await?;
+    Client::<Device>::register("my_device", "b".into()).await?;
 
     Ok(())
 }
