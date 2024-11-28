@@ -66,7 +66,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
+                    body: "Database fault".into(),
                 })?;
         }
 
