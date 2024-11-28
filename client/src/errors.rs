@@ -10,6 +10,7 @@ type Result<T> = std::result::Result<T, SignalClientError>;
 
 pub enum SignalClientError {
     ContactManagerError(ContactManagerError),
+    KeyError(String),
     RegistrationError(RegistrationError),
     LoginError(LoginError),
     SendMessageError(SendMessageError),
@@ -62,6 +63,7 @@ impl fmt::Display for SignalClientError {
             Self::DotenvError(err) => write!(f, "{err}"),
             Self::ReceiveMessageError(err) => write!(f, "{err}"),
             Self::ServerRequestError(err) => write!(f, "{err}"),
+            Self::KeyError(err) => write!(f, "{err}"),
         }
     }
 }
@@ -98,7 +100,7 @@ impl From<ContactManagerError> for SignalClientError {
 pub enum RegistrationError {
     PhoneNumberTaken,
     NoResponse,
-    BadResponse,
+    BadResponse(String),
 }
 
 impl fmt::Debug for RegistrationError {
@@ -110,10 +112,12 @@ impl fmt::Debug for RegistrationError {
 impl fmt::Display for RegistrationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
-            Self::PhoneNumberTaken => "Phone number was already taken.",
-            Self::NoResponse => "The server did not respond to the registration request.",
-            Self::BadResponse => {
-                "The server responded to the request, but the response could not be parsed."
+            Self::PhoneNumberTaken => "Phone number was already taken.".to_owned(),
+            Self::NoResponse => {
+                "The server did not respond to the registration request.".to_owned()
+            }
+            Self::BadResponse(s) => {
+                format!("Bad response from server: {s}")
             }
         };
         write!(f, "Could not register account - {}", message)
@@ -213,16 +217,16 @@ impl fmt::Debug for ReceiveMessageError {
 impl fmt::Display for ReceiveMessageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
-            Self::Base64DecodeError(err) => format!("{err}"),
+            Self::Base64DecodeError(err) => format!("Base64 decode error: {err}"),
             Self::NoMessageTypeInEnvelope => {
                 "A message was received but it did not contain the type of the message.".to_owned()
             }
             Self::InvalidMessageTypeInEnvelope => {
                 "A message was received but it had an invalid message type".to_string()
             }
-            Self::CiphertextDecodeError(err) => format!("{err}"),
+            Self::CiphertextDecodeError(err) => format!("Could not decode ciphertext: {err}"),
             Self::ParseProtocolAddressError(err) => format!("{err}"),
-            Self::DecryptMessageError(err) => format!("{err}"),
+            Self::DecryptMessageError(err) => format!("Decrypt: {err}"),
             Self::ProtobufDecodeContentError(err) => {
                 format!("The decrypted message content could not be decoded: {err}")
             }

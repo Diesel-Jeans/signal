@@ -6,23 +6,27 @@ use crate::{
     socket_manager::signal_ws_connect,
 };
 use async_native_tls::{Certificate, TlsConnector};
-use common::signalservice::Envelope;
-use common::web_api::SignalMessages;
-use common::websocket::net_helper::create_request;
-use common::{
-    signalservice::{web_socket_message, WebSocketMessage},
-    web_api::{authorization::BasicAuthorizationHeader, RegistrationRequest, RegistrationResponse},
+use common::signalservice::{web_socket_message, Envelope, WebSocketMessage};
+use common::web_api::{
+    authorization::BasicAuthorizationHeader, PreKeyResponse, RegistrationRequest,
+    RegistrationResponse,
 };
+use common::web_api::{SetKeyRequest, SignalMessages};
+use common::websocket::net_helper::create_request;
 use http_client::h1::H1Client;
-use libsignal_core::ServiceId;
+use libsignal_core::{Aci, DeviceId, ServiceId};
 use libsignal_protocol::PreKeyBundle;
 use prost::Message;
 use serde_json::{from_slice, to_vec};
+use std::error::Error;
+use std::fmt::Display;
 use std::{env, fmt::Debug, fs, sync::Arc, time::Duration};
 use surf::{http::convert::json, Client, Config, Url};
+use surf::{Response, StatusCode};
 
 const REGISTER_URI: &str = "v1/registration";
 const MSG_URI: &str = "/v1/messages";
+const KEY_BUNDLE_URI: &str = "/v2/keys";
 
 #[allow(unused)]
 pub struct VerifiedSession {
@@ -49,13 +53,13 @@ pub trait Backend {
     /// Publish a sigle [PreKeyBundle] for this device.
     async fn publish_pre_key_bundle(
         &mut self,
-        pre_key_bundle: PreKeyBundle,
+        pre_key_bundle: SetKeyRequest,
     ) -> Result<(), SignalClientError>;
 
     /// Fetch [PreKeyBundle] for all of a users devices.
     async fn fetch_pre_key_bundles(
         &self,
-        uuid: String,
+        service_id: &ServiceId,
     ) -> Result<Vec<PreKeyBundle>, SignalClientError>;
 
     /// Send a [RegistrationRequest] to the server.
@@ -76,6 +80,7 @@ pub trait Backend {
     ) -> Result<(), SignalClientError>;
 
     async fn get_message(&mut self) -> Option<Envelope>;
+    fn create_auth_header(&mut self, aci: Aci, password: String, device_id: DeviceId) -> ();
 }
 
 #[derive(Debug)]
@@ -101,16 +106,16 @@ impl<T: Backend> ServerAPI<T> {
 
     pub async fn publish_pre_key_bundle(
         &mut self,
-        pre_key_bundle: PreKeyBundle,
+        pre_key_bundle: SetKeyRequest,
     ) -> Result<(), SignalClientError> {
         self.backend.publish_pre_key_bundle(pre_key_bundle).await
     }
 
     pub async fn fetch_pre_key_bundles(
         &self,
-        uuid: String,
+        service_id: &ServiceId,
     ) -> Result<Vec<PreKeyBundle>, SignalClientError> {
-        self.backend.fetch_pre_key_bundles(uuid).await
+        self.backend.fetch_pre_key_bundles(service_id).await
     }
 
     pub async fn register_client(
@@ -136,12 +141,38 @@ impl<T: Backend> ServerAPI<T> {
     pub async fn get_message(&mut self) -> Option<Envelope> {
         self.backend.get_message().await
     }
+    pub fn create_auth_header(&mut self, aci: Aci, password: String, device_id: DeviceId) -> () {
+        self.backend.create_auth_header(aci, password, device_id);
+    }
 }
 
 pub struct SignalBackend {
+    auth_header: Option<BasicAuthorizationHeader>,
     http_client: Client,
     socket_manager: SocketManager<SignalStream>,
     message_queue: PersistentReceiver<WebSocketMessage>,
+}
+
+enum ReqType {
+    Get,
+    Post(serde_json::Value),
+    Put(serde_json::Value),
+    Delete(serde_json::Value),
+}
+
+impl Display for ReqType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                ReqType::Get => "GET",
+                ReqType::Post(_) => "POST",
+                ReqType::Put(_) => "PUT",
+                ReqType::Delete(_) => "DELETE",
+            }
+        )
+    }
 }
 
 impl Backend for SignalBackend {
@@ -168,16 +199,35 @@ impl Backend for SignalBackend {
 
     async fn publish_pre_key_bundle(
         &mut self,
-        pre_key_bundle: PreKeyBundle,
+        pre_key_bundle: SetKeyRequest,
     ) -> Result<(), SignalClientError> {
-        todo!()
+        let uri = format!("{}?identity_type=aci", KEY_BUNDLE_URI);
+        self.make_request(ReqType::Put(json!(pre_key_bundle)), uri)
+            .await
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+        Ok(())
     }
 
     async fn fetch_pre_key_bundles(
         &self,
-        uuid: String,
+        service_id: &ServiceId,
     ) -> Result<Vec<PreKeyBundle>, SignalClientError> {
-        todo!()
+        let uri = format!("{}/{}/*", KEY_BUNDLE_URI, service_id.service_id_string());
+
+        let mut res = self
+            .make_request(ReqType::Get, uri)
+            .await
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+
+        let pre_key_res: PreKeyResponse = res
+            .body_json()
+            .await
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+
+        let bundle: Vec<PreKeyBundle> = Vec::<PreKeyBundle>::try_from(pre_key_res)
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+
+        Ok(bundle)
     }
 
     async fn register_client(
@@ -196,13 +246,25 @@ impl Backend for SignalBackend {
             .header("Authorization", auth_header.encode())
             .await
             .map_err(|_| RegistrationError::NoResponse)?;
-        Ok(from_slice(
-            res.body_bytes()
-                .await
-                .map_err(|_| RegistrationError::BadResponse)?
-                .as_ref(),
-        )
-        .map_err(|_| RegistrationError::BadResponse)?)
+        if res.status().is_success() {
+            Ok(from_slice(
+                res.body_bytes()
+                    .await
+                    .map_err(|err| RegistrationError::BadResponse(format!("{err}")))
+                    .expect("There")
+                    .as_ref(),
+            )
+            .map_err(|err| RegistrationError::BadResponse(format!("{err}")))
+            .expect("Here"))
+        } else {
+            Err(SignalClientError::RegistrationError(
+                RegistrationError::BadResponse(format!(
+                    "Received {}: {:?}",
+                    res.status(),
+                    res.body_string().await
+                )),
+            ))
+        }
     }
 
     async fn send_msg(
@@ -219,7 +281,7 @@ impl Backend for SignalBackend {
             .socket_manager
             .send(id, create_request(id, "PUT", &uri, vec![], Some(payload)))
             .await
-            .map_err(|err| SendMessageError::WebSocketError);
+            .map_err(SendMessageError::WebSocketError)?;
 
         // TODO handle send went wrong.
         Ok(())
@@ -240,6 +302,14 @@ impl Backend for SignalBackend {
                 None
             }
         }
+    }
+
+    fn create_auth_header(&mut self, aci: Aci, password: String, device_id: DeviceId) -> () {
+        self.auth_header = Some(BasicAuthorizationHeader::new(
+            aci.service_id_string(),
+            device_id.into(),
+            password.to_string(),
+        ));
     }
 }
 
@@ -282,19 +352,60 @@ impl SignalBackend {
         let msg_queue = PersistentReceiver::new(socket_mgr.subscribe(), Some(filter));
 
         Self {
+            auth_header: None,
             http_client,
             socket_manager: socket_mgr,
             message_queue: msg_queue,
         }
     }
+
+    fn create_auth_header(&mut self, aci: Aci, password: &str, device_id: DeviceId) -> () {
+        self.auth_header = Some(BasicAuthorizationHeader::new(
+            aci.service_id_string(),
+            device_id.into(),
+            password.to_string(),
+        ));
+    }
 }
 
+#[derive(Debug)]
+enum ServerRequestError {
+    /// The status code was not 200 - OK
+    StatusCodeError(StatusCode, String),
+    BodyDecodeError(String),
+    TransmissionError(String),
+    NoAuthDevice,
+}
+impl Display for ServerRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StatusCodeError(code, body) => write!(f, "Response was {}: {}", code, body),
+            Self::BodyDecodeError(err) => {
+                write!(f, "Could not decode response body: {err}")
+            }
+            Self::TransmissionError(err) => {
+                write!(f, "HTTP communication with server failed: {err}")
+            }
+            Self::NoAuthDevice => {
+                write!(
+                    f,
+                    "You cannot make requests without an authentication device."
+                )
+            }
+        }
+    }
+}
+
+impl Error for ServerRequestError {}
+/*
 #[cfg(test)]
 pub mod server_api_test {
-    use crate::errors::SignalClientError;
-
     use super::Backend;
-    use common::{signalservice::Envelope, web_api::SignalMessages};
+    use crate::errors::SignalClientError;
+    use common::{
+        signalservice::Envelope,
+        web_api::{SetKeyRequest, SignalMessages},
+    };
     use core::panic;
     use libsignal_core::{ProtocolAddress, ServiceId};
     use libsignal_protocol::PreKeyBundle;
@@ -325,7 +436,7 @@ pub mod server_api_test {
 
         async fn publish_pre_key_bundle(
             &mut self,
-            pre_key_bundle: PreKeyBundle,
+            pre_key_bundle: SetKeyRequest,
         ) -> Result<(), SignalClientError> {
             if !self
                 .state
@@ -352,14 +463,14 @@ pub mod server_api_test {
 
         async fn fetch_pre_key_bundles(
             &self,
-            uuid: String,
+            service_id: &ServiceId,
         ) -> Result<Vec<PreKeyBundle>, SignalClientError> {
             Ok(self
                 .state
                 .lock()
                 .await
                 .pre_key_bundles
-                .get(&uuid)
+                .get(&service_id.service_id_string())
                 .unwrap()
                 .clone())
         }
@@ -409,11 +520,86 @@ pub mod server_api_test {
                 .unwrap()
                 .pop()
         }
+
+        fn create_auth_header(
+            &mut self,
+            aci: libsignal_core::Aci,
+            password: &str,
+            device_id: libsignal_core::DeviceId,
+        ) -> () {
+            todo!()
+        }
+
+        fn new() -> Self {
+            todo!()
+        }
     }
 
     impl MockBackend {
         pub fn new(address: ProtocolAddress, state: Arc<Mutex<MockBackendState>>) -> Self {
             Self { address, state }
+        }
+    }
+}
+*/
+
+impl SignalBackend {
+    async fn make_request(
+        &self,
+        req_type: ReqType,
+        uri: String,
+    ) -> Result<Response, ServerRequestError> {
+        println!("Sent {} request to {}", req_type, uri);
+        let header = match &self.auth_header {
+            Some(header) => header,
+            None => Err(ServerRequestError::NoAuthDevice)?,
+        };
+        let mut res = match req_type {
+            ReqType::Get => self
+                .http_client
+                .get(uri)
+                .header("Authorization", header.encode()),
+            ReqType::Post(payload) => self
+                .http_client
+                .post(uri)
+                .body(
+                    surf::Body::from_json(&payload)
+                        .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
+                )
+                .header("Authorization", header.encode()),
+            ReqType::Put(payload) => self
+                .http_client
+                .put(uri)
+                .body(
+                    surf::Body::from_json(&payload)
+                        .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
+                )
+                .header("Authorization", header.encode()),
+            ReqType::Delete(payload) => self
+                .http_client
+                .delete(uri)
+                .body(
+                    surf::Body::from_json(&payload)
+                        .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
+                )
+                .header("Authorization", header.encode()),
+        }
+        .await
+        .map_err(|err| ServerRequestError::TransmissionError(format!("{err}")))?;
+
+        match res.status() {
+            StatusCode::Ok => Ok(res),
+            _ => {
+                println!(
+                    "Response code {}: {:?}",
+                    res.status(),
+                    res.body_string().await.unwrap().to_string()
+                );
+                Err(ServerRequestError::StatusCodeError(
+                    res.status(),
+                    res.body_string().await.unwrap_or("".to_owned()),
+                ))
+            }
         }
     }
 }

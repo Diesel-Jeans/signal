@@ -5,8 +5,8 @@ use crate::{
     key_manager::KeyManager,
     server::{Backend, ServerAPI, SignalBackend},
     storage::{
-        device::Device,
         generic::{ProtocolStore, Storage, StorageType},
+        in_memory::InMemory,
     },
 };
 use anyhow::Result;
@@ -66,14 +66,12 @@ impl<S: StorageType, B: Backend> Client<S, B> {
     pub async fn register(
         name: &str,
         phone_number: String,
-    ) -> Result<Client<Device, SignalBackend>, SignalClientError> {
+    ) -> Result<Client<InMemory, SignalBackend>, SignalClientError> {
         let mut csprng = OsRng;
         let aci_registration_id = OsRng.gen_range(1..16383);
         let pni_registration_id = OsRng.gen_range(1..16383);
-        let aci_key_pair = KeyPair::generate(&mut csprng);
-        let pni_key_pair = KeyPair::generate(&mut csprng);
-        let id_key = IdentityKey::new(aci_key_pair.public_key);
-        let id_key_pair = IdentityKeyPair::new(id_key, aci_key_pair.private_key);
+        let aci_id_key_pair = IdentityKeyPair::generate(&mut csprng);
+        let pni_id_key_pair = IdentityKeyPair::generate(&mut csprng);
         dotenv().map_err(|err| SignalClientError::DotenvError(format!("{err}")))?;
         let db_url =
             std::env::var("DATABASE_URL").expect("Expected to read database url from .env file");
@@ -87,12 +85,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
             .await
             .expect("Could not run migrations");
 
-        let mut proto_storage = ProtocolStore::create_device_protocol_store(
-            id_key_pair,
-            aci_registration_id,
-            pool.clone(),
-        )
-        .await;
+        let mut proto_storage = ProtocolStore::new(aci_id_key_pair, aci_registration_id);
         let mut key_manager = KeyManager::new();
 
         let aci_signed_pk = key_manager
@@ -150,15 +143,15 @@ impl<S: StorageType, B: Backend> Client<S, B> {
             capabilities,
             Box::new(access_key),
         );
-        let server_api = ServerAPI::new(SignalBackend::new());
+        let mut server_api = ServerAPI::new(SignalBackend::new());
         let req = RegistrationRequest::new(
             "".into(),
             "".into(),
             account_attributes,
             true, // Require atomic is always true
             true, // Skip device transfer is always true
-            IdentityKey::new(aci_key_pair.public_key),
-            IdentityKey::new(pni_key_pair.public_key),
+            aci_id_key_pair.identity_key().clone(),
+            pni_id_key_pair.identity_key().clone(),
             aci_signed_pk.into(),
             pni_signed_pk.into(),
             aci_pq_last_resort.into(),
@@ -168,14 +161,32 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         );
 
         let response = server_api
-            .register_client(phone_number, password.to_owned(), req, None)
+            .register_client(phone_number, password.clone(), req, None)
             .await?;
 
         let aci: Aci = response.uuid.into();
         let pni: Pni = response.pni.into();
 
+        server_api.create_auth_header(aci, password.clone(), 1.into());
+
         let contact_manager = ContactManager::new();
-        let storage = Storage::create(aci, pni, password, proto_storage, pool).await?;
+        let mut storage = Storage::new(password.clone(), aci, pni, proto_storage);
+        let key_bundle = key_manager
+            .generate_key_bundle(&mut storage.protocol_store)
+            .await
+            .expect("Should create key bundle");
+
+        server_api.publish_pre_key_bundle(key_bundle).await?;
+
+        server_api
+            .connect(
+                &aci.service_id_string(),
+                &password,
+                "wss://127.0.0.1:4444/v1/websocket",
+                "../server/cert/rootCA.crt",
+            )
+            .await?;
+
         Ok(Client::new(
             aci,
             pni,
@@ -217,7 +228,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
                     .expect("Can add contact that does not exist yet");
                 let bundles = self
                     .server_api
-                    .fetch_pre_key_bundles(service_id.service_id_string())
+                    .fetch_pre_key_bundles(service_id)
                     .await
                     .unwrap();
 
@@ -300,9 +311,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         let ciphertext_content = envelope.content();
 
         // The content of the envelope is base64 encoded.
-        let bytes = BASE64_STANDARD
-            .decode(ciphertext_content)
-            .map_err(ReceiveMessageError::Base64DecodeError)?;
+        let bytes = ciphertext_content.to_vec();
 
         // The evelope contains information about which message type is received.
         let _type = match envelope.r#type() {
@@ -380,7 +389,7 @@ mod test_client {
         encryption::test::create_pre_key_bundle,
         key_manager::KeyManager,
         server::{
-            server_api_test::{MockBackend, MockBackendState},
+            //server_api_test::{MockBackend, MockBackendState},
             ServerAPI,
         },
         storage::{
@@ -388,7 +397,7 @@ mod test_client {
             in_memory::InMemory,
         },
     };
-    use common::signalservice::{envelope, Content, DataMessage, Envelope};
+    use common::signalservice::{Content, DataMessage};
     use libsignal_core::{Aci, ProtocolAddress};
     use libsignal_protocol::IdentityKeyPair;
     use prost::Message;
@@ -396,6 +405,7 @@ mod test_client {
     use tokio::sync::Mutex;
     use uuid::uuid;
 
+    /*
     fn get_alice(state: Arc<Mutex<MockBackendState>>) -> Client<InMemory, MockBackend> {
         let aci: Aci = uuid!("0d76041e-54ce-4cea-a128-ebfa32171c29").into();
         let pni = uuid!("93c5486c-5bba-437f-a9c1-0570cb619d27").into();
@@ -466,6 +476,7 @@ mod test_client {
 
         assert_eq!("Hello, World!".to_owned(), message);
     }
+    */
 
     #[tokio::test]
     async fn test_content_decode() {

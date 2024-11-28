@@ -34,22 +34,22 @@ where
         primary_device: Device,
     ) -> Result<Account, ApiError> {
         let account = Account::new(
-            Pni::from(Uuid::new_v4()),
             primary_device,
-            pni_identity_key,
+            Pni::from(Uuid::new_v4()),
             aci_identity_key,
+            pni_identity_key,
             phone_number,
             account_attributes,
         );
         self.db.add_account(&account).await.map_err(|err| {
             let mut out_err = ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                message: "Could not create account".into(),
+                body: "Could not create account".to_owned(),
             };
             if let Some(sqlx::Error::Database(database_err)) = err.downcast_ref() {
                 if (database_err.as_ref()).constraint() == Some("phone_number") {
                     out_err.status_code = StatusCode::BAD_REQUEST;
-                    out_err.message += ", phone number already in use";
+                    out_err.body += ", phone number already in use";
                 }
             };
             out_err
