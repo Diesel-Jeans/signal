@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use common::utils::time_now;
 use crate::storage::generic::{ProtocolStore, StorageType};
+use common::utils::time_now;
 use common::web_api::{SetKeyRequest, UploadPreKey, UploadSignedPreKey};
 use libsignal_protocol::{
     kem, GenericSignedPreKey, IdentityKeyStore, KeyPair, KyberPreKeyRecord, KyberPreKeyStore,
