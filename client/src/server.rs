@@ -13,6 +13,7 @@ use common::web_api::{
     RegistrationResponse, SetKeyRequest,
 };
 use http_client::h1::H1Client;
+use libsignal_core::{Aci, DeviceId};
 use libsignal_protocol::PreKeyBundle;
 use prost::Message as _;
 use serde_json::from_slice;
@@ -26,6 +27,7 @@ const DEVICE_URI: &str = "/device";
 const KEY_BUNDLE_URI: &str = "/v2/keys";
 
 pub struct ServerAPI {
+    auth_header: Option<BasicAuthorizationHeader>,
     client: Client,
     socket_manager: SocketManager<SignalStream>,
     message_queue: PersistentReceiver<WebSocketMessage>,
@@ -71,7 +73,7 @@ pub trait Server {
     async fn register_client(
         &self,
         phone_number: String,
-        password: String,
+        password: &str,
         registration_request: RegistrationRequest,
         session: Option<&VerifiedSession>,
     ) -> Result<RegistrationResponse, Self::Error>;
@@ -86,6 +88,7 @@ pub trait Server {
     async fn delete_client(&self, uuid: String) -> Result<(), Self::Error>;
     async fn delete_device(&self, uuid: String) -> Result<(), Self::Error>;
     async fn get_message(&mut self) -> Option<Envelope>;
+    fn create_auth_header(&mut self, aci: Aci, password: &str, device_id: DeviceId) -> ();
     fn new() -> Self;
 }
 
@@ -139,7 +142,8 @@ impl Server for ServerAPI {
     }
 
     async fn publish_bundle(&self, bundle: SetKeyRequest) -> Result<(), Self::Error> {
-        self.make_request(ReqType::Put(json!(bundle)), KEY_BUNDLE_URI.to_string())
+        let uri = format!("{}?identity_type=aci", KEY_BUNDLE_URI);
+        self.make_request(ReqType::Put(json!(bundle)), uri)
             .await
             .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
         Ok(())
@@ -170,19 +174,19 @@ impl Server for ServerAPI {
     async fn register_client(
         &self,
         phone_number: String,
-        password: String,
+        password: &str,
         registration_request: RegistrationRequest,
         _session: Option<&VerifiedSession>,
     ) -> Result<RegistrationResponse, Self::Error> {
         let payload = json!(registration_request);
-        let auth_header = BasicAuthorizationHeader::new(phone_number, 1, password);
+        let auth_header = BasicAuthorizationHeader::new(phone_number, 1, password.to_string());
         let mut res = self
             .client
             .post(REGISTER_URI)
             .body(payload)
             .header("Authorization", auth_header.encode())
             .await
-            .map_err(|_| RegistrationError::NoResponse)?;
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
         Ok(from_slice(
             res.body_bytes()
                 .await
@@ -272,10 +276,19 @@ impl Server for ServerAPI {
         let msg_queue = PersistentReceiver::new(socket_mgr.subscribe(), Some(filter));
 
         ServerAPI {
+            auth_header: None,
             client,
             socket_manager: socket_mgr,
             message_queue: msg_queue,
         }
+    }
+
+    fn create_auth_header(&mut self, aci: Aci, password: &str, device_id: DeviceId) -> () {
+        self.auth_header = Some(BasicAuthorizationHeader::new(
+            aci.service_id_string(),
+            device_id.into(),
+            password.to_string(),
+        ));
     }
 }
 
@@ -285,6 +298,7 @@ enum ServerRequestError {
     StatusCodeError(StatusCode, String),
     BodyDecodeError(String),
     TransmissionError(String),
+    NoAuthDevice,
 }
 
 impl Display for ServerRequestError {
@@ -296,6 +310,12 @@ impl Display for ServerRequestError {
             }
             Self::TransmissionError(err) => {
                 write!(f, "HTTP communication with server failed: {err}")
+            }
+            Self::NoAuthDevice => {
+                write!(
+                    f,
+                    "You cannot make requests without an authentication device."
+                )
             }
         }
     }
@@ -310,30 +330,53 @@ impl ServerAPI {
         uri: String,
     ) -> Result<Response, ServerRequestError> {
         println!("Sent {} request to {}", req_type, uri);
+        let header = match &self.auth_header {
+            Some(header) => header,
+            None => Err(ServerRequestError::NoAuthDevice)?,
+        };
         let mut res = match req_type {
             ReqType::Get => self.client.get(uri),
-            ReqType::Post(payload) => self.client.post(uri).body(
-                surf::Body::from_json(&payload)
-                    .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
-            ),
-            ReqType::Put(payload) => self.client.put(uri).body(
-                surf::Body::from_json(&payload)
-                    .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
-            ),
-            ReqType::Delete(payload) => self.client.delete(uri).body(
-                surf::Body::from_json(&payload)
-                    .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
-            ),
+            ReqType::Post(payload) => self
+                .client
+                .post(uri)
+                .body(
+                    surf::Body::from_json(&payload)
+                        .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
+                )
+                .header("Authorization", header.encode()),
+            ReqType::Put(payload) => self
+                .client
+                .put(uri)
+                .body(
+                    surf::Body::from_json(&payload)
+                        .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
+                )
+                .header("Authorization", header.encode()),
+            ReqType::Delete(payload) => self
+                .client
+                .delete(uri)
+                .body(
+                    surf::Body::from_json(&payload)
+                        .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
+                )
+                .header("Authorization", header.encode()),
         }
         .await
         .map_err(|err| ServerRequestError::TransmissionError(format!("{err}")))?;
 
         match res.status() {
             StatusCode::Ok => Ok(res),
-            _ => Err(ServerRequestError::StatusCodeError(
-                res.status(),
-                res.body_string().await.unwrap_or("".to_owned()),
-            )),
+            _ => {
+                println!(
+                    "Response code {}: {:?}",
+                    res.status(),
+                    res.body_string().await.unwrap().to_string()
+                );
+                Err(ServerRequestError::StatusCodeError(
+                    res.status(),
+                    res.body_string().await.unwrap_or("".to_owned()),
+                ))
+            }
         }
     }
 }

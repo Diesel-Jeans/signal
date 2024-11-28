@@ -8,6 +8,8 @@ pub enum SignalClientError {
     LoginError(LoginError),
     SendMessageError(SendMessageError),
     WebSocketError(String),
+    DatabaseError(String),
+    DotenvError(String),
 }
 
 impl fmt::Debug for SignalClientError {
@@ -23,6 +25,8 @@ impl fmt::Display for SignalClientError {
             Self::LoginError(err) => format!("{err}"),
             Self::SendMessageError(err) => format!("{err}"),
             Self::WebSocketError(err) => err.to_string(),
+            Self::DatabaseError(err) => format!("{err}"),
+            Self::DotenvError(err) => format!("{err}"),
             Self::KeyError(err) => err.to_string(),
         };
         write!(f, "Could not register account - {}", message)

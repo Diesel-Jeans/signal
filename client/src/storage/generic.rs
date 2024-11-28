@@ -25,12 +25,14 @@ pub struct Storage<T: StorageType> {
 
 #[async_trait]
 pub trait SignalStore {
-    async fn set_password(&mut self, new_password: String);
-    async fn get_password(&self) -> &str;
-    async fn set_aci(&mut self, new_aci: Aci);
-    async fn get_aci(&self) -> &Aci;
-    async fn set_pni(&mut self, new_pni: Pni);
-    async fn get_pni(&self) -> &Pni;
+    type Error;
+
+    async fn set_password(&mut self, new_password: String) -> Result<(), Self::Error>;
+    async fn get_password(&self) -> Result<String, Self::Error>;
+    async fn set_aci(&mut self, new_aci: Aci) -> Result<(), Self::Error>;
+    async fn get_aci(&self) -> Result<Aci, Self::Error>;
+    async fn set_pni(&mut self, new_pni: Pni) -> Result<(), Self::Error>;
+    async fn get_pni(&self) -> Result<Pni, Self::Error>;
 }
 
 pub struct ProtocolStore<T: StorageType> {

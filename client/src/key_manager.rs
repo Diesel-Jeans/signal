@@ -1,14 +1,11 @@
-use std::{
-    collections::HashMap,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::HashMap;
 
+use common::utils::time_now;
 use crate::storage::generic::{ProtocolStore, StorageType};
 use common::web_api::{SetKeyRequest, UploadPreKey, UploadSignedPreKey};
 use libsignal_protocol::{
     kem, GenericSignedPreKey, IdentityKeyStore, KeyPair, KyberPreKeyRecord, KyberPreKeyStore,
     PreKeyRecord, PreKeyStore, SignalProtocolError, SignedPreKeyRecord, SignedPreKeyStore,
-    Timestamp,
 };
 use rand::rngs::OsRng;
 use rand::{CryptoRng, Rng};
@@ -140,17 +137,6 @@ impl KeyManager {
             Some(UploadSignedPreKey::from(pq_last_resort_pre_key)),
         ))
     }
-}
-
-fn time_now() -> Timestamp {
-    Timestamp::from_epoch_millis(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Now is later than epoch")
-            .as_millis()
-            .try_into()
-            .expect("Living in the future is not allowed"),
-    )
 }
 
 #[cfg(test)]
