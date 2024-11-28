@@ -165,6 +165,7 @@ impl From<LoginError> for SignalClientError {
 
 pub enum SendMessageError {
     EncryptionError(SignalProtocolError),
+    WebSocketError(String),
 }
 
 impl fmt::Debug for SendMessageError {
@@ -176,7 +177,8 @@ impl fmt::Debug for SendMessageError {
 impl fmt::Display for SendMessageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
-            Self::EncryptionError(err) => err,
+            Self::EncryptionError(err) => format!("{err}"),
+            Self::WebSocketError(err) => err.to_owned(),
         };
         write!(f, "Could not send message - {}", message)
     }

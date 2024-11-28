@@ -18,7 +18,16 @@ mod test_utils;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    Client::<Device, SignalBackend>::register("my_device", "b".into()).await?;
+    let mut alice = Client::<Device, SignalBackend>::register("alice_device", "a".into()).await?;
+    let mut bob = Client::<Device, SignalBackend>::register("bob_device", "b".into()).await?;
+
+    alice
+        .send_message("Hello, World!", &bob.aci.into())
+        .await
+        .unwrap();
+
+    let message = bob.receive_message().await.unwrap();
+    println!("{message}");
 
     Ok(())
 }

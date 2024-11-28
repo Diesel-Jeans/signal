@@ -1,3 +1,4 @@
+use crate::errors::SendMessageError;
 use crate::socket_manager::{SignalStream, SocketManager};
 use crate::{
     errors::{RegistrationError, SignalClientError},
@@ -7,6 +8,7 @@ use crate::{
 use async_native_tls::{Certificate, TlsConnector};
 use common::signalservice::Envelope;
 use common::web_api::SignalMessages;
+use common::websocket::net_helper::create_request;
 use common::{
     signalservice::{web_socket_message, WebSocketMessage},
     web_api::{authorization::BasicAuthorizationHeader, RegistrationRequest, RegistrationResponse},
@@ -14,11 +16,13 @@ use common::{
 use http_client::h1::H1Client;
 use libsignal_core::ServiceId;
 use libsignal_protocol::PreKeyBundle;
-use serde_json::from_slice;
+use prost::Message;
+use serde_json::{from_slice, to_vec};
 use std::{env, fmt::Debug, fs, sync::Arc, time::Duration};
 use surf::{http::convert::json, Client, Config, Url};
 
 const REGISTER_URI: &str = "v1/registration";
+const MSG_URI: &str = "/v1/messages";
 
 #[allow(unused)]
 pub struct VerifiedSession {
@@ -206,11 +210,36 @@ impl Backend for SignalBackend {
         messages: SignalMessages,
         recipient: &ServiceId,
     ) -> Result<(), SignalClientError> {
-        todo!()
+        let payload = to_vec(&messages).unwrap();
+        let uri = format!("{}/{}", MSG_URI, recipient.service_id_string());
+        println!("Sending message to: {}", uri);
+
+        let id = self.socket_manager.next_id();
+        let response = self
+            .socket_manager
+            .send(id, create_request(id, "PUT", &uri, vec![], Some(payload)))
+            .await
+            .map_err(|err| SendMessageError::WebSocketError);
+
+        // TODO handle send went wrong.
+        Ok(())
     }
 
     async fn get_message(&mut self) -> Option<Envelope> {
-        todo!()
+        let x = self.message_queue.recv().await?;
+
+        let req = match x.request {
+            Some(x) => x,
+            None => return None,
+        };
+
+        match Envelope::decode(req.body()) {
+            Ok(e) => Some(e),
+            Err(e) => {
+                println!("Failed to decode envelope: {}", e);
+                None
+            }
+        }
     }
 }
 
