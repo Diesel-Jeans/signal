@@ -371,7 +371,7 @@ async fn put_keys_endpoint(
         .handle_put_keys(
             &authenticated_device,
             set_keys_request,
-            get_kind(params.get("identity_type").unwrap().to_owned())?,
+            get_kind(params.get("identity").unwrap().to_owned())?,
         )
         .await
 }
