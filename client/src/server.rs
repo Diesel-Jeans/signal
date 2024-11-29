@@ -246,6 +246,7 @@ impl Backend for SignalBackend {
             .header("Authorization", auth_header.encode())
             .await
             .map_err(|_| RegistrationError::NoResponse)?;
+        println!("Sent POST request to /{}", REGISTER_URI);
         if res.status().is_success() {
             Ok(from_slice(
                 res.body_bytes()

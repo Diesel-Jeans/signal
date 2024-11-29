@@ -289,9 +289,9 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<T
                 }
                 web_socket_message::Type::Request => {
                     let _id = msg
-                        .response
+                        .request
                         .as_ref()
-                        .expect("No Response in response")
+                        .expect("No Request in response")
                         .id
                         .expect("No ID");
                     if _id == id {

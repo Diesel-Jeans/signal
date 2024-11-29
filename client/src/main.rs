@@ -23,19 +23,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .expect("Failed to install rustls crypto provider");
 
     let mut alice =
-        Client::<InMemory, SignalBackend>::register("A_d_name", "1234567891aababaaaaa".into())
-            .await?;
+        Client::<InMemory, SignalBackend>::register("alice_device", "123456789".into()).await?;
     let mut bob =
-        Client::<InMemory, SignalBackend>::register("B_d_name", "9876543211aabnaaaaaa".into())
-            .await?;
+        Client::<InMemory, SignalBackend>::register("bob_device", "987654321".into()).await?;
 
-    alice
-        .send_message("Hello, World!", &bob.aci.into())
-        .await
-        .unwrap();
+    alice.send_message("Hello Bob!", &bob.aci.into()).await?;
 
-    let message = bob.receive_message().await;
-    match message {
+    let message_from_alice = bob.receive_message().await;
+
+    match message_from_alice {
+        Ok(message) => println!("{message}"),
+        Err(err) => println!("{:?}", err),
+    }
+
+    bob.send_message("Hello Alice!", &alice.aci.into()).await?;
+
+    let message_from_bob = alice.receive_message().await;
+
+    match message_from_bob {
         Ok(message) => println!("{message}"),
         Err(err) => println!("{:?}", err),
     }
