@@ -2,43 +2,69 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::Display;
 
+use common::protocol_address::ParseProtocolAddressError;
+use derive_more::derive::{Display, Error, From};
+use libsignal_core::DeviceId;
+use libsignal_protocol::SignalProtocolError;
+
+use crate::key_manager::KeyManagerError;
+
+pub type Result<T> = std::result::Result<T, SignalClientError>;
+
+#[derive(Debug, Display, From)]
 pub enum SignalClientError {
+    #[from]
+    ContactManagerError(ContactManagerError),
     KeyError(String),
+    #[from]
+    KeyManagerError(KeyManagerError),
+    #[from]
     RegistrationError(RegistrationError),
-    LoginError(LoginError),
+    #[from]
     SendMessageError(SendMessageError),
     WebSocketError(String),
     DatabaseError(String),
     DotenvError(String),
+    #[from]
+    ReceiveMessageError(ReceiveMessageError),
+    #[from]
+    ProcessPreKeyBundle(ProcessPreKeyBundleError),
+    #[display("Tried to get a session that does not exist")]
+    NoSession,
+    #[from]
+    Protocol(SignalProtocolError),
 }
 
-impl fmt::Debug for SignalClientError {
+impl Error for SignalClientError {}
+
+#[derive(Debug, Display, From, Error)]
+pub struct ProcessPreKeyBundleError(pub SignalProtocolError);
+
+pub enum ContactManagerError {
+    DeviceNotFound(DeviceId),
+}
+
+impl fmt::Debug for ContactManagerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self::Display::fmt(&self, f)
     }
 }
 
-impl fmt::Display for SignalClientError {
+impl fmt::Display for ContactManagerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
-            Self::RegistrationError(err) => format!("{err}"),
-            Self::LoginError(err) => format!("{err}"),
-            Self::SendMessageError(err) => format!("{err}"),
-            Self::WebSocketError(err) => err.to_string(),
-            Self::DatabaseError(err) => format!("{err}"),
-            Self::DotenvError(err) => format!("{err}"),
-            Self::KeyError(err) => err.to_string(),
+            Self::DeviceNotFound(id) => format!("The user did does not have a device with id {id}"),
         };
-        write!(f, "Could not register account - {}", message)
+        write!(f, "Error in ContactManager - {}", message)
     }
 }
 
-impl Error for SignalClientError {}
+impl Error for ContactManagerError {}
 
 pub enum RegistrationError {
     PhoneNumberTaken,
     NoResponse,
-    BadResponse,
+    BadResponse(String),
 }
 
 impl fmt::Debug for RegistrationError {
@@ -50,10 +76,12 @@ impl fmt::Debug for RegistrationError {
 impl fmt::Display for RegistrationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
-            Self::PhoneNumberTaken => "Phone number was already taken.",
-            Self::NoResponse => "The server did not respond to the registration request.",
-            Self::BadResponse => {
-                "The server responded to the request, but the response could not be parsed."
+            Self::PhoneNumberTaken => "Phone number was already taken.".to_owned(),
+            Self::NoResponse => {
+                "The server did not respond to the registration request.".to_owned()
+            }
+            Self::BadResponse(s) => {
+                format!("Bad response from server: {s}")
             }
         };
         write!(f, "Could not register account - {}", message)
@@ -62,48 +90,10 @@ impl fmt::Display for RegistrationError {
 
 impl Error for RegistrationError {}
 
-impl From<RegistrationError> for SignalClientError {
-    fn from(value: RegistrationError) -> Self {
-        SignalClientError::RegistrationError(value)
-    }
+pub enum SendMessageError {
+    EncryptionError(SignalProtocolError),
+    WebSocketError(String),
 }
-
-pub enum LoginError {
-    NoAccountInformation,
-    MissingAccountInformation,
-    LoadInfoError,
-}
-
-impl fmt::Debug for LoginError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self::Display::fmt(&self, f)
-    }
-}
-
-impl fmt::Display for LoginError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            Self::NoAccountInformation => {
-                "No account information is saved locally. Did you ever register this device?"
-            }
-            Self::MissingAccountInformation => {
-                "Insufficient account information to login. Fields were missing in the credentials file."
-            }
-            Self::LoadInfoError => "Could not load stored credentials. Maybe your credentials were corrupted.",
-        };
-        write!(f, "Could not log in - {}", message)
-    }
-}
-
-impl Error for LoginError {}
-
-impl From<LoginError> for SignalClientError {
-    fn from(value: LoginError) -> Self {
-        SignalClientError::LoginError(value)
-    }
-}
-
-pub enum SendMessageError {}
 
 impl fmt::Debug for SendMessageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -113,15 +103,33 @@ impl fmt::Debug for SendMessageError {
 
 impl fmt::Display for SendMessageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = "hej";
+        let message = match self {
+            Self::EncryptionError(err) => format!("{err}"),
+            Self::WebSocketError(err) => err.to_owned(),
+        };
         write!(f, "Could not send message - {}", message)
     }
 }
 
 impl Error for SendMessageError {}
 
-impl From<SendMessageError> for SignalClientError {
-    fn from(value: SendMessageError) -> Self {
-        SignalClientError::SendMessageError(value)
+#[derive(Debug, Display, Error)]
+pub enum ReceiveMessageError {
+    Base64DecodeError(base64::DecodeError),
+    NoMessageTypeInEnvelope,
+    InvalidMessageTypeInEnvelope,
+    CiphertextDecodeError(SignalProtocolError),
+    ParseProtocolAddressError(ParseProtocolAddressError),
+    DecryptMessageError(SignalProtocolError),
+    ProtobufDecodeContentError(prost::DecodeError),
+    InvalidMessageContent,
+    NoMessageReceived,
+}
+
+impl From<ParseProtocolAddressError> for SignalClientError {
+    fn from(value: ParseProtocolAddressError) -> Self {
+        SignalClientError::ReceiveMessageError(ReceiveMessageError::ParseProtocolAddressError(
+            value,
+        ))
     }
 }

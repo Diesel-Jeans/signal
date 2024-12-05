@@ -1,24 +1,55 @@
-use std::collections::HashMap;
-
 use crate::storage::generic::{ProtocolStore, StorageType};
 use common::utils::time_now;
 use common::web_api::{SetKeyRequest, UploadPreKey, UploadSignedPreKey};
+use derive_more::derive::{Display, Error, From};
 use libsignal_protocol::{
     kem, GenericSignedPreKey, IdentityKeyStore, KeyPair, KyberPreKeyRecord, KyberPreKeyStore,
     PreKeyRecord, PreKeyStore, SignalProtocolError, SignedPreKeyRecord, SignedPreKeyStore,
 };
 use rand::rngs::OsRng;
 use rand::{CryptoRng, Rng};
+use std::collections::HashMap;
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Display)]
 pub enum PreKeyType {
+    #[display("signed pre key")]
     Signed,
+    #[display("kyber pre key")]
     Kyber,
+    #[display("pre key")]
     OneTime,
+}
+
+#[derive(Debug, Display, From)]
+pub enum KeyType {
+    #[from]
+    PreKey(PreKeyType),
+    #[display("identity key")]
+    IdentityKey,
 }
 
 pub struct KeyManager {
     key_incrementer_map: HashMap<PreKeyType, u32>,
+}
+
+#[derive(Debug, Display, Error)]
+#[display("Could not {} {}: {}", err_type, key_type, error)]
+pub struct KeyManagerError {
+    pub err_type: KeyManagerErrorType,
+    pub key_type: KeyType,
+    pub error: SignalProtocolError,
+}
+
+#[derive(Debug, Display, Error)]
+pub enum KeyManagerErrorType {
+    #[display("generate")]
+    Generate,
+    #[display("store")]
+    Store,
+    #[display("sign")]
+    Signature,
+    #[display("get")]
+    Get,
 }
 
 impl KeyManager {
@@ -36,18 +67,27 @@ impl KeyManager {
         *self.key_incrementer_map.get_mut(&key_type).unwrap() += 1u32;
         id
     }
+
     pub async fn generate_pre_key<R: Rng + CryptoRng, PK: PreKeyStore>(
         &mut self,
         pre_key_store: &mut PK,
         csprng: &mut R,
-    ) -> Result<PreKeyRecord, SignalProtocolError> {
+    ) -> Result<PreKeyRecord, KeyManagerError> {
         let id = self.get_new_key_id(PreKeyType::OneTime).into();
 
         let key_pair = KeyPair::generate(csprng);
         let record = PreKeyRecord::new(id, &key_pair);
-        pre_key_store.save_pre_key(id, &record).await?;
+        pre_key_store
+            .save_pre_key(id, &record)
+            .await
+            .map_err(|error| KeyManagerError {
+                key_type: PreKeyType::OneTime.into(),
+                err_type: KeyManagerErrorType::Store,
+                error,
+            })?;
         Ok(record)
     }
+
     pub async fn generate_signed_pre_key<
         R: Rng + CryptoRng,
         IK: IdentityKeyStore,
@@ -57,19 +97,35 @@ impl KeyManager {
         identity_key_store: &mut IK,
         signed_pre_key_store: &mut SPK,
         csprng: &mut R,
-    ) -> Result<SignedPreKeyRecord, SignalProtocolError> {
+    ) -> Result<SignedPreKeyRecord, KeyManagerError> {
         let id = self.get_new_key_id(PreKeyType::Signed).into();
         let signed_pre_key_pair = KeyPair::generate(csprng);
         let signature = identity_key_store
             .get_identity_key_pair()
-            .await?
+            .await
+            .map_err(|error| KeyManagerError {
+                key_type: PreKeyType::Signed.into(),
+                err_type: KeyManagerErrorType::Get,
+                error,
+            })?
             .private_key()
-            .calculate_signature(&signed_pre_key_pair.public_key.serialize(), csprng)?;
+            .calculate_signature(&signed_pre_key_pair.public_key.serialize(), csprng)
+            .map_err(|error| KeyManagerError {
+                key_type: PreKeyType::Signed.into(),
+                err_type: KeyManagerErrorType::Signature,
+                error,
+            })?;
 
         let record = SignedPreKeyRecord::new(id, time_now(), &signed_pre_key_pair, &signature);
+
         signed_pre_key_store
             .save_signed_pre_key(id, &record)
-            .await?;
+            .await
+            .map_err(|error| KeyManagerError {
+                key_type: PreKeyType::Signed.into(),
+                err_type: KeyManagerErrorType::Store,
+                error,
+            })?;
 
         Ok(record)
     }
@@ -79,25 +135,42 @@ impl KeyManager {
         &mut self,
         identity_key_store: &mut IK,
         kyber_pre_key_store: &mut KPK,
-    ) -> Result<KyberPreKeyRecord, SignalProtocolError> {
+    ) -> Result<KyberPreKeyRecord, KeyManagerError> {
         let id = self.get_new_key_id(PreKeyType::Kyber).into();
         let record = KyberPreKeyRecord::generate(
             kem::KeyType::Kyber1024,
             id,
             identity_key_store
                 .get_identity_key_pair()
-                .await?
+                .await
+                .map_err(|error| KeyManagerError {
+                    key_type: KeyType::IdentityKey,
+                    err_type: KeyManagerErrorType::Get,
+                    error,
+                })?
                 .private_key(),
-        )?;
+        )
+        .map_err(|error| KeyManagerError {
+            key_type: PreKeyType::Kyber.into(),
+            err_type: KeyManagerErrorType::Generate,
+            error,
+        })?;
 
-        kyber_pre_key_store.save_kyber_pre_key(id, &record).await?;
+        kyber_pre_key_store
+            .save_kyber_pre_key(id, &record)
+            .await
+            .map_err(|error| KeyManagerError {
+                key_type: PreKeyType::Kyber.into(),
+                err_type: KeyManagerErrorType::Store,
+                error,
+            })?;
         Ok(record)
     }
 
     pub async fn generate_key_bundle<T: StorageType>(
         &mut self,
         store: &mut ProtocolStore<T>,
-    ) -> Result<SetKeyRequest, SignalProtocolError> {
+    ) -> Result<SetKeyRequest, KeyManagerError> {
         let mut pre_keys: Vec<UploadPreKey> = Vec::new();
         let mut pq_signed_pre_keys: Vec<UploadSignedPreKey> = Vec::new();
         let mut rng = OsRng;
@@ -248,7 +321,6 @@ mod key_manager_tests {
 
     #[tokio::test]
     async fn generate_key_bundle() {
-        let rng = OsRng;
         let mut store = store(0);
         let mut manager = KeyManager::new();
         let keys = manager.generate_key_bundle(&mut store).await.unwrap();

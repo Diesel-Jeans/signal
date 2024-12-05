@@ -106,6 +106,7 @@ pub async fn signal_ws_connect(
     password: &str,
 ) -> Result<TLSWebSocket, String> {
     let tls_cfg = rustls_cfg(tls_cert)?;
+    let url = url.replace("https", "wss").replace("http", "wss");
     let mut req = url
         .into_client_request()
         .map_err(|_| "Failed to convert to client request".to_string())?;
@@ -289,9 +290,9 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<T
                 }
                 web_socket_message::Type::Request => {
                     let _id = msg
-                        .response
+                        .request
                         .as_ref()
-                        .expect("No Response in response")
+                        .expect("No Request in response")
                         .id
                         .expect("No ID");
                     if _id == id {

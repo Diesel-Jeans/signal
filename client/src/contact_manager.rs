@@ -1,6 +1,7 @@
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
-use libsignal_protocol::SignalProtocolError;
 use std::collections::{HashMap, HashSet};
+
+use crate::errors::{ContactManagerError, SignalClientError};
 
 pub struct Contact {
     pub service_id: ServiceId,
@@ -16,18 +17,13 @@ impl Contact {
             device_ids: set,
         }
     }
-    pub fn get_address(
-        &self,
-        device_id: &DeviceId,
-    ) -> Result<ProtocolAddress, SignalProtocolError> {
+    pub fn get_address(&self, device_id: &DeviceId) -> Result<ProtocolAddress, SignalClientError> {
         Ok(ProtocolAddress::new(
             self.service_id.service_id_string(),
-            *self.device_ids.get(device_id).ok_or_else(|| {
-                SignalProtocolError::InvalidArgument(format!(
-                    "Device id: {} does not exist",
-                    device_id
-                ))
-            })?,
+            *self
+                .device_ids
+                .get(device_id)
+                .ok_or(ContactManagerError::DeviceNotFound(device_id.to_owned()))?,
         ))
     }
 }
