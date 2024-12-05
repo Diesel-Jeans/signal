@@ -27,12 +27,12 @@ use prost::Message;
 use rand::{rngs::OsRng, Rng};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub struct Client<ST: StorageType, SRV: SignalServerAPI> {
+pub struct Client<ST: StorageType, SSA: SignalServerAPI> {
     pub aci: Aci,
     #[allow(unused)]
     pub pni: Pni,
     contact_manager: ContactManager,
-    server_api: SRV,
+    server_api: SSA,
     key_manager: KeyManager,
     pub storage: Storage<ST>,
 }
@@ -41,14 +41,14 @@ const PROFILE_KEY_LENGTH: usize = 32;
 const MASTER_KEY_LENGTH: usize = 32;
 const PASSWORD_LENGTH: usize = 16;
 
-impl<S: StorageType, B: SignalServerAPI> Client<S, B> {
+impl<ST: StorageType, SSA: SignalServerAPI> Client<ST, SSA> {
     fn new(
         aci: Aci,
         pni: Pni,
         contact_manager: ContactManager,
-        server_api: B,
+        server_api: SSA,
         key_manager: KeyManager,
-        storage: Storage<S>,
+        storage: Storage<ST>,
     ) -> Self {
         Client {
             aci,
