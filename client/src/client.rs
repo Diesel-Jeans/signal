@@ -65,6 +65,8 @@ impl<ST: StorageType, SSA: SignalServerAPI> Client<ST, SSA> {
     pub async fn register(
         name: &str,
         phone_number: String,
+        server_url: &str,
+        cert_path: &str,
     ) -> Result<Client<InMemory, SignalServer>> {
         let mut csprng = OsRng;
         let aci_registration_id = OsRng.gen_range(1..16383);
@@ -128,7 +130,8 @@ impl<ST: StorageType, SSA: SignalServerAPI> Client<ST, SSA> {
             capabilities,
             Box::new(access_key),
         );
-        let mut server_api = SignalServer::new();
+        let mut server_api = SignalServer::new(cert_path, server_url);
+
         let req = RegistrationRequest::new(
             "".into(),
             "".into(),

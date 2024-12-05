@@ -246,14 +246,10 @@ impl SignalServerAPI for SignalServer {
 }
 
 impl SignalServer {
-    pub fn new() -> Self {
-        let cert_bytes =
-            fs::read("../server/cert/rootCA.crt").expect("Could not read certificate.");
+    pub fn new(cert_path: &str, server_url: &str) -> Self {
+        let cert_bytes = fs::read(cert_path).expect("Could not read certificate.");
 
         let crt = Certificate::from_pem(&cert_bytes).expect("Could not parse certificate.");
-
-        let address =
-            env::var("SERVER_URL").expect("Could not read SERVER_URL environment variable.");
 
         let tls_config = Arc::new(TlsConnector::new().add_root_certificate(crt));
         let http_client: H1Client = http_client::Config::new()
@@ -263,7 +259,7 @@ impl SignalServer {
             .expect("Could not create HTTP client");
         let http_client = Config::new()
             .set_http_client(http_client)
-            .set_base_url(Url::parse(&address).expect("Could not parse URL for server"))
+            .set_base_url(Url::parse(server_url).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
 
