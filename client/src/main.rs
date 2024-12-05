@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{env::var, error::Error};
 
 use client::Client;
 use dotenv::dotenv;
@@ -21,8 +21,8 @@ mod test_utils;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv().map_err(|err| SignalClientError::DotenvError(format!("{err}")))?;
-    let server_url = env!("SERVER_URL");
-    let cert_path = env!("CERT_PATH");
+    let server_url = var("SERVER_URL")?;
+    let cert_path = var("CERT_PATH")?;
 
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -31,15 +31,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut alice = Client::<InMemory, SignalServer>::register(
         "alice_device",
         "123456789".into(),
-        server_url,
-        cert_path,
+        &server_url,
+        &cert_path,
     )
     .await?;
     let mut bob = Client::<InMemory, SignalServer>::register(
         "bob_device",
         "987654321".into(),
-        server_url,
-        cert_path,
+        &server_url,
+        &cert_path,
     )
     .await?;
 
