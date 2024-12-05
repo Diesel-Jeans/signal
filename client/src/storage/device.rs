@@ -601,7 +601,7 @@ impl ClientDB for Device {
                     .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))?
                     .as_slice(),
             )
-            .map(|res| Some(res)),
+            .map(Some),
             Err(_) => Ok(None),
         }
     }
@@ -679,7 +679,7 @@ impl ClientDB for Device {
                     .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))?
                     .as_slice(),
             )
-            .map(|res| Some(res)),
+            .map(Some),
             Err(_) => Ok(None),
         }
     }

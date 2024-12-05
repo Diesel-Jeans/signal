@@ -159,7 +159,9 @@ impl ClientDB for InMemory {
         kyber_prekey_id: KyberPreKeyId,
         record: &KyberPreKeyRecord,
     ) -> Result<(), Self::Error> {
-        self.save_kyber_pre_key(kyber_prekey_id, record).await
+        self.kyber_pre_key_store
+            .save_kyber_pre_key(kyber_prekey_id, record)
+            .await
     }
     async fn load_session(
         &self,

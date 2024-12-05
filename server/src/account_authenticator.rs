@@ -41,11 +41,11 @@ where
                 .map_err(|err| match err.reason() {
                     TypedHeaderRejectionReason::Missing => ApiError {
                         status_code: StatusCode::UNAUTHORIZED,
-                        message: "Authorization header is missing".to_owned(),
+                        body: "Authorization header is missing".to_owned(),
                     },
                     _ => ApiError {
                         status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                        message: "Error parsing Authorization header".to_owned(),
+                        body: "Error parsing Authorization header".to_owned(),
                     },
                 })?;
 
@@ -55,20 +55,20 @@ where
             )
             .ok_or(ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                message: "Error parsing service id".to_owned(),
+                body: "Error parsing service id".to_owned(),
             })?;
             let device_id = basic.username()[(v + 1)..]
                 .parse::<u32>()
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Error parsing device id".to_owned(),
+                    body: "Error parsing device id".to_owned(),
                 })?;
             authenticate_device(state, &service_id, device_id, basic.password()).await
         } else {
             let service_id: ServiceId = ServiceId::parse_from_service_id_string(basic.username())
                 .ok_or(ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                message: "Error parsing service id".to_owned(),
+                body: "Error parsing service id".to_owned(),
             })?;
             authenticate_device(state, &service_id, 1, basic.password()).await
         }
@@ -87,7 +87,7 @@ async fn authenticate_device<T: SignalDatabase, U: WSStream<Message, axum::Error
         .await
         .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "Error getting account".to_owned(),
+            body: "Error getting account".to_owned(),
         })?;
 
     let device: Device = account
@@ -96,7 +96,7 @@ async fn authenticate_device<T: SignalDatabase, U: WSStream<Message, axum::Error
         .find(|&d| d.device_id() == device_id.into())
         .ok_or(ApiError {
             status_code: StatusCode::NOT_FOUND,
-            message: "Device not found".to_owned(),
+            body: "Device not found".to_owned(),
         })?
         .to_owned();
 
@@ -110,7 +110,7 @@ async fn authenticate_device<T: SignalDatabase, U: WSStream<Message, axum::Error
     } else {
         Err(ApiError {
             status_code: StatusCode::UNAUTHORIZED,
-            message: "Wrong password".to_owned(),
+            body: "Wrong password".to_owned(),
         })
     }
 }
@@ -169,7 +169,7 @@ fn HKDF_DeriveSecrets(
         .expand(label, &mut buffer)
         .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: format!("output too long ({})", output_length),
+            body: format!("output too long ({})", output_length),
         })?;
     Ok(buffer)
 }

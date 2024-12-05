@@ -12,7 +12,7 @@ use crate::contact_manager::Contact;
 
 #[async_trait(?Send)]
 pub trait ClientDB {
-    type Error: std::error::Error;
+    type Error: std::error::Error + 'static;
 
     async fn insert_account_information(
         &self,
@@ -272,7 +272,7 @@ impl<T: ClientDB> KyberPreKeyStore for DeviceKyberPreKeyStore<T> {
         &mut self,
         _kyber_prekey_id: KyberPreKeyId,
     ) -> Result<(), SignalProtocolError> {
-        panic!("THIS IS NOT USED")
+        Ok(())
     }
 }
 

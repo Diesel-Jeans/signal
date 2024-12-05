@@ -26,17 +26,7 @@ impl<T: SignalDatabase> KeyManager<T> {
             ServiceIdKind::Pni => auth_device.account().pni_identity_key(),
         };
 
-        if let Some(prekeys) = bundle.pre_key {
-            self.db
-                .store_one_time_ec_pre_keys(prekeys, &address)
-                .await
-                .map_err(|_| ApiError {
-                    status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
-                })?;
-        }
-
-        let verify_key = |prekey: &UploadSignedPreKey, msg: &str| -> Result<(), ApiError> {
+        let verify_key = |prekey: &UploadSignedPreKey| -> Result<(), ApiError> {
             if !identity_key
                 .public_key()
                 .verify_signature(&prekey.public_key, &prekey.signature)
@@ -44,45 +34,69 @@ impl<T: SignalDatabase> KeyManager<T> {
             {
                 return Err(ApiError {
                     status_code: StatusCode::BAD_REQUEST,
-                    message: msg.into(),
+                    body: "Invalid signature".to_owned(),
                 });
             }
             Ok(())
         };
 
+        bundle
+            .signed_pre_key
+            .as_ref()
+            .map(|key| verify_key(key))
+            .transpose()?;
+        bundle
+            .pq_last_resort_pre_key
+            .as_ref()
+            .map(|key| verify_key(key))
+            .transpose()?;
+        bundle
+            .pq_pre_key
+            .as_ref()
+            .map(|keys| {
+                keys.iter()
+                    .map(|key| verify_key(key))
+                    .collect::<Result<(), ApiError>>()
+            })
+            .transpose()?;
+
+        if let Some(prekeys) = bundle.pre_key {
+            self.db
+                .store_one_time_ec_pre_keys(prekeys, &address)
+                .await
+                .map_err(|_| ApiError {
+                    status_code: StatusCode::INTERNAL_SERVER_ERROR,
+                    body: "Database fault".into(),
+                })?;
+        }
+
         if let Some(ref prekey) = bundle.signed_pre_key {
-            verify_key(prekey, "Could not verify signature for signed prekey")?;
             self.db
                 .store_signed_pre_key(prekey, &address)
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
+                    body: "Database fault".to_owned(),
                 })?;
         }
 
         if let Some(prekeys) = bundle.pq_pre_key {
-            prekeys.iter().try_for_each(|prekey| {
-                verify_key(prekey, "Could not verify signature for kem prekey")
-            })?;
-
             self.db
                 .store_one_time_pq_pre_keys(prekeys, &address)
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
+                    body: "Database fault".to_owned(),
                 })?;
         }
 
         if let Some(ref prekey) = bundle.pq_last_resort_pre_key {
-            verify_key(prekey, "Could not verify signature for kem prekey")?;
             self.db
                 .store_pq_signed_pre_key(prekey, &address)
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
+                    body: "Database fault".to_owned(),
                 })?;
         }
 
@@ -107,7 +121,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .await
                 .map_err(|err| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: format!("Could not fetch user key bundle: {}", err),
+                    body: format!("Could not fetch user key bundle: {}", err),
                 })?;
             let (pq_pre_key, signed_pre_key) = match service_id {
                 ServiceId::Aci(_) => (bundle.aci_pq_pre_key, bundle.aci_signed_pre_key),
@@ -119,7 +133,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Could not fetch user pre key".into(),
+                    body: "Could not fetch user pre key".to_owned(),
                 })?;
 
             Ok(PreKeyResponseItem::new(
@@ -136,7 +150,7 @@ impl<T: SignalDatabase> KeyManager<T> {
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::UNAUTHORIZED,
-                message: "".into(),
+                body: "".to_owned(),
             })?;
 
         let target_account = database
@@ -144,7 +158,7 @@ impl<T: SignalDatabase> KeyManager<T> {
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::BAD_REQUEST,
-                message: format!(
+                body: format!(
                     "Could not find account for service id: {}",
                     target_service_id.service_id_string()
                 ),
@@ -160,7 +174,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                     .await
                     .map_err(|_| ApiError {
                         status_code: StatusCode::BAD_REQUEST,
-                        message: format!("Device id does not exist: {}", device_id),
+                        body: format!("Device id does not exist: {}", device_id),
                     })?]
             }
             _ if target_device_id == "*" => database
@@ -168,12 +182,12 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Could not get all targets devices".into(),
+                    body: "Could not get all targets devices".into(),
                 })?,
             _ => {
                 return Err(ApiError {
                     status_code: StatusCode::BAD_REQUEST,
-                    message: "Target device id is not a u32 or '*'".into(),
+                    body: "Target device id is not a u32 or '*'".into(),
                 })
             }
         };
@@ -223,7 +237,7 @@ impl<T: SignalDatabase> KeyManager<T> {
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                message: "Could not fetch user key bundle".into(),
+                body: "Could not fetch user key bundle".to_owned(),
             })?;
 
         let mut digest = Sha256::new();
@@ -237,7 +251,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                         .public_key_bytes()
                         .map_err(|_| ApiError {
                             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                            message: "Could not convert key to bytes".into(),
+                            body: "Could not convert key to bytes".to_owned(),
                         })?,
                 );
                 digest.update(bundle.aci_signed_pre_key.key_id.to_be_bytes());
@@ -254,7 +268,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                         .public_key_bytes()
                         .map_err(|_| ApiError {
                             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                            message: "Could not convert key to bytes".into(),
+                            body: "Could not convert key to bytes".to_owned(),
                         })?,
                 );
                 digest.update(bundle.pni_signed_pre_key.key_id.to_be_bytes());
@@ -295,8 +309,8 @@ mod key_manager_tests {
 
     pub fn new_account_from_identity_key(identity_key: IdentityKey) -> Account {
         Account::new(
-            new_pni(),
             new_device(),
+            new_pni(),
             identity_key,
             identity_key,
             new_uuid().into(),
@@ -362,7 +376,10 @@ mod key_manager_tests {
             device_bundle[0].registration_id(),
             target_device.registration_id()
         );
-        assert_eq!(device_bundle[0].pre_key().clone(), one_time[0]);
+        assert_eq!(
+            device_bundle[0].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
         assert_eq!(
             device_bundle[0].signed_pre_key().clone(),
             key_bundle.pni_signed_pre_key
@@ -440,7 +457,10 @@ mod key_manager_tests {
             device_bundle[0].registration_id(),
             target_device.registration_id()
         );
-        assert_eq!(device_bundle[0].pre_key().clone(), one_time[0]);
+        assert_eq!(
+            device_bundle[0].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
         assert_eq!(
             device_bundle[0].signed_pre_key().clone(),
             key_bundle.pni_signed_pre_key
@@ -454,7 +474,10 @@ mod key_manager_tests {
             device_bundle[1].registration_id(),
             device2.registration_id()
         );
-        assert_eq!(device_bundle[1].pre_key().clone(), one_time[0]);
+        assert_eq!(
+            device_bundle[1].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
         assert_eq!(
             device_bundle[1].signed_pre_key().clone(),
             key_bundle.pni_signed_pre_key
@@ -475,7 +498,7 @@ mod key_manager_tests {
         let account = new_account_from_identity_key(IdentityKey::from(identity_key.public_key));
         let device = account.devices()[0].clone();
         let auth_device = AuthenticatedDevice::new(account, device);
-        let target_address = auth_device.get_protocol_address(ServiceIdKind::Pni);
+        let target_address = auth_device.get_protocol_address(ServiceIdKind::Aci);
 
         let prekey = new_upload_pre_keys(1);
         let signed_pre_key = new_upload_signed_pre_key(Some(identity_key.private_key));
@@ -491,7 +514,7 @@ mod key_manager_tests {
 
         database.add_account(auth_device.account()).await.unwrap();
 
-        km.handle_put_keys(&auth_device, request.clone(), ServiceIdKind::Pni)
+        km.handle_put_keys(&auth_device, request.clone(), ServiceIdKind::Aci)
             .await
             .unwrap();
 
@@ -499,7 +522,7 @@ mod key_manager_tests {
             .get_one_time_ec_pre_key(&target_address)
             .await
             .unwrap();
-        let signed_pre_key_db = get_ec_pni_signed_pre_key(
+        let signed_pre_key_db = get_aci_signed_pre_key(
             &database,
             request.signed_pre_key.unwrap().key_id,
             &target_address,
@@ -510,7 +533,7 @@ mod key_manager_tests {
             .get_one_time_pq_pre_key(&target_address)
             .await
             .unwrap();
-        let pq_last_resort_pre_key_db = get_pq_last_resort_pre_key(
+        let pq_last_resort_pre_key_db = get_aci_pq_last_resort_pre_key(
             &database,
             request.pq_last_resort_pre_key.unwrap().key_id,
             &target_address,
@@ -523,7 +546,7 @@ mod key_manager_tests {
             .await
             .unwrap();
 
-        assert_eq!(prekey[0], prekey_db);
+        assert_eq!(Some(prekey[0].clone()), prekey_db);
         assert_eq!(signed_pre_key, signed_pre_key_db);
         assert_eq!(pq_pre_key, pq_pre_key_db);
         assert_eq!(pq_last_resort_pre_key, pq_last_resort_pre_key_db);

@@ -4,14 +4,12 @@ use std::net::SocketAddr;
 use axum::{
     http::{header, StatusCode},
     response::IntoResponse,
-    Json,
 };
-use serde_json::json;
 
 #[derive(Debug, Clone)]
 pub struct ApiError {
     pub status_code: StatusCode,
-    pub message: String,
+    pub body: String,
 }
 
 impl IntoResponse for ApiError {
@@ -20,7 +18,7 @@ impl IntoResponse for ApiError {
         (
             status_code,
             [(header::CONTENT_TYPE, "application/json")],
-            Json(json!({"StatusCode": status_code.as_u16(), "Message": self.message})),
+            self.body,
         )
             .into_response()
     }
@@ -28,7 +26,7 @@ impl IntoResponse for ApiError {
 
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "API Error {}: {}", self.status_code, self.message)
+        write!(f, "API Error {}: {}", self.status_code, self.body)
     }
 }
 
