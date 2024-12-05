@@ -40,7 +40,7 @@ impl VerifiedSession {
     }
 }
 
-pub trait Backend {
+pub trait SignalServerAPI {
     /// Connect with Websockets to the backend.
     async fn connect(
         &mut self,
@@ -83,70 +83,7 @@ pub trait Backend {
     fn create_auth_header(&mut self, aci: Aci, password: String, device_id: DeviceId) -> ();
 }
 
-#[derive(Debug)]
-pub struct ServerAPI<T: Backend> {
-    backend: T,
-}
-
-impl<T: Backend> ServerAPI<T> {
-    pub fn new(backend: T) -> Self {
-        Self { backend }
-    }
-    pub async fn connect(
-        &mut self,
-        username: &str,
-        password: &str,
-        url: &str,
-        tls_path: &str,
-    ) -> Result<(), SignalClientError> {
-        self.backend
-            .connect(username, password, url, tls_path)
-            .await
-    }
-
-    pub async fn publish_pre_key_bundle(
-        &mut self,
-        pre_key_bundle: SetKeyRequest,
-    ) -> Result<(), SignalClientError> {
-        self.backend.publish_pre_key_bundle(pre_key_bundle).await
-    }
-
-    pub async fn fetch_pre_key_bundles(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<PreKeyBundle>, SignalClientError> {
-        self.backend.fetch_pre_key_bundles(service_id).await
-    }
-
-    pub async fn register_client(
-        &self,
-        phone_number: String,
-        password: String,
-        registration_request: RegistrationRequest,
-        session: Option<&VerifiedSession>,
-    ) -> Result<RegistrationResponse, SignalClientError> {
-        self.backend
-            .register_client(phone_number, password, registration_request, session)
-            .await
-    }
-
-    pub async fn send_msg(
-        &mut self,
-        messages: SignalMessages,
-        service_id: &ServiceId,
-    ) -> Result<(), SignalClientError> {
-        self.backend.send_msg(messages, service_id).await
-    }
-
-    pub async fn get_message(&mut self) -> Option<Envelope> {
-        self.backend.get_message().await
-    }
-    pub fn create_auth_header(&mut self, aci: Aci, password: String, device_id: DeviceId) -> () {
-        self.backend.create_auth_header(aci, password, device_id);
-    }
-}
-
-pub struct SignalBackend {
+pub struct SignalServer {
     auth_header: Option<BasicAuthorizationHeader>,
     http_client: Client,
     socket_manager: SocketManager<SignalStream>,
@@ -175,7 +112,7 @@ impl Display for ReqType {
     }
 }
 
-impl Backend for SignalBackend {
+impl SignalServerAPI for SignalServer {
     async fn connect(
         &mut self,
         username: &str,
@@ -235,7 +172,7 @@ impl Backend for SignalBackend {
         phone_number: String,
         password: String,
         registration_request: RegistrationRequest,
-        session: Option<&VerifiedSession>,
+        _session: Option<&VerifiedSession>,
     ) -> Result<RegistrationResponse, SignalClientError> {
         let payload = json!(registration_request);
         let auth_header = BasicAuthorizationHeader::new(phone_number, 1, password);
@@ -308,7 +245,7 @@ impl Backend for SignalBackend {
     }
 }
 
-impl SignalBackend {
+impl SignalServer {
     pub fn new() -> Self {
         let cert_bytes =
             fs::read("../server/cert/rootCA.crt").expect("Could not read certificate.");
@@ -393,7 +330,7 @@ impl Display for ServerRequestError {
 
 impl Error for ServerRequestError {}
 
-impl SignalBackend {
+impl SignalServer {
     async fn make_request(
         &self,
         req_type: ReqType,

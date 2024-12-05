@@ -4,7 +4,7 @@ use crate::{
     encryption::{encrypt, pad_message, unpad_message},
     errors::{ProcessPreKeyBundleError, ReceiveMessageError},
     key_manager::KeyManager,
-    server::{Backend, ServerAPI, SignalBackend},
+    server::{SignalServer, SignalServerAPI},
     storage::{
         generic::{ProtocolStore, Storage, StorageType},
         in_memory::InMemory,
@@ -27,26 +27,26 @@ use prost::Message;
 use rand::{rngs::OsRng, Rng};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub struct Client<S: StorageType, B: Backend> {
+pub struct Client<ST: StorageType, SRV: SignalServerAPI> {
     pub aci: Aci,
     #[allow(unused)]
     pub pni: Pni,
     contact_manager: ContactManager,
-    server_api: ServerAPI<B>,
+    server_api: SRV,
     key_manager: KeyManager,
-    pub storage: Storage<S>,
+    pub storage: Storage<ST>,
 }
 
 const PROFILE_KEY_LENGTH: usize = 32;
 const MASTER_KEY_LENGTH: usize = 32;
 const PASSWORD_LENGTH: usize = 16;
 
-impl<S: StorageType, B: Backend> Client<S, B> {
+impl<S: StorageType, B: SignalServerAPI> Client<S, B> {
     fn new(
         aci: Aci,
         pni: Pni,
         contact_manager: ContactManager,
-        server_api: ServerAPI<B>,
+        server_api: B,
         key_manager: KeyManager,
         storage: Storage<S>,
     ) -> Self {
@@ -65,7 +65,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
     pub async fn register(
         name: &str,
         phone_number: String,
-    ) -> Result<Client<InMemory, SignalBackend>> {
+    ) -> Result<Client<InMemory, SignalServer>> {
         let mut csprng = OsRng;
         let aci_registration_id = OsRng.gen_range(1..16383);
         let pni_registration_id = OsRng.gen_range(1..16383);
@@ -128,7 +128,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
             capabilities,
             Box::new(access_key),
         );
-        let mut server_api = ServerAPI::new(SignalBackend::new());
+        let mut server_api = SignalServer::new();
         let req = RegistrationRequest::new(
             "".into(),
             "".into(),

@@ -25,7 +25,7 @@ use tokio_tungstenite::{
 };
 use tungstenite::protocol::frame::coding::CloseCode;
 
-pub fn rustls_cfg(ca_file_path: &str) -> Result<ClientConfig, String> {
+fn rustls_cfg(ca_file_path: &str) -> Result<ClientConfig, String> {
     let ca_file = File::open(ca_file_path).map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(ca_file);
 
