@@ -1,6 +1,7 @@
 use std::error::Error;
 
 use client::Client;
+use dotenv::dotenv;
 use server::SignalBackend;
 use storage::in_memory::InMemory;
 
@@ -18,14 +19,15 @@ mod test_utils;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    dotenv();
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
     let mut alice =
-        Client::<InMemory, SignalBackend>::register("alice_device", "123456789".into()).await?;
+        Client::<InMemory, SignalBackend>::register("alice_device", "1234567891".into()).await?;
     let mut bob =
-        Client::<InMemory, SignalBackend>::register("bob_device", "987654321".into()).await?;
+        Client::<InMemory, SignalBackend>::register("bob_device", "9876543211".into()).await?;
 
     alice.send_message("Hello Bob!", &bob.aci.into()).await?;
 

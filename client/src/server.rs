@@ -251,12 +251,10 @@ impl Backend for SignalBackend {
             Ok(from_slice(
                 res.body_bytes()
                     .await
-                    .map_err(|err| RegistrationError::BadResponse(format!("{err}")))
-                    .expect("There")
+                    .map_err(|err| RegistrationError::BadResponse(format!("{err}")))?
                     .as_ref(),
             )
-            .map_err(|err| RegistrationError::BadResponse(format!("{err}")))
-            .expect("Here"))
+            .map_err(|err| RegistrationError::BadResponse(format!("{err}")))?)
         } else {
             Err(SignalClientError::RegistrationError(
                 RegistrationError::BadResponse(format!(
@@ -289,13 +287,9 @@ impl Backend for SignalBackend {
     }
 
     async fn get_message(&mut self) -> Option<Envelope> {
-        let x = self.message_queue.recv().await?;
-
-        let req = match x.request {
-            Some(x) => x,
-            None => return None,
+        let Some(req) = self.message_queue.recv().await?.request else {
+            return None;
         };
-
         match Envelope::decode(req.body()) {
             Ok(e) => Some(e),
             Err(e) => {
@@ -398,151 +392,6 @@ impl Display for ServerRequestError {
 }
 
 impl Error for ServerRequestError {}
-/*
-#[cfg(test)]
-pub mod server_api_test {
-    use super::Backend;
-    use crate::errors::SignalClientError;
-    use common::{
-        signalservice::Envelope,
-        web_api::{SetKeyRequest, SignalMessages},
-    };
-    use core::panic;
-    use libsignal_core::{ProtocolAddress, ServiceId};
-    use libsignal_protocol::PreKeyBundle;
-    use std::{collections::HashMap, sync::Arc};
-    use tokio::sync::Mutex;
-
-    #[derive(Default)]
-    pub struct MockBackendState {
-        pre_key_bundles: HashMap<String, Vec<PreKeyBundle>>,
-        message_queues: HashMap<ProtocolAddress, Vec<Envelope>>,
-    }
-
-    pub struct MockBackend {
-        address: ProtocolAddress,
-        state: Arc<Mutex<MockBackendState>>,
-    }
-
-    impl Backend for MockBackend {
-        async fn connect(
-            &mut self,
-            username: &str,
-            password: &str,
-            url: &str,
-            tls_path: &str,
-        ) -> Result<(), SignalClientError> {
-            Ok(())
-        }
-
-        async fn publish_pre_key_bundle(
-            &mut self,
-            pre_key_bundle: SetKeyRequest,
-        ) -> Result<(), SignalClientError> {
-            if !self
-                .state
-                .lock()
-                .await
-                .pre_key_bundles
-                .entry(self.address.name().to_owned())
-                .or_insert(vec![])
-                .iter()
-                .find(|x| x.device_id().unwrap() == pre_key_bundle.device_id().unwrap())
-                .is_none()
-            {
-                panic!("Cannot publish bundle twice for client. Not supported.")
-            }
-            self.state
-                .lock()
-                .await
-                .pre_key_bundles
-                .get_mut(&self.address.name().to_owned())
-                .unwrap()
-                .push(pre_key_bundle);
-            Ok(())
-        }
-
-        async fn fetch_pre_key_bundles(
-            &self,
-            service_id: &ServiceId,
-        ) -> Result<Vec<PreKeyBundle>, SignalClientError> {
-            Ok(self
-                .state
-                .lock()
-                .await
-                .pre_key_bundles
-                .get(&service_id.service_id_string())
-                .unwrap()
-                .clone())
-        }
-
-        async fn register_client(
-            &self,
-            phone_number: String,
-            password: String,
-            registration_request: common::web_api::RegistrationRequest,
-            session: Option<&super::VerifiedSession>,
-        ) -> Result<common::web_api::RegistrationResponse, SignalClientError> {
-            todo!()
-        }
-
-        async fn send_msg(
-            &mut self,
-            messages: SignalMessages,
-            service_id: &ServiceId,
-        ) -> Result<(), SignalClientError> {
-            for message in messages.messages {
-                let envelope = Envelope::builder()
-                    .r#type(message.r#type)
-                    .content(message.content.as_bytes().to_vec())
-                    .source_service_id(self.address.name().to_owned())
-                    .source_device(self.address.device_id().into())
-                    .build();
-                self.state
-                    .lock()
-                    .await
-                    .message_queues
-                    .entry(ProtocolAddress::new(
-                        service_id.service_id_string(),
-                        message.destination_device_id.into(),
-                    ))
-                    .or_insert(vec![])
-                    .push(envelope);
-            }
-            Ok(())
-        }
-
-        async fn get_message(&mut self) -> Option<common::signalservice::Envelope> {
-            self.state
-                .lock()
-                .await
-                .message_queues
-                .get_mut(&self.address)
-                .unwrap()
-                .pop()
-        }
-
-        fn create_auth_header(
-            &mut self,
-            aci: libsignal_core::Aci,
-            password: &str,
-            device_id: libsignal_core::DeviceId,
-        ) -> () {
-            todo!()
-        }
-
-        fn new() -> Self {
-            todo!()
-        }
-    }
-
-    impl MockBackend {
-        pub fn new(address: ProtocolAddress, state: Arc<Mutex<MockBackendState>>) -> Self {
-            Self { address, state }
-        }
-    }
-}
-*/
 
 impl SignalBackend {
     async fn make_request(

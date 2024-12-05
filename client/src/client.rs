@@ -1,7 +1,8 @@
+use crate::errors::Result;
 use crate::{
     contact_manager::ContactManager,
     encryption::{encrypt, pad_message, unpad_message},
-    errors::{LoginError, ReceiveMessageError, SignalClientError},
+    errors::{ProcessPreKeyBundleError, ReceiveMessageError},
     key_manager::KeyManager,
     server::{Backend, ServerAPI, SignalBackend},
     storage::{
@@ -9,7 +10,6 @@ use crate::{
         in_memory::InMemory,
     },
 };
-use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use common::{
     signalservice::{envelope, Content, DataMessage},
@@ -18,22 +18,21 @@ use common::{
     },
 };
 use core::str;
-use dotenv::dotenv;
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{
-    message_decrypt, process_prekey_bundle, CiphertextMessage, CiphertextMessageType, IdentityKey,
-    IdentityKeyPair, KeyPair, SignalProtocolError,
+    message_decrypt, process_prekey_bundle, CiphertextMessage, CiphertextMessageType,
+    IdentityKeyPair, SignalProtocolError,
 };
 use prost::Message;
 use rand::{rngs::OsRng, Rng};
-use sqlx::sqlite::SqlitePoolOptions;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct Client<S: StorageType, B: Backend> {
     pub aci: Aci,
+    #[allow(unused)]
     pub pni: Pni,
     contact_manager: ContactManager,
-    pub server_api: ServerAPI<B>,
+    server_api: ServerAPI<B>,
     key_manager: KeyManager,
     pub storage: Storage<S>,
 }
@@ -66,24 +65,12 @@ impl<S: StorageType, B: Backend> Client<S, B> {
     pub async fn register(
         name: &str,
         phone_number: String,
-    ) -> Result<Client<InMemory, SignalBackend>, SignalClientError> {
+    ) -> Result<Client<InMemory, SignalBackend>> {
         let mut csprng = OsRng;
         let aci_registration_id = OsRng.gen_range(1..16383);
         let pni_registration_id = OsRng.gen_range(1..16383);
         let aci_id_key_pair = IdentityKeyPair::generate(&mut csprng);
         let pni_id_key_pair = IdentityKeyPair::generate(&mut csprng);
-        dotenv().map_err(|err| SignalClientError::DotenvError(format!("{err}")))?;
-        let db_url =
-            std::env::var("DATABASE_URL").expect("Expected to read database url from .env file");
-        let pool = SqlitePoolOptions::new()
-            .connect(&db_url)
-            .await
-            .expect("Could not connect to database");
-
-        sqlx::migrate!("client_db/migrations")
-            .run(&pool)
-            .await
-            .expect("Could not run migrations");
 
         let mut proto_storage = ProtocolStore::new(aci_id_key_pair, aci_registration_id);
         let mut key_manager = KeyManager::new();
@@ -94,31 +81,29 @@ impl<S: StorageType, B: Backend> Client<S, B> {
                 &mut proto_storage.signed_pre_key_store,
                 &mut csprng,
             )
-            .await
-            .unwrap();
+            .await?;
+
         let pni_signed_pk = key_manager
             .generate_signed_pre_key(
                 &mut proto_storage.identity_key_store,
                 &mut proto_storage.signed_pre_key_store,
                 &mut csprng,
             )
-            .await
-            .unwrap();
+            .await?;
 
         let aci_pq_last_resort = key_manager
             .generate_kyber_pre_key(
                 &mut proto_storage.identity_key_store,
                 &mut proto_storage.kyber_pre_key_store,
             )
-            .await
-            .unwrap();
+            .await?;
+
         let pni_pq_last_resort = key_manager
             .generate_kyber_pre_key(
                 &mut proto_storage.identity_key_store,
                 &mut proto_storage.kyber_pre_key_store,
             )
-            .await
-            .unwrap();
+            .await?;
 
         let mut password = [0u8; PASSWORD_LENGTH];
         csprng.fill(&mut password);
@@ -173,8 +158,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         let mut storage = Storage::new(password.clone(), aci, pni, proto_storage);
         let key_bundle = key_manager
             .generate_key_bundle(&mut storage.protocol_store)
-            .await
-            .expect("Should create key bundle");
+            .await?;
 
         server_api.publish_pre_key_bundle(key_bundle).await?;
 
@@ -197,15 +181,11 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         ))
     }
 
-    pub async fn login() -> Result<Self, LoginError> {
+    pub async fn login() -> Result<Self> {
         todo!("Implement when Storage<Device> is done")
     }
 
-    pub async fn send_message(
-        &mut self,
-        message: &str,
-        service_id: &ServiceId,
-    ) -> Result<(), SignalClientError> {
+    pub async fn send_message(&mut self, message: &str, service_id: &ServiceId) -> Result<()> {
         let content = Content::builder()
             .data_message(
                 DataMessage::builder()
@@ -226,20 +206,15 @@ impl<S: StorageType, B: Backend> Client<S, B> {
                 self.contact_manager
                     .add_contact(service_id, 1.into())
                     .expect("Can add contact that does not exist yet");
-                let bundles = self
-                    .server_api
-                    .fetch_pre_key_bundles(service_id)
-                    .await
-                    .unwrap();
+                let bundles = self.server_api.fetch_pre_key_bundles(service_id).await?;
 
                 let mut device_ids = Vec::new();
                 for ref bundle in bundles {
-                    device_ids.push(bundle.device_id().unwrap());
+                    // Device id is safe to unwrap.
+                    let device_id = bundle.device_id().unwrap();
+                    device_ids.push(device_id);
                     process_prekey_bundle(
-                        &ProtocolAddress::new(
-                            service_id.service_id_string(),
-                            bundle.device_id().unwrap(),
-                        ),
+                        &ProtocolAddress::new(service_id.service_id_string(), device_id),
                         &mut self.storage.protocol_store.session_store,
                         &mut self.storage.protocol_store.identity_key_store,
                         bundle,
@@ -247,7 +222,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
                         &mut OsRng,
                     )
                     .await
-                    .unwrap();
+                    .map_err(|err| ProcessPreKeyBundleError(err))?;
                 }
 
                 self.contact_manager
@@ -288,7 +263,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
                     content: BASE64_STANDARD.encode(msg.1.serialize()),
                 })
                 .collect(),
-            online: false, // Should this be true?
+            online: false,
             urgent: true,
             timestamp: timestamp
                 .duration_since(UNIX_EPOCH)
@@ -299,7 +274,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         self.server_api.send_msg(msgs, service_id).await
     }
 
-    pub async fn receive_message(&mut self) -> Result<String, SignalClientError> {
+    pub async fn receive_message(&mut self) -> Result<String> {
         // I get Envelope from Server.
         let envelope = self
             .server_api
@@ -313,11 +288,10 @@ impl<S: StorageType, B: Backend> Client<S, B> {
         // The content of the envelope is base64 encoded.
         let bytes = ciphertext_content.to_vec();
 
-        // The evelope contains information about which message type is received.
+        // The envelope contains information about which message type is received.
         let _type = match envelope.r#type() {
             envelope::Type::Ciphertext => Ok(CiphertextMessageType::Whisper),
             envelope::Type::PrekeyBundle => Ok(CiphertextMessageType::PreKey),
-            //7 => Ok(CiphertextMessageType::SenderKey),
             envelope::Type::PlaintextContent => Ok(CiphertextMessageType::Plaintext),
             _ => Err(ReceiveMessageError::InvalidMessageTypeInEnvelope),
         }?;
@@ -363,7 +337,7 @@ impl<S: StorageType, B: Backend> Client<S, B> {
 fn decode_ciphertext(
     bytes: Vec<u8>,
     _type: CiphertextMessageType,
-) -> Result<CiphertextMessage, SignalProtocolError> {
+) -> std::result::Result<CiphertextMessage, SignalProtocolError> {
     match _type {
         CiphertextMessageType::Whisper => {
             Ok(CiphertextMessage::SignalMessage((&*bytes).try_into()?))
@@ -377,123 +351,5 @@ fn decode_ciphertext(
         CiphertextMessageType::Plaintext => {
             Ok(CiphertextMessage::PlaintextContent((&*bytes).try_into()?))
         }
-    }
-}
-#[cfg(test)]
-mod test_client {
-    use std::sync::Arc;
-
-    use crate::{
-        client::Client,
-        contact_manager::ContactManager,
-        encryption::test::create_pre_key_bundle,
-        key_manager::KeyManager,
-        server::{
-            //server_api_test::{MockBackend, MockBackendState},
-            ServerAPI,
-        },
-        storage::{
-            generic::{ProtocolStore, Storage},
-            in_memory::InMemory,
-        },
-    };
-    use common::signalservice::{Content, DataMessage};
-    use libsignal_core::{Aci, ProtocolAddress};
-    use libsignal_protocol::IdentityKeyPair;
-    use prost::Message;
-    use rand::rngs::OsRng;
-    use tokio::sync::Mutex;
-    use uuid::uuid;
-
-    /*
-    fn get_alice(state: Arc<Mutex<MockBackendState>>) -> Client<InMemory, MockBackend> {
-        let aci: Aci = uuid!("0d76041e-54ce-4cea-a128-ebfa32171c29").into();
-        let pni = uuid!("93c5486c-5bba-437f-a9c1-0570cb619d27").into();
-        let contact_manager = ContactManager::new();
-        let server_api = ServerAPI::new(MockBackend::new(
-            ProtocolAddress::new(aci.service_id_string(), 1.into()),
-            state,
-        ));
-        let key_manager = KeyManager::new();
-        let id_key_pair = IdentityKeyPair::generate(&mut OsRng);
-        let aci_registration_id = 1u32;
-        let protocol_store = ProtocolStore::new(id_key_pair, aci_registration_id);
-        let storage = Storage::new("password".to_owned(), aci, pni, protocol_store);
-
-        Client::new(aci, pni, contact_manager, server_api, key_manager, storage)
-    }
-
-    fn get_bob(state: Arc<Mutex<MockBackendState>>) -> Client<InMemory, MockBackend> {
-        let aci: Aci = uuid!("7db772c1-5ae2-4d25-9daf-025be34aa7b1").into();
-        let pni = uuid!("2328ef13-246b-4ff9-9baf-e28933d0bc02").into();
-        let contact_manager = ContactManager::new();
-        let server_api = ServerAPI::new(MockBackend::new(
-            ProtocolAddress::new(aci.service_id_string(), 1.into()),
-            state,
-        ));
-        let key_manager = KeyManager::new();
-        let id_key_pair = IdentityKeyPair::generate(&mut OsRng);
-        let aci_registration_id = 1u32;
-        let protocol_store = ProtocolStore::new(id_key_pair, aci_registration_id);
-        let storage = Storage::new("password".to_owned(), aci, pni, protocol_store);
-        Client::new(aci, pni, contact_manager, server_api, key_manager, storage)
-    }
-
-    #[tokio::test]
-    async fn test_alice_send_bob_receive() {
-        let state = Arc::new(Mutex::new(MockBackendState::default()));
-        let mut alice = get_alice(state.clone());
-        let mut bob = get_bob(state);
-        let mut csprng = OsRng;
-
-        let alice_bundle =
-            create_pre_key_bundle(&mut alice.storage.protocol_store, 1.into(), &mut csprng)
-                .await
-                .unwrap();
-
-        let bob_bundle =
-            create_pre_key_bundle(&mut bob.storage.protocol_store, 1.into(), &mut csprng)
-                .await
-                .unwrap();
-
-        alice
-            .server_api
-            .publish_pre_key_bundle(alice_bundle)
-            .await
-            .unwrap();
-
-        bob.server_api
-            .publish_pre_key_bundle(bob_bundle)
-            .await
-            .unwrap();
-
-        alice
-            .send_message("Hello, World!", &bob.aci.into())
-            .await
-            .unwrap();
-
-        let message = bob.receive_message().await.unwrap();
-
-        assert_eq!("Hello, World!".to_owned(), message);
-    }
-    */
-
-    #[tokio::test]
-    async fn test_content_decode() {
-        let content = Content::builder()
-            .data_message(
-                DataMessage::builder()
-                    .body("Hello, World!".to_owned())
-                    .contact(vec![])
-                    .body_ranges(vec![])
-                    .preview(vec![])
-                    .attachments(vec![])
-                    .build(),
-            )
-            .build();
-        assert_eq!(
-            Content::decode(content.encode_to_vec().as_ref()).unwrap(),
-            content
-        )
     }
 }
