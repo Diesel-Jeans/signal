@@ -22,11 +22,9 @@ pub async fn encrypt(
     for id in target.device_ids.clone() {
         let reg_id = session_store
             .load_session(&target.get_address(&id).unwrap())
-            .await
-            .unwrap()
-            .unwrap()
-            .remote_registration_id()
-            .unwrap();
+            .await?
+            .ok_or(SignalClientError::NoSession)?
+            .remote_registration_id()?;
         let res = message_encrypt(
             msg,
             &target.get_address(&id)?,

@@ -29,6 +29,10 @@ pub enum SignalClientError {
     ReceiveMessageError(ReceiveMessageError),
     #[from]
     ProcessPreKeyBundle(ProcessPreKeyBundleError),
+    #[display("Tried to get a session that does not exist")]
+    NoSession,
+    #[from]
+    Protocol(SignalProtocolError),
 }
 
 impl Error for SignalClientError {}

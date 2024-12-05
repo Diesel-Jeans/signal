@@ -209,6 +209,7 @@ impl<S: StorageType, B: SignalServerAPI> Client<S, B> {
                 let bundles = self.server_api.fetch_pre_key_bundles(service_id).await?;
 
                 let mut device_ids = Vec::new();
+                let time = SystemTime::now();
                 for ref bundle in bundles {
                     // Device id is safe to unwrap.
                     let device_id = bundle.device_id().unwrap();
@@ -218,7 +219,7 @@ impl<S: StorageType, B: SignalServerAPI> Client<S, B> {
                         &mut self.storage.protocol_store.session_store,
                         &mut self.storage.protocol_store.identity_key_store,
                         bundle,
-                        SystemTime::now(),
+                        time,
                         &mut OsRng,
                     )
                     .await
