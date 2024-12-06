@@ -138,7 +138,7 @@ impl SignalServerAPI for SignalServer {
         &mut self,
         pre_key_bundle: SetKeyRequest,
     ) -> Result<(), SignalClientError> {
-        let uri = format!("{}?identity_type=aci", KEY_BUNDLE_URI);
+        let uri = format!("{}?identity=aci", KEY_BUNDLE_URI);
         self.make_request(ReqType::Put(json!(pre_key_bundle)), uri)
             .await
             .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
