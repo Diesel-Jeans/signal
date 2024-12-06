@@ -1,228 +1,29 @@
-use super::generic::{ProtocolStore, SignalStore, Storage};
-use crate::{errors::SignalClientError, storage::generic::StorageType};
+use std::collections::HashSet;
+
+use super::{
+    database::ClientDB,
+    generic::{SignalStore, Storage},
+};
+use crate::contact_manager::Contact;
 use axum::async_trait;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
-use libsignal_core::{Aci, Pni, ProtocolAddress};
+use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{
-    Direction, GenericSignedPreKey as _, IdentityKey, IdentityKeyPair, IdentityKeyStore,
-    KyberPreKeyId, KyberPreKeyRecord, KyberPreKeyStore, PreKeyId, PreKeyRecord, PreKeyStore,
-    PrivateKey, SenderKeyRecord, SenderKeyStore, SessionRecord, SessionStore, SignalProtocolError,
-    SignedPreKeyId, SignedPreKeyRecord, SignedPreKeyStore,
+    Direction, GenericSignedPreKey as _, IdentityKey, IdentityKeyPair, KyberPreKeyId,
+    KyberPreKeyRecord, PreKeyId, PreKeyRecord, PrivateKey, SenderKeyRecord, SessionRecord,
+    SignalProtocolError, SignedPreKeyId, SignedPreKeyRecord,
 };
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Device {
     pool: SqlitePool,
 }
 
 impl Device {
-    pub async fn create(
-        aci: Aci,
-        pni: Pni,
-        password: String,
-        pool: SqlitePool,
-    ) -> Result<Self, SignalClientError> {
-        let aci = aci.service_id_string();
-        let pni = pni.service_id_string();
-
-        sqlx::query!(
-            r#"
-            INSERT INTO Identity (aci, pni, password)
-            VALUES (?, ?, ?)
-            "#,
-            aci,
-            pni,
-            password,
-        )
-        .execute(&pool)
-        .await
-        .map(|_| ())
-        .map_err(|err| SignalClientError::DatabaseError(format!("{err}")))?;
-
-        Ok(Self { pool })
-    }
-}
-
-impl Storage<Device> {
-    pub async fn create(
-        aci: Aci,
-        pni: Pni,
-        password: String,
-        protocol_store: ProtocolStore<Device>,
-        pool: SqlitePool,
-    ) -> Result<Self, SignalClientError> {
-        Ok(Self {
-            inner: Device::create(aci, pni, password, pool).await?,
-            protocol_store,
-        })
-    }
-}
-
-#[async_trait]
-impl SignalStore for Storage<Device> {
-    type Error = SignalClientError;
-
-    async fn set_password(&mut self, new_password: String) -> Result<(), Self::Error> {
-        sqlx::query!(
-            r#"
-            UPDATE identity
-            SET password = ?
-            "#,
-            new_password
-        )
-        .execute(&self.inner.pool)
-        .await
-        .map(|_| ())
-        .map_err(|err| SignalClientError::DatabaseError(format!("{err}")))
-    }
-
-    async fn get_password(&self) -> Result<String, Self::Error> {
-        sqlx::query!(
-            r#"
-            SELECT
-                password
-            FROM
-                identity
-            "#
-        )
-        .fetch_one(&self.inner.pool)
-        .await
-        .map(|row| row.password)
-        .map_err(|err| SignalClientError::DatabaseError(format!("{err}")))
-    }
-
-    async fn set_aci(&mut self, new_aci: Aci) -> Result<(), Self::Error> {
-        let new_aci = new_aci.service_id_string();
-
-        sqlx::query!(
-            r#"
-            UPDATE identity
-            SET aci = ?
-            "#,
-            new_aci
-        )
-        .execute(&self.inner.pool)
-        .await
-        .map(|_| ())
-        .map_err(|err| SignalClientError::DatabaseError(format!("{err}")))
-    }
-
-    async fn get_aci(&self) -> Result<Aci, Self::Error> {
-        match sqlx::query!(
-            r#"
-            SELECT
-                aci
-            FROM
-                identity
-            "#
-        )
-        .fetch_one(&self.inner.pool)
-        .await
-        {
-            Ok(row) => Ok(Aci::parse_from_service_id_string(row.aci.as_str()).ok_or(
-                SignalClientError::DatabaseError(format!("Could not convert {} to aci", row.aci)),
-            )?),
-            Err(err) => Err(SignalClientError::DatabaseError(format!("{err}"))),
-        }
-    }
-
-    async fn set_pni(&mut self, new_pni: Pni) -> Result<(), Self::Error> {
-        let new_pni = new_pni.service_id_string();
-
-        sqlx::query!(
-            r#"
-            UPDATE identity
-            SET pni = ?
-            "#,
-            new_pni
-        )
-        .execute(&self.inner.pool)
-        .await
-        .map(|_| ())
-        .map_err(|err| SignalClientError::DatabaseError(format!("{err}")))
-    }
-
-    async fn get_pni(&self) -> Result<Pni, Self::Error> {
-        match sqlx::query!(
-            r#"
-            SELECT
-                pni
-            FROM
-                identity
-            "#
-        )
-        .fetch_one(&self.inner.pool)
-        .await
-        {
-            Ok(row) => Ok(Pni::parse_from_service_id_string(row.pni.as_str()).ok_or(
-                SignalClientError::DatabaseError(format!("Could not convert {} to pni", row.pni)),
-            )?),
-            Err(err) => Err(SignalClientError::DatabaseError(format!("{err}"))),
-        }
-    }
-}
-
-impl StorageType for Device {
-    type IdentityKeyStore = DeviceIdentityKeyStore;
-    type PreKeyStore = DevicePreKeyStore;
-    type SignedPreKeyStore = DeviceSignedPreKeyStore;
-    type KyberPreKeyStore = DeviceKyberPreKeyStore;
-    type SessionStore = DeviceSessionStore;
-    type SenderKeyStore = DeviceSenderKeyStore;
-}
-
-impl ProtocolStore<Device> {
-    pub async fn create_device_protocol_store(
-        id_key_pair: IdentityKeyPair,
-        aci_registration_id: u32,
-        pool: SqlitePool,
-    ) -> Self {
-        Self {
-            identity_key_store: DeviceIdentityKeyStore::create(
-                id_key_pair,
-                aci_registration_id,
-                pool.clone(),
-            )
-            .await
-            .unwrap(),
-            pre_key_store: DevicePreKeyStore::new(pool.clone()),
-            signed_pre_key_store: DeviceSignedPreKeyStore::new(pool.clone()),
-            kyber_pre_key_store: DeviceKyberPreKeyStore::new(pool.clone()),
-            session_store: DeviceSessionStore::new(pool.clone()),
-            sender_key_store: DeviceSenderKeyStore::new(pool.clone()),
-        }
-    }
-}
-
-pub struct DeviceIdentityKeyStore {
-    pool: SqlitePool,
-}
-
-impl DeviceIdentityKeyStore {
-    pub async fn create(
-        key_pair: IdentityKeyPair,
-        registration_id: u32,
-        pool: SqlitePool,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let pk = BASE64_STANDARD.encode(key_pair.identity_key().serialize());
-        let sk = BASE64_STANDARD.encode(key_pair.private_key().serialize());
-
-        sqlx::query!(
-            r#"
-            INSERT INTO IdentityKeys (public_key, private_key, registration_id)
-            VALUES (?, ?, ?)
-            "#,
-            pk,
-            sk,
-            registration_id,
-        )
-        .execute(&pool)
-        .await
-        .map(|_| ())
-        .map_err(|err| SignalClientError::DatabaseError(format!("{err}")))?;
-        Ok(Self { pool })
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
     }
 
     async fn insert_identity(
@@ -251,8 +52,239 @@ impl DeviceIdentityKeyStore {
 }
 
 #[async_trait(?Send)]
-impl IdentityKeyStore for DeviceIdentityKeyStore {
-    async fn get_identity_key_pair(&self) -> Result<IdentityKeyPair, SignalProtocolError> {
+impl ClientDB for Device {
+    type Error = SignalProtocolError;
+
+    async fn insert_account_information(
+        &self,
+        aci: Aci,
+        pni: Pni,
+        password: String,
+    ) -> Result<(), Self::Error> {
+        let aci = aci.service_id_string();
+        let pni = pni.service_id_string();
+
+        sqlx::query!(
+            r#"
+            INSERT INTO Identity (aci, pni, password)
+            VALUES (?, ?, ?)
+            "#,
+            aci,
+            pni,
+            password,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| SignalProtocolError::InvalidArgument(format!("{err}")))
+    }
+
+    async fn insert_account_key_information(
+        &self,
+        key_pair: IdentityKeyPair,
+        registration_id: u32,
+    ) -> Result<(), Self::Error> {
+        let pk = BASE64_STANDARD.encode(key_pair.identity_key().serialize());
+        let sk = BASE64_STANDARD.encode(key_pair.private_key().serialize());
+
+        sqlx::query!(
+            r#"
+            INSERT INTO IdentityKeys (public_key, private_key, registration_id)
+            VALUES (?, ?, ?)
+            "#,
+            pk,
+            sk,
+            registration_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| SignalProtocolError::InvalidArgument(format!("{err}")))
+    }
+
+    async fn get_key_ids(&self) -> Result<(u32, u32, u32), Self::Error> {
+        sqlx::query!(
+            r#"
+            WITH max_pre_key_id_table AS (
+                SELECT
+                    1 AS _id,
+                    MAX(pre_key_id) AS max_pre_key_id
+                FROM
+                    DevicePreKeyStore
+            ), max_signed_pre_key_id_table AS (
+                SELECT
+                    1 AS _id,
+                    MAX(signed_pre_key_id) AS max_signed_pre_key_id
+                FROM
+                    DeviceSignedPreKeyStore
+            ), max_kyber_pre_key_id_table AS (
+                SELECT
+                    1 AS _id,
+                    MAX(kyber_pre_key_id) AS max_kyber_pre_key_id
+                FROM
+                    DeviceKyberPreKeyStore
+            )
+            SELECT
+                CASE WHEN mpk.max_pre_key_id IS NOT NULL
+                    THEN mpk.max_pre_key_id
+                ELSE
+                    0
+                END AS mpkid,
+                CASE WHEN spk.max_signed_pre_key_id IS NOT NULL
+                    THEN spk.max_signed_pre_key_id
+                ELSE
+                    0
+                END AS spkid,
+                CASE WHEN kpk.max_kyber_pre_key_id IS NOT NULL
+                    THEN kpk.max_kyber_pre_key_id
+                ELSE
+                    0
+                END AS kpkid
+            FROM
+                max_pre_key_id_table mpk
+                INNER JOIN max_signed_pre_key_id_table spk ON spk._id = mpk._id
+                INNER JOIN max_kyber_pre_key_id_table kpk ON kpk._id = mpk._id
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map(|row| (row.mpkid as u32, row.spkid as u32, row.kpkid as u32))
+        .map_err(|err| SignalProtocolError::InvalidArgument(format!("{err}")))
+    }
+
+    async fn store_contact(&self, contact: &Contact) -> Result<(), Self::Error> {
+        let service_id = contact.service_id.service_id_string();
+        let device_ids = contact
+            .device_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        sqlx::query!(
+            r#"
+            INSERT INTO Contacts(service_id, device_ids)
+            VALUES(?, ?)
+            ON CONFLICT(service_id) DO UPDATE SET device_ids = ?
+            "#,
+            service_id,
+            device_ids,
+            device_ids,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| SignalProtocolError::InvalidArgument(format!("{err}")))
+    }
+
+    async fn load_contacts(&self) -> Result<Vec<Contact>, Self::Error> {
+        match sqlx::query!(
+            r#"
+            SELECT
+                service_id,
+                device_ids
+            FROM
+                Contacts
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        {
+            Ok(rows) => {
+                let mut contacts = vec![];
+                for row in rows {
+                    let mut device_ids = HashSet::new();
+                    if row.device_ids != "" {
+                        for device_id in row.device_ids.split(",") {
+                            device_ids.insert(DeviceId::from(device_id.parse::<u32>().map_err(
+                                |err| {
+                                    SignalProtocolError::InvalidArgument(format!(
+                                        "Could not parse device id: {err}"
+                                    ))
+                                },
+                            )?));
+                        }
+                    }
+                    contacts.push(Contact {
+                        service_id: ServiceId::parse_from_service_id_string(
+                            row.service_id.as_str(),
+                        )
+                        .ok_or(SignalProtocolError::InvalidArgument(format!(
+                            "Could not parse service_id: {}",
+                            row.service_id
+                        )))?,
+                        device_ids,
+                    });
+                }
+                Ok(contacts)
+            }
+            Err(err) => Err(SignalProtocolError::InvalidArgument(format!("{err}"))),
+        }
+    }
+
+    async fn remove_contact(&self, service_id: &ServiceId) -> Result<(), Self::Error> {
+        let name = service_id.service_id_string();
+
+        sqlx::query!(
+            r#"
+            DELETE FROM
+                Contacts
+            WHERE
+                service_id = ?
+            "#,
+            name
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| SignalProtocolError::InvalidArgument(format!("{err}")))
+    }
+
+    async fn insert_service_id_for_nickname(
+        &self,
+        nickname: &str,
+        service_id: &ServiceId,
+    ) -> Result<(), Self::Error> {
+        let service_id = service_id.service_id_string();
+        sqlx::query!(
+            r#"
+            INSERT INTO Nicknames(name, service_id)
+            VALUES(?, ?)
+            "#,
+            nickname,
+            service_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| SignalProtocolError::InvalidArgument(format!("{err}")))
+    }
+
+    async fn get_service_id_by_nickname(&self, nickname: &str) -> Result<ServiceId, Self::Error> {
+        match sqlx::query!(
+            r#"
+            SELECT
+                service_id
+            FROM
+                Nicknames
+            WHERE
+                name = ?
+            "#,
+            nickname
+        )
+        .fetch_one(&self.pool)
+        .await
+        {
+            Ok(row) => Ok(
+                ServiceId::parse_from_service_id_string(row.service_id.as_str()).ok_or(
+                    SignalProtocolError::InvalidArgument(format!("Could not parse service_id")),
+                )?,
+            ),
+            Err(err) => Err(SignalProtocolError::InvalidArgument(format!("{err}"))),
+        }
+    }
+
+    async fn get_identity_key_pair(&self) -> Result<IdentityKeyPair, Self::Error> {
         match sqlx::query!(
             r#"
             SELECT
@@ -282,7 +314,7 @@ impl IdentityKeyStore for DeviceIdentityKeyStore {
         }
     }
 
-    async fn get_local_registration_id(&self) -> Result<u32, SignalProtocolError> {
+    async fn get_local_registration_id(&self) -> Result<u32, Self::Error> {
         sqlx::query!(
             r#"
             SELECT
@@ -296,12 +328,11 @@ impl IdentityKeyStore for DeviceIdentityKeyStore {
         .map(|row| row.registration_id as u32)
         .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
     }
-
     async fn save_identity(
         &mut self,
         address: &ProtocolAddress,
         identity: &IdentityKey,
-    ) -> Result<bool, SignalProtocolError> {
+    ) -> Result<bool, Self::Error> {
         match self
             .get_identity(address)
             .await
@@ -324,7 +355,7 @@ impl IdentityKeyStore for DeviceIdentityKeyStore {
         address: &ProtocolAddress,
         identity: &IdentityKey,
         _direction: Direction,
-    ) -> Result<bool, SignalProtocolError> {
+    ) -> Result<bool, Self::Error> {
         match self
             .get_identity(address)
             .await
@@ -338,7 +369,7 @@ impl IdentityKeyStore for DeviceIdentityKeyStore {
     async fn get_identity(
         &self,
         address: &ProtocolAddress,
-    ) -> Result<Option<IdentityKey>, SignalProtocolError> {
+    ) -> Result<Option<IdentityKey>, Self::Error> {
         let addr = format!("{}", address);
 
         match sqlx::query!(
@@ -365,20 +396,8 @@ impl IdentityKeyStore for DeviceIdentityKeyStore {
             Err(_) => Ok(None),
         }
     }
-}
 
-pub struct DevicePreKeyStore {
-    pool: SqlitePool,
-}
-
-impl DevicePreKeyStore {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-#[async_trait(?Send)]
-impl PreKeyStore for DevicePreKeyStore {
-    async fn get_pre_key(&self, prekey_id: PreKeyId) -> Result<PreKeyRecord, SignalProtocolError> {
+    async fn get_pre_key(&self, prekey_id: PreKeyId) -> Result<PreKeyRecord, Self::Error> {
         let id: u32 = prekey_id.into();
 
         match sqlx::query!(
@@ -410,7 +429,7 @@ impl PreKeyStore for DevicePreKeyStore {
         &mut self,
         prekey_id: PreKeyId,
         record: &PreKeyRecord,
-    ) -> Result<(), SignalProtocolError> {
+    ) -> Result<(), Self::Error> {
         let id: u32 = prekey_id.into();
         let rec = BASE64_STANDARD.encode(record.serialize()?);
 
@@ -430,7 +449,7 @@ impl PreKeyStore for DevicePreKeyStore {
         .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
     }
 
-    async fn remove_pre_key(&mut self, prekey_id: PreKeyId) -> Result<(), SignalProtocolError> {
+    async fn remove_pre_key(&mut self, prekey_id: PreKeyId) -> Result<(), Self::Error> {
         let id: u32 = prekey_id.into();
 
         sqlx::query!(
@@ -447,23 +466,11 @@ impl PreKeyStore for DevicePreKeyStore {
         .map(|_| ())
         .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
     }
-}
 
-pub struct DeviceSignedPreKeyStore {
-    pool: SqlitePool,
-}
-
-impl DeviceSignedPreKeyStore {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-#[async_trait(?Send)]
-impl SignedPreKeyStore for DeviceSignedPreKeyStore {
     async fn get_signed_pre_key(
         &self,
         id: SignedPreKeyId,
-    ) -> Result<SignedPreKeyRecord, SignalProtocolError> {
+    ) -> Result<SignedPreKeyRecord, Self::Error> {
         let sid: u32 = id.into();
 
         match sqlx::query!(
@@ -495,7 +502,7 @@ impl SignedPreKeyStore for DeviceSignedPreKeyStore {
         &mut self,
         id: SignedPreKeyId,
         record: &SignedPreKeyRecord,
-    ) -> Result<(), SignalProtocolError> {
+    ) -> Result<(), Self::Error> {
         let id: u32 = id.into();
         let rec = BASE64_STANDARD.encode(record.serialize()?);
 
@@ -514,24 +521,11 @@ impl SignedPreKeyStore for DeviceSignedPreKeyStore {
         .map(|_| ())
         .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
     }
-}
 
-pub struct DeviceKyberPreKeyStore {
-    pool: SqlitePool,
-}
-
-impl DeviceKyberPreKeyStore {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-
-#[async_trait(?Send)]
-impl KyberPreKeyStore for DeviceKyberPreKeyStore {
     async fn get_kyber_pre_key(
         &self,
         kyber_prekey_id: KyberPreKeyId,
-    ) -> Result<KyberPreKeyRecord, SignalProtocolError> {
+    ) -> Result<KyberPreKeyRecord, Self::Error> {
         let id: u32 = kyber_prekey_id.into();
 
         match sqlx::query!(
@@ -562,7 +556,7 @@ impl KyberPreKeyStore for DeviceKyberPreKeyStore {
         &mut self,
         kyber_prekey_id: KyberPreKeyId,
         record: &KyberPreKeyRecord,
-    ) -> Result<(), SignalProtocolError> {
+    ) -> Result<(), Self::Error> {
         let id: u32 = kyber_prekey_id.into();
         let rec = BASE64_STANDARD.encode(record.serialize()?);
 
@@ -581,31 +575,10 @@ impl KyberPreKeyStore for DeviceKyberPreKeyStore {
         .map(|_| ())
         .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
     }
-
-    async fn mark_kyber_pre_key_used(
-        &mut self,
-        _kyber_prekey_id: KyberPreKeyId,
-    ) -> Result<(), SignalProtocolError> {
-        panic!("THIS IS NOT USED")
-    }
-}
-
-pub struct DeviceSessionStore {
-    pool: SqlitePool,
-}
-
-impl DeviceSessionStore {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-
-#[async_trait(?Send)]
-impl SessionStore for DeviceSessionStore {
     async fn load_session(
         &self,
         address: &ProtocolAddress,
-    ) -> Result<Option<SessionRecord>, SignalProtocolError> {
+    ) -> Result<Option<SessionRecord>, Self::Error> {
         let addr = format!("{}", address);
 
         match sqlx::query!(
@@ -632,12 +605,11 @@ impl SessionStore for DeviceSessionStore {
             Err(_) => Ok(None),
         }
     }
-
     async fn store_session(
         &mut self,
         address: &ProtocolAddress,
         record: &SessionRecord,
-    ) -> Result<(), SignalProtocolError> {
+    ) -> Result<(), Self::Error> {
         let addr = format!("{}", address);
         let rec = BASE64_STANDARD.encode(record.serialize()?);
 
@@ -656,26 +628,12 @@ impl SessionStore for DeviceSessionStore {
         .map(|_| ())
         .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
     }
-}
-
-pub struct DeviceSenderKeyStore {
-    pool: SqlitePool,
-}
-
-impl DeviceSenderKeyStore {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-
-#[async_trait(?Send)]
-impl SenderKeyStore for DeviceSenderKeyStore {
     async fn store_sender_key(
         &mut self,
         sender: &ProtocolAddress,
         distribution_id: Uuid,
         record: &SenderKeyRecord,
-    ) -> Result<(), SignalProtocolError> {
+    ) -> Result<(), Self::Error> {
         let addr = format!("{}:{}", sender, distribution_id);
         let rec = BASE64_STANDARD.encode(record.serialize()?);
 
@@ -694,12 +652,11 @@ impl SenderKeyStore for DeviceSenderKeyStore {
         .map(|_| ())
         .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
     }
-
     async fn load_sender_key(
         &mut self,
         sender: &ProtocolAddress,
         distribution_id: Uuid,
-    ) -> Result<Option<SenderKeyRecord>, SignalProtocolError> {
+    ) -> Result<Option<SenderKeyRecord>, Self::Error> {
         let addr = format!("{}:{}", sender, distribution_id);
 
         match sqlx::query!(
@@ -726,25 +683,175 @@ impl SenderKeyStore for DeviceSenderKeyStore {
             Err(_) => Ok(None),
         }
     }
+
+    async fn set_password(&mut self, new_password: String) -> Result<(), Self::Error> {
+        sqlx::query!(
+            r#"
+            UPDATE identity
+            SET password = ?
+            "#,
+            new_password
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
+    }
+    async fn get_password(&self) -> Result<String, Self::Error> {
+        sqlx::query!(
+            r#"
+            SELECT
+                password
+            FROM
+                identity
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map(|row| row.password)
+        .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
+    }
+    async fn set_aci(&mut self, new_aci: Aci) -> Result<(), Self::Error> {
+        let new_aci = new_aci.service_id_string();
+
+        sqlx::query!(
+            r#"
+            UPDATE identity
+            SET aci = ?
+            "#,
+            new_aci
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
+    }
+    async fn get_aci(&self) -> Result<Aci, Self::Error> {
+        match sqlx::query!(
+            r#"
+            SELECT
+                aci
+            FROM
+                identity
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await
+        {
+            Ok(row) => Ok(Aci::parse_from_service_id_string(row.aci.as_str()).ok_or(
+                SignalProtocolError::InvalidArgument(format!(
+                    "Could not convert {} to aci",
+                    row.aci
+                )),
+            )?),
+            Err(err) => Err(SignalProtocolError::InvalidArgument(format!("{}", err))),
+        }
+    }
+    async fn set_pni(&mut self, new_pni: Pni) -> Result<(), Self::Error> {
+        let new_pni = new_pni.service_id_string();
+
+        sqlx::query!(
+            r#"
+            UPDATE identity
+            SET pni = ?
+            "#,
+            new_pni
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
+    }
+    async fn get_pni(&self) -> Result<Pni, Self::Error> {
+        match sqlx::query!(
+            r#"
+            SELECT
+                pni
+            FROM
+                identity
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await
+        {
+            Ok(row) => Ok(Pni::parse_from_service_id_string(row.pni.as_str()).ok_or(
+                SignalProtocolError::InvalidArgument(format!(
+                    "Could not convert {} to pni",
+                    row.pni
+                )),
+            )?),
+            Err(err) => Err(SignalProtocolError::InvalidArgument(format!("{}", err))),
+        }
+    }
+}
+
+#[async_trait(?Send)]
+impl SignalStore for Storage<Device> {
+    type Error = SignalProtocolError;
+
+    async fn set_password(&mut self, new_password: String) -> Result<(), Self::Error> {
+        self.device
+            .set_password(new_password)
+            .await
+            .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
+    }
+
+    async fn get_password(&self) -> Result<String, Self::Error> {
+        self.device
+            .get_password()
+            .await
+            .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
+    }
+
+    async fn set_aci(&mut self, new_aci: Aci) -> Result<(), Self::Error> {
+        self.device
+            .set_aci(new_aci)
+            .await
+            .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
+    }
+
+    async fn get_aci(&self) -> Result<Aci, Self::Error> {
+        self.device
+            .get_aci()
+            .await
+            .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
+    }
+
+    async fn set_pni(&mut self, new_pni: Pni) -> Result<(), Self::Error> {
+        self.device
+            .set_pni(new_pni)
+            .await
+            .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
+    }
+
+    async fn get_pni(&self) -> Result<Pni, Self::Error> {
+        self.device
+            .get_pni()
+            .await
+            .map_err(|err| SignalProtocolError::InvalidArgument(format!("{}", err)))
+    }
 }
 
 #[cfg(test)]
 mod device_protocol_test {
-    use common::utils::time_now;
-    use libsignal_core::{Aci, ProtocolAddress};
+    use crate::{
+        key_manager::KeyManager,
+        storage::{
+            database::{
+                ClientDB, DeviceIdentityKeyStore, DeviceKyberPreKeyStore, DevicePreKeyStore,
+                DeviceSessionStore, DeviceSignedPreKeyStore,
+            },
+            device::Device,
+        },
+        test_utils::user::{new_contact, new_protocol_address, new_rand_number, new_service_id},
+    };
     use libsignal_protocol::{
-        kem::KeyType, Direction, GenericSignedPreKey, IdentityKeyPair, IdentityKeyStore, KeyPair,
-        KyberPreKeyId, KyberPreKeyRecord, KyberPreKeyStore, PreKeyId, PreKeyRecord, PreKeyStore,
-        SessionRecord, SessionStore, SignedPreKeyId, SignedPreKeyRecord, SignedPreKeyStore,
+        Direction, GenericSignedPreKey, IdentityKeyPair, IdentityKeyStore, KyberPreKeyStore,
+        PreKeyStore, SessionRecord, SessionStore, SignedPreKeyStore,
     };
     use rand::rngs::OsRng;
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
-    use uuid::Uuid;
-
-    use crate::storage::device::{
-        DeviceIdentityKeyStore, DeviceKyberPreKeyStore, DevicePreKeyStore, DeviceSessionStore,
-        DeviceSignedPreKeyStore,
-    };
+    use std::collections::HashMap;
 
     async fn connect() -> SqlitePool {
         dotenv::dotenv().ok();
@@ -764,12 +871,9 @@ mod device_protocol_test {
 
     #[tokio::test]
     async fn save_and_get_identity_test() {
-        let key_pair = IdentityKeyPair::generate(&mut OsRng);
-        let mut device_identity_key_store =
-            DeviceIdentityKeyStore::create(key_pair, 1, connect().await)
-                .await
-                .unwrap();
-        let address = ProtocolAddress::new(Aci::from(Uuid::new_v4()).service_id_string(), 1.into());
+        let device = Device::new(connect().await);
+        let mut device_identity_key_store = DeviceIdentityKeyStore::new(device);
+        let address = new_protocol_address();
         let other_key_pair = IdentityKeyPair::generate(&mut OsRng);
         let new_other_key_pair = IdentityKeyPair::generate(&mut OsRng);
 
@@ -829,16 +933,12 @@ mod device_protocol_test {
     }
     #[tokio::test]
     async fn is_trusted_identity_test() {
-        let key_pair = IdentityKeyPair::generate(&mut OsRng);
-        let mut device_identity_key_store =
-            DeviceIdentityKeyStore::create(key_pair, 1, connect().await)
-                .await
-                .unwrap();
-        let address = ProtocolAddress::new(Aci::from(Uuid::new_v4()).service_id_string(), 1.into());
+        let device = Device::new(connect().await);
+        let mut device_identity_key_store = DeviceIdentityKeyStore::new(device);
+        let address = new_protocol_address();
         let other_key_pair = IdentityKeyPair::generate(&mut OsRng);
 
-        let random_address =
-            ProtocolAddress::new(Aci::from(Uuid::new_v4()).service_id_string(), 1.into());
+        let random_address = new_protocol_address();
         let random_key_pair = IdentityKeyPair::generate(&mut OsRng);
 
         // First use
@@ -872,116 +972,184 @@ mod device_protocol_test {
 
     #[tokio::test]
     async fn save_and_get_pre_key_test() {
-        let mut device_pre_key_store = DevicePreKeyStore::new(connect().await);
-        let pre_key_id: PreKeyId = 1.into();
-        let key_pair = KeyPair::generate(&mut OsRng);
-        let pre_key_record = PreKeyRecord::new(pre_key_id, &key_pair);
-
-        device_pre_key_store
-            .save_pre_key(pre_key_id, &pre_key_record)
+        let mut key_man = KeyManager::default();
+        let device = Device::new(connect().await);
+        let mut device_pre_key_store = DevicePreKeyStore::new(device);
+        let pre_key_record = key_man
+            .generate_pre_key(&mut device_pre_key_store, &mut OsRng)
             .await
             .unwrap();
 
-        let retrived_pre_key = device_pre_key_store.get_pre_key(pre_key_id).await.unwrap();
+        device_pre_key_store
+            .save_pre_key(pre_key_record.id().unwrap(), &pre_key_record)
+            .await
+            .unwrap();
 
-        assert_eq!(retrived_pre_key.id().unwrap(), pre_key_id);
+        let retrived_pre_key = device_pre_key_store
+            .get_pre_key(pre_key_record.id().unwrap())
+            .await
+            .unwrap();
 
-        assert_eq!(retrived_pre_key.public_key().unwrap(), key_pair.public_key);
+        assert_eq!(retrived_pre_key.id().unwrap(), pre_key_record.id().unwrap());
+
+        assert_eq!(
+            retrived_pre_key.public_key().unwrap(),
+            pre_key_record.key_pair().unwrap().public_key
+        );
 
         assert_eq!(
             retrived_pre_key.private_key().unwrap().serialize(),
-            key_pair.private_key.serialize()
+            pre_key_record.key_pair().unwrap().private_key.serialize()
         );
     }
     #[tokio::test]
     async fn remove_pre_key_test() {
-        let mut device_pre_key_store = DevicePreKeyStore::new(connect().await);
-        let pre_key_id: PreKeyId = 1.into();
-        let key_pair = KeyPair::generate(&mut OsRng);
-        let pre_key_record = PreKeyRecord::new(pre_key_id, &key_pair);
-
-        device_pre_key_store
-            .save_pre_key(pre_key_id, &pre_key_record)
-            .await
-            .unwrap();
-
-        let _ = device_pre_key_store.get_pre_key(pre_key_id).await.unwrap();
-
-        device_pre_key_store
-            .remove_pre_key(pre_key_id)
+        let mut key_man = KeyManager::default();
+        let device = Device::new(connect().await);
+        let mut device_pre_key_store = DevicePreKeyStore::new(device);
+        let pre_key_record = key_man
+            .generate_pre_key(&mut device_pre_key_store, &mut OsRng)
             .await
             .unwrap();
 
         device_pre_key_store
-            .get_pre_key(pre_key_id)
+            .save_pre_key(pre_key_record.id().unwrap(), &pre_key_record)
+            .await
+            .unwrap();
+
+        let _ = device_pre_key_store
+            .get_pre_key(pre_key_record.id().unwrap())
+            .await
+            .unwrap();
+
+        device_pre_key_store
+            .remove_pre_key(pre_key_record.id().unwrap())
+            .await
+            .unwrap();
+
+        device_pre_key_store
+            .get_pre_key(pre_key_record.id().unwrap())
             .await
             .expect_err("We should not be able to retrive the key after deletion");
     }
 
     #[tokio::test]
     async fn get_and_save_signed_pre_key_test() {
-        let mut device_signed_pre_key_store = DeviceSignedPreKeyStore::new(connect().await);
-        let signed_pre_key_id: SignedPreKeyId = 1.into();
-        let now = time_now();
-        let key_pair = KeyPair::generate(&mut OsRng);
-        let signed_pre_key_record =
-            SignedPreKeyRecord::new(signed_pre_key_id, now, &key_pair, &[0u8]);
+        let pool = connect().await;
 
+        let device = Device::new(pool.clone());
+
+        device
+            .insert_account_key_information(
+                IdentityKeyPair::generate(&mut OsRng),
+                new_rand_number(),
+            )
+            .await
+            .unwrap();
+
+        let mut key_man = KeyManager::default();
+        let mut device_identity_key_store = DeviceIdentityKeyStore::new(device.clone());
+        let mut device_signed_pre_key_store = DeviceSignedPreKeyStore::new(device);
+        let signed_pre_key_record = key_man
+            .generate_signed_pre_key(
+                &mut device_identity_key_store,
+                &mut device_signed_pre_key_store,
+                &mut OsRng,
+            )
+            .await
+            .unwrap();
         device_signed_pre_key_store
-            .save_signed_pre_key(signed_pre_key_id, &signed_pre_key_record)
+            .save_signed_pre_key(signed_pre_key_record.id().unwrap(), &signed_pre_key_record)
             .await
             .unwrap();
 
         let retrived_record = device_signed_pre_key_store
-            .get_signed_pre_key(signed_pre_key_id)
+            .get_signed_pre_key(signed_pre_key_record.id().unwrap())
             .await
             .unwrap();
 
-        assert_eq!(retrived_record.id().unwrap(), signed_pre_key_id);
-
-        assert_eq!(retrived_record.public_key().unwrap(), key_pair.public_key);
-
+        assert_eq!(
+            retrived_record.id().unwrap(),
+            signed_pre_key_record.id().unwrap()
+        );
+        assert_eq!(
+            retrived_record.public_key().unwrap(),
+            signed_pre_key_record.key_pair().unwrap().public_key
+        );
         assert_eq!(
             retrived_record.private_key().unwrap().serialize(),
-            key_pair.private_key.serialize()
+            signed_pre_key_record
+                .key_pair()
+                .unwrap()
+                .private_key
+                .serialize()
         );
     }
 
     #[tokio::test]
     async fn get_and_save_kyber_pre_key_test() {
-        let mut device_kyber_pre_key_store = DeviceKyberPreKeyStore::new(connect().await);
-        let kyber_pre_key_id: KyberPreKeyId = 1.into();
-        let now = time_now();
-        let key_pair = libsignal_protocol::kem::KeyPair::generate(KeyType::Kyber1024);
-        let kyber_pre_key_record = KyberPreKeyRecord::new(kyber_pre_key_id, now, &key_pair, &[0u8]);
+        let pool = connect().await;
+
+        let device = Device::new(pool.clone());
+
+        device
+            .insert_account_key_information(
+                IdentityKeyPair::generate(&mut OsRng),
+                new_rand_number(),
+            )
+            .await
+            .unwrap();
+
+        let mut key_man = KeyManager::default();
+        let mut device_identity_key_store = DeviceIdentityKeyStore::new(device.clone());
+        let mut device_kyber_pre_key_store = DeviceKyberPreKeyStore::new(device);
+        let kyber_pre_key_record = key_man
+            .generate_kyber_pre_key(
+                &mut device_identity_key_store,
+                &mut device_kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
 
         device_kyber_pre_key_store
-            .save_kyber_pre_key(kyber_pre_key_id, &kyber_pre_key_record)
+            .save_kyber_pre_key(kyber_pre_key_record.id().unwrap(), &kyber_pre_key_record)
             .await
             .unwrap();
 
         let retrived_record = device_kyber_pre_key_store
-            .get_kyber_pre_key(kyber_pre_key_id)
+            .get_kyber_pre_key(kyber_pre_key_record.id().unwrap())
             .await
             .unwrap();
 
-        assert_eq!(retrived_record.id().unwrap(), kyber_pre_key_id);
+        assert_eq!(
+            retrived_record.id().unwrap(),
+            kyber_pre_key_record.id().unwrap()
+        );
 
         assert_eq!(
             retrived_record.public_key().unwrap().serialize(),
-            key_pair.public_key.serialize()
+            kyber_pre_key_record
+                .key_pair()
+                .unwrap()
+                .public_key
+                .serialize()
         );
 
         assert_eq!(
             retrived_record.secret_key().unwrap().serialize(),
-            key_pair.secret_key.serialize()
+            kyber_pre_key_record
+                .key_pair()
+                .unwrap()
+                .secret_key
+                .serialize()
         );
     }
 
     #[tokio::test]
     async fn load_and_store_session_test() {
-        let mut device_session_store = DeviceSessionStore::new(connect().await);
-        let address = ProtocolAddress::new(Aci::from(Uuid::new_v4()).service_id_string(), 1.into());
+        let device = Device::new(connect().await);
+        let mut device_session_store = DeviceSessionStore::new(device);
+        let address = new_protocol_address();
         let record = SessionRecord::new_fresh();
 
         // Not stored yet
@@ -1006,6 +1174,287 @@ mod device_protocol_test {
                 .serialize()
                 .unwrap(),
             record.serialize().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn insert_and_get_key_ids() {
+        let pool = connect().await;
+
+        let device = Device::new(pool.clone());
+
+        device
+            .insert_account_key_information(
+                IdentityKeyPair::generate(&mut OsRng),
+                new_rand_number(),
+            )
+            .await
+            .unwrap();
+
+        let mut key_man = KeyManager::default();
+        let mut device_identity_key_store = DeviceIdentityKeyStore::new(device.clone());
+        let mut device_pre_key_store = DevicePreKeyStore::new(device.clone());
+        let mut device_signed_pre_key_store = DeviceSignedPreKeyStore::new(device.clone());
+        let mut device_kyber_pre_key_store = DeviceKyberPreKeyStore::new(device.clone());
+        let pre_key_record = key_man
+            .generate_pre_key(&mut device_pre_key_store, &mut OsRng)
+            .await
+            .unwrap();
+        let signed_pre_key_record1 = key_man
+            .generate_signed_pre_key(
+                &mut device_identity_key_store,
+                &mut device_signed_pre_key_store,
+                &mut OsRng,
+            )
+            .await
+            .unwrap();
+        let signed_pre_key_record2 = key_man
+            .generate_signed_pre_key(
+                &mut device_identity_key_store,
+                &mut device_signed_pre_key_store,
+                &mut OsRng,
+            )
+            .await
+            .unwrap();
+        let kyber_pre_key_record1 = key_man
+            .generate_kyber_pre_key(
+                &mut device_identity_key_store,
+                &mut device_kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
+        let kyber_pre_key_record2 = key_man
+            .generate_kyber_pre_key(
+                &mut device_identity_key_store,
+                &mut device_kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
+        let kyber_pre_key_record3 = key_man
+            .generate_kyber_pre_key(
+                &mut device_identity_key_store,
+                &mut device_kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
+
+        device_pre_key_store
+            .save_pre_key(pre_key_record.id().unwrap(), &pre_key_record)
+            .await
+            .unwrap();
+
+        device_signed_pre_key_store
+            .save_signed_pre_key(
+                signed_pre_key_record1.id().unwrap(),
+                &signed_pre_key_record1,
+            )
+            .await
+            .unwrap();
+        device_signed_pre_key_store
+            .save_signed_pre_key(
+                signed_pre_key_record2.id().unwrap(),
+                &signed_pre_key_record2,
+            )
+            .await
+            .unwrap();
+
+        device_kyber_pre_key_store
+            .save_kyber_pre_key(kyber_pre_key_record1.id().unwrap(), &kyber_pre_key_record1)
+            .await
+            .unwrap();
+        device_kyber_pre_key_store
+            .save_kyber_pre_key(kyber_pre_key_record2.id().unwrap(), &kyber_pre_key_record2)
+            .await
+            .unwrap();
+        device_kyber_pre_key_store
+            .save_kyber_pre_key(kyber_pre_key_record3.id().unwrap(), &kyber_pre_key_record3)
+            .await
+            .unwrap();
+
+        let (pkidmax, spkidmax, kpkidmax) = device.get_key_ids().await.unwrap();
+
+        assert_eq!(pkidmax, 0);
+        assert_eq!(spkidmax, 1);
+        assert_eq!(kpkidmax, 2);
+    }
+
+    #[tokio::test]
+    async fn remove_key_and_get_ids_test() {
+        let pool = connect().await;
+
+        let device = Device::new(pool.clone());
+
+        device
+            .insert_account_key_information(
+                IdentityKeyPair::generate(&mut OsRng),
+                new_rand_number(),
+            )
+            .await
+            .unwrap();
+
+        let mut key_man = KeyManager::default();
+        let mut device_identity_key_store = DeviceIdentityKeyStore::new(device.clone());
+        let mut device_pre_key_store = DevicePreKeyStore::new(device.clone());
+        let mut device_signed_pre_key_store = DeviceSignedPreKeyStore::new(device.clone());
+        let mut device_kyber_pre_key_store = DeviceKyberPreKeyStore::new(device.clone());
+        let pre_key_record1 = key_man
+            .generate_pre_key(&mut device_pre_key_store, &mut OsRng)
+            .await
+            .unwrap();
+        let pre_key_record2 = key_man
+            .generate_pre_key(&mut device_pre_key_store, &mut OsRng)
+            .await
+            .unwrap();
+        let signed_pre_key_record1 = key_man
+            .generate_signed_pre_key(
+                &mut device_identity_key_store,
+                &mut device_signed_pre_key_store,
+                &mut OsRng,
+            )
+            .await
+            .unwrap();
+        let signed_pre_key_record2 = key_man
+            .generate_signed_pre_key(
+                &mut device_identity_key_store,
+                &mut device_signed_pre_key_store,
+                &mut OsRng,
+            )
+            .await
+            .unwrap();
+        let kyber_pre_key_record1 = key_man
+            .generate_kyber_pre_key(
+                &mut device_identity_key_store,
+                &mut device_kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
+        let kyber_pre_key_record2 = key_man
+            .generate_kyber_pre_key(
+                &mut device_identity_key_store,
+                &mut device_kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
+        let kyber_pre_key_record3 = key_man
+            .generate_kyber_pre_key(
+                &mut device_identity_key_store,
+                &mut device_kyber_pre_key_store,
+            )
+            .await
+            .unwrap();
+
+        device_pre_key_store
+            .save_pre_key(pre_key_record1.id().unwrap(), &pre_key_record1)
+            .await
+            .unwrap();
+        device_pre_key_store
+            .remove_pre_key(pre_key_record1.id().unwrap())
+            .await
+            .unwrap();
+        device_pre_key_store
+            .save_pre_key(pre_key_record2.id().unwrap(), &pre_key_record2)
+            .await
+            .unwrap();
+
+        device_signed_pre_key_store
+            .save_signed_pre_key(
+                signed_pre_key_record1.id().unwrap(),
+                &signed_pre_key_record1,
+            )
+            .await
+            .unwrap();
+        device_signed_pre_key_store
+            .save_signed_pre_key(
+                signed_pre_key_record2.id().unwrap(),
+                &signed_pre_key_record2,
+            )
+            .await
+            .unwrap();
+
+        device_kyber_pre_key_store
+            .save_kyber_pre_key(kyber_pre_key_record1.id().unwrap(), &kyber_pre_key_record1)
+            .await
+            .unwrap();
+        device_kyber_pre_key_store
+            .save_kyber_pre_key(kyber_pre_key_record2.id().unwrap(), &kyber_pre_key_record2)
+            .await
+            .unwrap();
+        device_kyber_pre_key_store
+            .save_kyber_pre_key(kyber_pre_key_record3.id().unwrap(), &kyber_pre_key_record3)
+            .await
+            .unwrap();
+
+        let (pkidmax, spkidmax, kpkidmax) = device.get_key_ids().await.unwrap();
+
+        assert_eq!(pkidmax, 1);
+        assert_eq!(spkidmax, 1);
+        assert_eq!(kpkidmax, 2);
+    }
+
+    #[tokio::test]
+    async fn store_and_load_contact() {
+        // store_contact
+        // load_contact
+        let device = Device::new(connect().await);
+
+        let contacts = vec![new_contact(), new_contact(), new_contact()];
+
+        device.store_contact(&contacts[0]).await.unwrap();
+        device.store_contact(&contacts[1]).await.unwrap();
+        device.store_contact(&contacts[2]).await.unwrap();
+
+        let retrived_contacts = device.load_contacts().await.unwrap();
+
+        assert_eq!(contacts, retrived_contacts);
+    }
+
+    #[tokio::test]
+    async fn insert_and_get_address_by_nickname() {
+        // insert_address_for_nickname
+        // get_address_by_nickname
+        let device = Device::new(connect().await);
+
+        let nicknames = vec!["Alice", "Bob", "Charlie"];
+
+        let nickname_map = HashMap::from([
+            (nicknames[0], new_service_id()),
+            (nicknames[1], new_service_id()),
+            (nicknames[2], new_service_id()),
+        ]);
+
+        device
+            .insert_service_id_for_nickname(nicknames[0], &nickname_map[nicknames[0]])
+            .await
+            .unwrap();
+        device
+            .insert_service_id_for_nickname(nicknames[1], &nickname_map[nicknames[1]])
+            .await
+            .unwrap();
+        device
+            .insert_service_id_for_nickname(nicknames[2], &nickname_map[nicknames[2]])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            device
+                .get_service_id_by_nickname(nicknames[0])
+                .await
+                .unwrap(),
+            nickname_map[nicknames[0]]
+        );
+        assert_eq!(
+            device
+                .get_service_id_by_nickname(nicknames[1])
+                .await
+                .unwrap(),
+            nickname_map[nicknames[1]]
+        );
+        assert_eq!(
+            device
+                .get_service_id_by_nickname(nicknames[2])
+                .await
+                .unwrap(),
+            nickname_map[nicknames[2]]
         );
     }
 }

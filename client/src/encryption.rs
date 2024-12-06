@@ -1,7 +1,7 @@
 use crate::{
     contact_manager::Contact,
     errors::{SendMessageError, SignalClientError},
-    storage::generic::{ProtocolStore, StorageType},
+    storage::{database::ClientDB, generic::ProtocolStore},
 };
 use libsignal_core::{DeviceId, ProtocolAddress};
 use libsignal_protocol::{
@@ -40,7 +40,7 @@ pub async fn encrypt(
     Ok(msgs)
 }
 
-pub async fn decrypt<R: Rng + CryptoRng, T: StorageType>(
+pub async fn decrypt<R: Rng + CryptoRng, T: ClientDB>(
     store: &mut ProtocolStore<T>,
     rng: &mut R,
     from_address: &ProtocolAddress,
@@ -110,21 +110,24 @@ pub mod test {
         contact_manager::ContactManager,
         encryption::{decrypt, encrypt},
         storage::{generic::ProtocolStore, in_memory::InMemory},
-        test_utils::user::{new_device_id, new_service_id},
+        test_utils::user::{new_aci, new_device_id, new_pni, new_rand_number, new_service_id},
     };
     use libsignal_protocol::{
-        kem, process_prekey_bundle, GenericSignedPreKey, KeyPair, KyberPreKeyRecord,
-        KyberPreKeyStore, PreKeyBundle, PreKeyRecord, PreKeyStore, SignedPreKeyRecord,
-        SignedPreKeyStore, Timestamp,
+        kem, process_prekey_bundle, GenericSignedPreKey, IdentityKeyPair, KeyPair,
+        KyberPreKeyRecord, KyberPreKeyStore, PreKeyBundle, PreKeyRecord, PreKeyStore,
+        SignedPreKeyRecord, SignedPreKeyStore, Timestamp,
     };
     use rand::{rngs::OsRng, CryptoRng, Rng};
     use std::time::SystemTime;
 
     pub fn store(reg: u32) -> ProtocolStore<InMemory> {
-        let mut rng = OsRng;
-        let p = KeyPair::generate(&mut rng).into();
-
-        ProtocolStore::new(p, reg)
+        ProtocolStore::new(InMemory::new(
+            "password".to_string(),
+            new_aci(),
+            new_pni(),
+            IdentityKeyPair::generate(&mut OsRng),
+            new_rand_number(),
+        ))
     }
 
     pub async fn create_pre_key_bundle<R: Rng + CryptoRng>(
@@ -217,8 +220,12 @@ pub mod test {
         let bob_device = new_device_id();
 
         let mut manager = ContactManager::new();
-        let _ = manager.add_contact(&alice_id, alice_device);
-        let _ = manager.add_contact(&bob_id, bob_device);
+        let _ = manager.add_contact(&alice_id);
+        let _ = manager.add_contact(&bob_id);
+        manager
+            .update_contact(&alice_id, vec![alice_device])
+            .unwrap();
+        manager.update_contact(&bob_id, vec![bob_device]).unwrap();
 
         let mut alice_store = store(1);
         let mut bob_store = store(0);
