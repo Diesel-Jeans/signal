@@ -176,6 +176,7 @@ impl SignalServerAPI for SignalServer {
     ) -> Result<RegistrationResponse, SignalClientError> {
         let payload = json!(registration_request);
         let auth_header = BasicAuthorizationHeader::new(phone_number, 1, password);
+        println!("{}", REGISTER_URI);
         let mut res = self
             .http_client
             .post(REGISTER_URI)

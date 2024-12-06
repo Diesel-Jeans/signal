@@ -106,7 +106,7 @@ pub async fn signal_ws_connect(
     password: &str,
 ) -> Result<TLSWebSocket, String> {
     let tls_cfg = rustls_cfg(tls_cert)?;
-    let url = url.replace("https", "wss").replace("http", "ws");
+    let url = format!("{}/v1/websocket", url.replace("http", "ws"));
     let mut req = url
         .into_client_request()
         .map_err(|_| "Failed to convert to client request".to_string())?;
