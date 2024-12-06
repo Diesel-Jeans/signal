@@ -166,12 +166,7 @@ impl<ST: StorageType, SSA: SignalServerAPI> Client<ST, SSA> {
         server_api.publish_pre_key_bundle(key_bundle).await?;
 
         server_api
-            .connect(
-                &aci.service_id_string(),
-                &password,
-                "wss://127.0.0.1:4444/v1/websocket",
-                "../server/cert/rootCA.crt",
-            )
+            .connect(&aci.service_id_string(), &password, server_url, cert_path)
             .await?;
 
         Ok(Client::new(
