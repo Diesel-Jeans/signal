@@ -75,7 +75,7 @@ pub trait SignalServerAPI {
     /// Send a message to another user.
     async fn send_msg(
         &mut self,
-        messages: SignalMessages,
+        messages: &SignalMessages,
         service_id: &ServiceId,
     ) -> Result<(), SignalClientError>;
 
@@ -205,7 +205,7 @@ impl SignalServerAPI for SignalServer {
 
     async fn send_msg(
         &mut self,
-        messages: SignalMessages,
+        messages: &SignalMessages,
         recipient: &ServiceId,
     ) -> Result<(), SignalClientError> {
         let payload = to_vec(&messages).unwrap();
@@ -219,7 +219,6 @@ impl SignalServerAPI for SignalServer {
             .await
             .map_err(SendMessageError::WebSocketError)?;
 
-        // TODO handle send went wrong.
         Ok(())
     }
 

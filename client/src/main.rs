@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
-    let mut alice = Client::<Device, SignalServer>::register(
+    /*let mut alice = Client::<Device, SignalServer>::register(
         "alice_device",
         "123456789".into(),
         &alice_db_url,
@@ -58,9 +58,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &server_url,
         &cert_path,
     )
-    .await?;
+    .await?;*/
+    let mut alice =
+        Client::<Device, SignalServer>::login(&alice_db_url, &cert_path, &server_url).await?;
+    let mut bob =
+        Client::<Device, SignalServer>::login(&bob_db_url, &cert_path, &server_url).await?;
 
-    alice.send_message("Hello Bob!", &bob.aci.into()).await?;
+    alice
+        .send_message("Hello Bob!", &bob.aci.into(), "bob")
+        .await?;
 
     let message_from_alice = bob.receive_message().await;
 
@@ -69,7 +75,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(err) => println!("{:?}", err),
     }
 
-    bob.send_message("Hello Alice!", &alice.aci.into()).await?;
+    bob.send_message("Hello Alice!", &alice.aci.into(), "alice")
+        .await?;
 
     let message_from_bob = alice.receive_message().await;
 

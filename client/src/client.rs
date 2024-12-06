@@ -1,6 +1,6 @@
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use core::str;
-use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
+use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use rand::{rngs::OsRng, Rng};
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use std::collections::HashMap;
@@ -249,12 +249,17 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
             device.get_pni().await.map_err(DatabaseError::from)?,
             ContactManager::new_with_contacts(contacts),
             server_api,
-            KeyManager::new(signed, kyber, one_time),
+            KeyManager::new(signed + 1, kyber + 1, one_time + 1), // Adds 1 to prevent reusing key ids
             Storage::new(device.clone(), ProtocolStore::new(device.clone())),
         ))
     }
 
-    pub async fn send_message(&mut self, message: &str, service_id: &ServiceId) -> Result<()> {
+    pub async fn send_message(
+        &mut self,
+        message: &str,
+        service_id: &ServiceId,
+        alias: &str,
+    ) -> Result<()> {
         let content = Content::builder()
             .data_message(
                 DataMessage::builder()
@@ -272,28 +277,13 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
         // Update the contact.
         let to = match self.contact_manager.get_contact(service_id) {
             Err(_) => {
-                self.contact_manager
-                    .add_contact(service_id)
-                    .expect("Can add contact that does not exist yet");
-                let bundles = self.server_api.fetch_pre_key_bundles(service_id).await?;
-
-                let mut device_ids = Vec::new();
-                let time = SystemTime::now();
-                for ref bundle in bundles {
-                    // Device id is safe to unwrap.
-                    let device_id = bundle.device_id().unwrap();
-                    device_ids.push(device_id);
-                    process_prekey_bundle(
-                        &ProtocolAddress::new(service_id.service_id_string(), device_id),
-                        &mut self.storage.protocol_store.session_store,
-                        &mut self.storage.protocol_store.identity_key_store,
-                        bundle,
-                        time,
-                        &mut OsRng,
-                    )
+                self.add_contact(alias, service_id)
                     .await
-                    .map_err(ProcessPreKeyBundleError)?;
-                }
+                    .expect("Can add contact that does not exist yet");
+
+                let device_ids = self.get_new_device_ids(service_id).await?;
+
+                self.update_contact(alias, device_ids).await?;
 
                 self.contact_manager
                     .get_contact(service_id)
@@ -341,7 +331,14 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
                 .as_secs(),
         };
 
-        self.server_api.send_msg(msgs, service_id).await
+        match self.server_api.send_msg(&msgs, service_id).await {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                let device_ids = self.get_new_device_ids(service_id).await?;
+                self.update_contact(alias, device_ids).await?;
+                self.server_api.send_msg(&msgs, service_id).await
+            }
+        }
     }
 
     pub async fn receive_message(&mut self) -> Result<String> {
@@ -403,7 +400,7 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
         )
     }
 
-    pub async fn add_contact(&mut self, alias: &str, service_id: ServiceId) -> Result<()> {
+    pub async fn add_contact(&mut self, alias: &str, service_id: &ServiceId) -> Result<()> {
         self.contact_manager
             .add_contact(&service_id)
             .map_err(SignalClientError::ContactManagerError)?;
@@ -435,13 +432,61 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
 
         self.contact_manager
             .remove_contact(&service_id)
-            .map_err(DatabaseError::from)?;
+            .map_err(SignalClientError::ContactManagerError)?;
 
         self.storage
             .device
             .remove_contact(&service_id)
             .await
             .map_err(|err| DatabaseError::Custom(Box::new(err)).into())
+    }
+
+    pub async fn update_contact(&mut self, alias: &str, device_ids: Vec<DeviceId>) -> Result<()> {
+        let service_id = self
+            .storage
+            .device
+            .get_service_id_by_nickname(alias)
+            .await
+            .map_err(DatabaseError::from)?;
+
+        self.contact_manager
+            .update_contact(&service_id, device_ids)
+            .map_err(SignalClientError::ContactManagerError)?;
+
+        let contact = self
+            .contact_manager
+            .get_contact(&service_id)
+            .map_err(SignalClientError::ContactManagerError)?;
+
+        self.storage
+            .device
+            .store_contact(contact)
+            .await
+            .map_err(|err| DatabaseError::Custom(Box::new(err)).into())
+    }
+
+    async fn get_new_device_ids(&mut self, service_id: &ServiceId) -> Result<Vec<DeviceId>> {
+        let bundles = self.server_api.fetch_pre_key_bundles(service_id).await?;
+
+        let mut device_ids = Vec::new();
+        let time = SystemTime::now();
+        for ref bundle in bundles {
+            // Device id is safe to unwrap.
+            let device_id = bundle.device_id().unwrap();
+            device_ids.push(device_id);
+            process_prekey_bundle(
+                &ProtocolAddress::new(service_id.service_id_string(), device_id),
+                &mut self.storage.protocol_store.session_store,
+                &mut self.storage.protocol_store.identity_key_store,
+                bundle,
+                time,
+                &mut OsRng,
+            )
+            .await
+            .map_err(ProcessPreKeyBundleError)?;
+        }
+
+        Ok(device_ids)
     }
 }
 
