@@ -6,13 +6,15 @@ use crate::{
     socket_manager::signal_ws_connect,
 };
 use async_native_tls::{Certificate, TlsConnector};
-use common::signalservice::{web_socket_message, Envelope, WebSocketMessage};
+use common::signalservice::{
+    web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
+};
 use common::web_api::{
     authorization::BasicAuthorizationHeader, PreKeyResponse, RegistrationRequest,
     RegistrationResponse,
 };
 use common::web_api::{SetKeyRequest, SignalMessages};
-use common::websocket::net_helper::create_request;
+use common::websocket::net_helper::{create_request, create_response};
 use http_client::h1::H1Client;
 use libsignal_core::{Aci, DeviceId, ServiceId};
 use libsignal_protocol::PreKeyBundle;
@@ -23,6 +25,7 @@ use std::fmt::Display;
 use std::{env, fmt::Debug, fs, sync::Arc, time::Duration};
 use surf::{http::convert::json, Client, Config, Url};
 use surf::{Response, StatusCode};
+use tokio::sync::broadcast::Receiver;
 
 const REGISTER_URI: &str = "v1/registration";
 const MSG_URI: &str = "/v1/messages";
@@ -79,7 +82,14 @@ pub trait SignalServerAPI {
         service_id: &ServiceId,
     ) -> Result<(), SignalClientError>;
 
-    async fn get_message(&mut self) -> Option<Envelope>;
+    async fn get_message(&mut self) -> Option<WebSocketRequestMessage>;
+
+    async fn send_response(
+        &mut self,
+        request: WebSocketRequestMessage,
+        status_code: axum::http::StatusCode,
+    ) -> Result<(), SignalClientError>;
+
     fn create_auth_header(&mut self, aci: Aci, password: String, device_id: DeviceId) -> ();
 }
 
@@ -222,17 +232,25 @@ impl SignalServerAPI for SignalServer {
         Ok(())
     }
 
-    async fn get_message(&mut self) -> Option<Envelope> {
-        let Some(req) = self.message_queue.recv().await?.request else {
-            return None;
-        };
-        match Envelope::decode(req.body()) {
-            Ok(e) => Some(e),
-            Err(e) => {
-                println!("Failed to decode envelope: {}", e);
-                None
-            }
-        }
+    // FIX:
+    async fn send_response(
+        &mut self,
+        request: WebSocketRequestMessage,
+        status_code: axum::http::StatusCode,
+    ) -> Result<(), SignalClientError> {
+        let id = request.id.expect("This is always some");
+        self.socket_manager
+            .send_response(
+                create_response(id, status_code, vec![], None).expect("This always goes well"),
+            )
+            .await
+            .map_err(SendMessageError::WebSocketError)?;
+
+        Ok(())
+    }
+
+    async fn get_message(&mut self) -> Option<WebSocketRequestMessage> {
+        self.message_queue.recv().await?.request
     }
 
     fn create_auth_header(&mut self, aci: Aci, password: String, device_id: DeviceId) -> () {

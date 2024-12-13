@@ -1,8 +1,9 @@
+use axum::http::StatusCode;
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use core::str;
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use rand::{rngs::OsRng, Rng};
-use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
+use sqlx::{decode, migrate::MigrateDatabase, Sqlite, SqlitePool};
 use std::collections::HashMap;
 
 use crate::{
@@ -20,7 +21,7 @@ use crate::{
     },
 };
 use common::{
-    signalservice::{envelope, Content, DataMessage},
+    signalservice::{envelope, Content, DataMessage, Envelope},
     web_api::{
         AccountAttributes, DeviceCapabilities, RegistrationRequest, SignalMessage, SignalMessages,
     },
@@ -343,11 +344,25 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
 
     pub async fn receive_message(&mut self) -> Result<String> {
         // I get Envelope from Server.
-        let envelope = self
+        let request = self
             .server_api
             .get_message()
             .await
             .ok_or(ReceiveMessageError::NoMessageReceived)?;
+
+        // FIX:
+        let envelope = match Envelope::decode(request.body()) {
+            Ok(e) => e,
+            Err(_) => {
+                self.server_api
+                    .send_response(request, StatusCode::INTERNAL_SERVER_ERROR)
+                    .await?;
+
+                return Err(SignalClientError::ReceiveMessageError(
+                    ReceiveMessageError::EnvelopeDecodeError,
+                ));
+            }
+        };
 
         // Envelope contains a ciphertext message; a so called `encrypted [Content]`
         let ciphertext_content = envelope.content();
@@ -389,6 +404,7 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
         .await
         .map_err(ReceiveMessageError::DecryptMessageError)?;
 
+        self.server_api.send_response(request, StatusCode::OK).await;
         // The final message is stored within a DataMessage inside a Content.
         Ok(
             Content::decode(unpad_message(plaintext.as_ref()).unwrap().as_ref())

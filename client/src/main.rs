@@ -1,6 +1,6 @@
 use client::Client;
 use dotenv::dotenv;
-use server::SignalServer;
+use server::{SignalServer, SignalServerAPI};
 use std::{env::var, error::Error, fs, path::PathBuf};
 use storage::device::Device;
 
@@ -64,6 +64,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut bob =
         Client::<Device, SignalServer>::login(&bob_db_url, &cert_path, &server_url).await?;
 
+    // 1st message
     alice
         .send_message("Hello Bob!", &bob.aci.into(), "bob")
         .await?;
@@ -76,6 +77,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     bob.send_message("Hello Alice!", &alice.aci.into(), "alice")
+        .await?;
+
+    let message_from_bob = alice.receive_message().await;
+
+    match message_from_bob {
+        Ok(message) => println!("{message}"),
+        Err(err) => println!("{:?}", err),
+    }
+
+    // 2nd message
+    alice
+        .send_message("Hello Bob again!", &bob.aci.into(), "bob")
+        .await?;
+
+    let message_from_alice = bob.receive_message().await;
+
+    match message_from_alice {
+        Ok(message) => println!("{message}"),
+        Err(err) => println!("{:?}", err),
+    }
+
+    bob.send_message("Hello Alice again!", &alice.aci.into(), "alice")
         .await?;
 
     let message_from_bob = alice.receive_message().await;

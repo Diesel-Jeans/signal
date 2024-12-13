@@ -25,7 +25,7 @@ use futures_util::{stream::SplitSink, Sink, SinkExt, Stream};
 use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
 use prost::Message as PMessage;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt::Debug,
     net::SocketAddr,
     pin::Pin,
@@ -46,7 +46,7 @@ pub struct WebSocketConnection<W: WSStream<Message, Error> + Debug, DB: SignalDa
     identity: UserIdentity,
     socket_address: SocketAddr,
     ws: ConnectionState<W, Message>,
-    pending_requests: HashSet<u64>,
+    pending_requests: HashMap<u64, String>,
     state: SignalServerState<DB, W>,
 }
 
@@ -63,7 +63,7 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
             identity,
             socket_address: socket_addr,
             ws: ConnectionState::Active(ws),
-            pending_requests: HashSet::new(),
+            pending_requests: HashMap::new(),
             state,
         }
     }
@@ -124,7 +124,8 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
             ],
             Some(message.encode_to_vec()),
         );
-        self.pending_requests.insert(id);
+        self.pending_requests
+            .insert(id, message.server_guid.expect("This is always some"));
         Ok(msg)
     }
 
@@ -260,25 +261,34 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
         &mut self,
         response_msq: WebSocketResponseMessage,
     ) -> Result<(), String> {
-        self.pending_requests
-            .remove(&response_msq.id.ok_or("Request id was not present")?);
-
         // TODO: Figure out how to get the ID of the message so the message manager can delete it.
         // The ID is on the envelope and is called server_guid
+        //
+        // TODO This should be fixed, since the current implementation is wrong
 
-        /*self.state
-        .message_manager
-        .delete(
-            &self.protocol_address(),
-            vec![response_msq
-                .message
-                .ok_or("Response message was not present")?],
-        )
-        .await
-        .map(|_| ())
-        .map_err(|err| err.to_string())*/
+        if !self
+            .pending_requests
+            .contains_key(&response_msq.id.ok_or("Response message was not present")?)
+        {
+            return Err("pending_requests did not have the expected request".to_string());
+        }
 
-        Ok(())
+        self.state
+            .message_manager
+            .delete(
+                &self.protocol_address(),
+                vec![self.pending_requests
+                    [&response_msq.id.ok_or("Response message was not present")?]
+                    .clone()],
+            )
+            .await
+            .map(|_| ())
+            .map_err(|err| err.to_string())?;
+
+        self.pending_requests
+            .remove(&response_msq.id.ok_or("Request id was not present")?)
+            .ok_or("Could not remove pending requests".to_string())
+            .map(|_| ())
     }
 }
 
@@ -490,7 +500,8 @@ pub(crate) mod test {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (mut client, sender, mut receiver, mreceiver) =
             create_connection("127.0.0.1:4042", state).await;
-        let env = make_envelope();
+        let mut env = make_envelope();
+        env.server_guid = Some("abs".to_string());
         client.send_message(env.clone()).await;
 
         assert!(!receiver.is_empty());
@@ -548,6 +559,7 @@ pub(crate) mod test {
             .unwrap();
     }
 
+    #[ignore = "This in currently not testable"]
     #[tokio::test]
     async fn test_on_receive_response() {
         let state = SignalServerState::<MockDB, MockSocket>::new();

@@ -116,6 +116,7 @@ pub enum ReceiveMessageError {
     ProtobufDecodeContentError(prost::DecodeError),
     InvalidMessageContent,
     NoMessageReceived,
+    EnvelopeDecodeError,
 }
 
 impl From<ParseProtocolAddressError> for SignalClientError {
