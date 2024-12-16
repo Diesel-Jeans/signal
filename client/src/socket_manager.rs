@@ -318,6 +318,22 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<T
         drop(guard);
         self.wait_for_id(id).await
     }
+
+    pub async fn send_response(&mut self, message: MessageType) -> Result<(), String> {
+        let mut guard = self.connection.lock().await;
+        match *guard {
+            ConnectionState::Active(ref mut sender) => {
+                sender
+                    .send(Message::Binary(message.encode_to_vec()))
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            ConnectionState::Closed => return Err("Closed".to_string()),
+        }
+        drop(guard);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
