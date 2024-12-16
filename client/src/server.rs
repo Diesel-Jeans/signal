@@ -219,7 +219,7 @@ impl SignalServerAPI for SignalServer {
         recipient: &ServiceId,
     ) -> Result<(), SignalClientError> {
         let payload = to_vec(&messages).unwrap();
-        let uri = format!("{}/{}", MSG_URI, recipient.service_id_string());
+        let uri = format!("{}/{}?story=false", MSG_URI, recipient.service_id_string());
         println!("Sending message to: {}", uri);
 
         let id = self.socket_manager.next_id();
