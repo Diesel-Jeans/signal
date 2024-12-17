@@ -223,12 +223,14 @@ impl SignalServerAPI for SignalServer {
         println!("Sending message to: {}", uri);
 
         let id = self.socket_manager.next_id();
+        let req = create_request(id, "PUT", &uri, vec![], Some(payload));
+        println!("SENDING MESSAGE:\n{:?}", req);
         let response = self
             .socket_manager
-            .send(id, create_request(id, "PUT", &uri, vec![], Some(payload)))
+            .send(id, req)
             .await
             .map_err(SendMessageError::WebSocketError)?;
-
+        println!("RECEIVED RESPONSE FOR MESSAGE:\n{:?}", response);
         Ok(())
     }
 
@@ -250,7 +252,9 @@ impl SignalServerAPI for SignalServer {
     }
 
     async fn get_message(&mut self) -> Option<WebSocketRequestMessage> {
-        self.message_queue.recv().await?.request
+        let msg = self.message_queue.recv().await?;
+        println!("RECEIVED MESSAGE:\n{:?}", msg);
+        msg.request
     }
 
     fn create_auth_header(&mut self, aci: Aci, password: String, device_id: DeviceId) -> () {

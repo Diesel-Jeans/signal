@@ -86,28 +86,5 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Ok(message) => println!("{message}"),
         Err(err) => println!("{:?}", err),
     }
-
-    // 2nd message
-    alice
-        .send_message("Hello Bob again!", &bob.aci.into(), "bob")
-        .await?;
-
-    let message_from_alice = bob.receive_message().await;
-
-    match message_from_alice {
-        Ok(message) => println!("{message}"),
-        Err(err) => println!("{:?}", err),
-    }
-
-    bob.send_message("Hello Alice again!", &alice.aci.into(), "alice")
-        .await?;
-
-    let message_from_bob = alice.receive_message().await;
-
-    match message_from_bob {
-        Ok(message) => println!("{message}"),
-        Err(err) => println!("{:?}", err),
-    }
-
     Ok(())
 }

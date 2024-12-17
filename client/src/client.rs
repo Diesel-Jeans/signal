@@ -274,7 +274,7 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
             .build();
 
         let timestamp = SystemTime::now();
-
+        println!("CONTENT:\n{:?}", content);
         // Update the contact.
         let to = match self.contact_manager.get_contact(service_id) {
             Err(_) => {
@@ -349,7 +349,6 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
             .get_message()
             .await
             .ok_or(ReceiveMessageError::NoMessageReceived)?;
-
         // FIX:
         let envelope = match Envelope::decode(request.body()) {
             Ok(e) => e,

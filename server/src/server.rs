@@ -377,7 +377,7 @@ async fn put_keys_endpoint(
 }
 
 /// Handler for the DELETE v1/accounts/me endpoint.
-#[debug_handler]
+/*#[debug_handler]
 async fn delete_account_endpoint(
     State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
 ) {
@@ -398,7 +398,7 @@ async fn post_link_device_endpoint(
     State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
 ) {
     // TODO: Call `handle_post_link_device`
-}
+}*/
 
 // Websocket upgrade handler '/v1/websocket'
 #[debug_handler]
@@ -448,11 +448,6 @@ async fn create_websocket_endpoint(
 ///  * add the router function to the axum router below.
 ///  * call the handler function from the router function to handle the request.
 pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("Failed to install rustls crypto provider");
-    let config = RustlsConfig::from_pem_file("cert/server.crt", "cert/server.key").await?;
-
     let cors = CorsLayer::new()
         .allow_methods([
             Method::GET,
@@ -482,38 +477,19 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v2/keys/:identifier/:device_id", get(get_keys_endpoint))
         .route("/v2/keys/check", post(post_keycheck_endpoint))
         .route("/v2/keys", put(put_keys_endpoint))
-        .route("/v1/accounts/me", delete(delete_account_endpoint))
-        .route("/v1/devices/link", post(post_link_device_endpoint))
-        .route("/v1/devices/:device_id", delete(delete_device_endpoint))
+        //.route("/v1/accounts/me", delete(delete_account_endpoint))
+        //.route("/v1/devices/link", post(post_link_device_endpoint))
+        //.route("/v1/devices/:device_id", delete(delete_device_endpoint))
         .route("/v1/websocket", any(create_websocket_endpoint))
         .with_state(state)
-        /*.layer(
-            ServiceBuilder::new()
-                .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(trace::DefaultMakeSpan::new().level(Level::DEBUG)), // .on_request(trace::DefaultOnRequest::new().level(Level::TRACE))
-                                                                                            // .on_response(trace::DefaultOnResponse::new().level(Level::TRACE))
-                                                                                            // .on_body_chunk(trace::DefaultOnBodyChunk::new()),
-                )
-                .layer(TraceLayer::new_for_grpc()),
-        )*/
         .layer(cors);
 
     let address = env::var("SERVER_ADDRESS")?;
-    let https_port = env::var("HTTPS_PORT")?;
     let http_port = env::var("HTTP_PORT")?;
 
     let http_addr = SocketAddr::from_str(format!("{}:{}", address, http_port).as_str())?;
-    let https_addr = SocketAddr::from_str(format!("{}:{}", address, https_port).as_str())?;
 
-    // we should probably sometime in future a proxy or something to redirect instead
-    tokio::spawn(redirect_http_to_https(
-        http_addr,
-        http_port.parse()?,
-        https_port.parse()?,
-    ));
-
-    axum_server::bind_rustls(https_addr, config)
+    axum_server::bind(http_addr)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
@@ -521,6 +497,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
 
 fn time_now() -> Result<u64, ApiError> {
     Ok(SystemTime::now()
