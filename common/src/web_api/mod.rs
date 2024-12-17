@@ -322,22 +322,22 @@ impl SetKeyRequest {
 #[serde(rename_all = "camelCase")]
 pub struct PreKeyResponse {
     identity_key: String, // Base64 endcoded
-    keys: Vec<PreKeyResponseItem>,
+    devices: Vec<PreKeyResponseItem>,
 }
 
 impl PreKeyResponse {
-    pub fn new(identity_key: IdentityKey, keys: Vec<PreKeyResponseItem>) -> Self {
+    pub fn new(identity_key: IdentityKey, devices: Vec<PreKeyResponseItem>) -> Self {
         Self {
             identity_key: BASE64_STANDARD.encode(identity_key.serialize()),
-            keys,
+            devices,
         }
     }
 
     pub fn identity_key(&self) -> &str {
         &self.identity_key
     }
-    pub fn keys(&self) -> &Vec<PreKeyResponseItem> {
-        &self.keys
+    pub fn devices(&self) -> &Vec<PreKeyResponseItem> {
+        &self.devices
     }
 }
 
@@ -397,7 +397,7 @@ impl TryFrom<PreKeyResponse> for Vec<PreKeyBundle> {
         .map_err(|_| "Failed decoding identity key")?;
 
         let mut bundles = Vec::new();
-        for pre_key_items in items.keys() {
+        for pre_key_items in items.devices() {
             let pre_key = if let Some(pre_key) = pre_key_items.pre_key() {
                 Some((
                     pre_key.key_id.into(),
