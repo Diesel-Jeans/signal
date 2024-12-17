@@ -264,24 +264,21 @@ impl SignalServerAPI for SignalServer {
 
 impl SignalServer {
     pub fn new(cert_path: &str, server_url: &str) -> Self {
-        let cert_bytes = fs::read(cert_path).expect("Could not read certificate.");
-
-        let crt = Certificate::from_pem(&cert_bytes).expect("Could not parse certificate.");
-
-        let tls_config = Arc::new(TlsConnector::new().add_root_certificate(crt));
+        // Removed cert reading and TLS configuration
+    
         let http_client: H1Client = http_client::Config::new()
             .set_timeout(Some(Duration::from_secs(5)))
-            .set_tls_config(Some(tls_config))
             .try_into()
             .expect("Could not create HTTP client");
+    
         let http_client = Config::new()
             .set_http_client(http_client)
             .set_base_url(Url::parse(server_url).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
-
+    
         let socket_mgr = SocketManager::new(16);
-
+    
         let filter = |x: &WebSocketMessage| -> Option<WebSocketMessage> {
             if x.r#type() != web_socket_message::Type::Request || x.request.is_none() {
                 None
@@ -293,9 +290,9 @@ impl SignalServer {
                 None
             }
         };
-
+    
         let msg_queue = PersistentReceiver::new(socket_mgr.subscribe(), Some(filter));
-
+    
         Self {
             auth_header: None,
             http_client,
@@ -303,6 +300,7 @@ impl SignalServer {
             message_queue: msg_queue,
         }
     }
+    
 
     fn create_auth_header(&mut self, aci: Aci, password: &str, device_id: DeviceId) -> () {
         self.auth_header = Some(BasicAuthorizationHeader::new(

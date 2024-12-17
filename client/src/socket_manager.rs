@@ -21,7 +21,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{
-    client_async_tls_with_config, tungstenite, Connector, MaybeTlsStream, WebSocketStream,
+    client_async_tls_with_config, client_async_with_config, tungstenite, Connector, MaybeTlsStream, WebSocketStream
 };
 use tungstenite::protocol::frame::coding::CloseCode;
 
@@ -105,7 +105,6 @@ pub async fn signal_ws_connect(
     username: &str,
     password: &str,
 ) -> Result<TLSWebSocket, String> {
-    let tls_cfg = rustls_cfg(tls_cert)?;
     let url = format!("{}/v1/websocket", url.replace("http", "ws"));
     let mut req = url
         .into_client_request()
@@ -138,17 +137,19 @@ pub async fn signal_ws_connect(
             .map_err(|_| "Failed to set keepalive".to_string())?;
     }
 
-    let connector = Connector::Rustls(Arc::new(tls_cfg));
+    // Wrap the TCP stream in a MaybeTlsStream for the return type
+    let maybe_tls_stream: MaybeTlsStream<TcpStream> = MaybeTlsStream::Plain(stream);
 
     let config = WebSocketConfig {
         max_frame_size: Some(0x210000),
         ..Default::default()
     };
 
-    let res = client_async_tls_with_config(req, stream, Some(config), Some(connector)).await;
+    let res = client_async_with_config(req, maybe_tls_stream, Some(config)).await;
     let (ws, _) = res.map_err(|_| "Failed to connect to server".to_string())?;
     Ok(ws)
 }
+
 
 type MessageType = WebSocketMessage;
 #[derive(Debug)]
