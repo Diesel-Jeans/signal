@@ -4,8 +4,8 @@ pub mod errors;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use libsignal_protocol::{
     kem::{self},
-    DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyBundle,
-    PreKeyRecord, PublicKey, SignedPreKeyRecord,
+    DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyBundle, PreKeyRecord,
+    PublicKey, SignedPreKeyRecord,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::{base64::Base64, serde_as};
@@ -221,7 +221,7 @@ pub struct UploadSignedPreKey {
     #[serde_as(as = "Base64")]
     pub public_key: Box<[u8]>, // TODO: Make this a PublicKey and implement Serialize
     #[serde_as(as = "Base64")]
-    pub signature: Box<[u8]>,  // TODO: Make this a PublicKey and implement Serialize
+    pub signature: Box<[u8]>, // TODO: Make this a PublicKey and implement Serialize
 }
 
 impl From<SignedPreKeyRecord> for UploadSignedPreKey {
