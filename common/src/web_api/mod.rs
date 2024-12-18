@@ -4,11 +4,11 @@ pub mod errors;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use libsignal_protocol::{
     kem::{self},
-    DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyBundle, PreKeyId,
-    PreKeyRecord, PublicKey, SignedPreKeyRecord,
+    DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyBundle, PreKeyRecord,
+    PublicKey, SignedPreKeyRecord,
 };
-use serde::de::IntoDeserializer;
 use serde::{Deserialize, Serialize};
+use serde_with::{base64::Base64, serde_as};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -46,6 +46,7 @@ impl Default for DeviceCapabilities {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountAttributes {
@@ -54,6 +55,7 @@ pub struct AccountAttributes {
     pub registration_id: u32,
     pub pni_registration_id: u32,
     pub capabilities: DeviceCapabilities,
+    #[serde_as(as = "Base64")]
     pub unidentified_access_key: Box<[u8]>,
 }
 
@@ -211,12 +213,15 @@ pub struct AccountIdentityResponse {
 
 /// Used to upload any type of prekey along with a signature that is used
 /// to verify the authenticity of the prekey.
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadSignedPreKey {
     pub key_id: u32,
+    #[serde_as(as = "Base64")]
     pub public_key: Box<[u8]>, // TODO: Make this a PublicKey and implement Serialize
-    pub signature: Box<[u8]>,  // TODO: Make this a PublicKey and implement Serialize
+    #[serde_as(as = "Base64")]
+    pub signature: Box<[u8]>, // TODO: Make this a PublicKey and implement Serialize
 }
 
 impl From<SignedPreKeyRecord> for UploadSignedPreKey {
@@ -248,17 +253,21 @@ impl From<PreKeyRecord> for UploadPreKey {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadPreKey {
     pub key_id: u32,
+    #[serde_as(as = "Base64")]
     pub public_key: Box<[u8]>,
 }
 
 /// Used to upload a new prekeys.
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadKeys {
+    #[serde_as(as = "Base64")]
     identity_key: Box<[u8]>,
     // If a field is not provided, the server won't update its data.
     pre_keys: Option<UploadSignedPreKey>,
