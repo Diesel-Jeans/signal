@@ -1,14 +1,15 @@
-use axum::http::{StatusCode, Uri};
-use common::signal_protobuf::{
-    web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
+use crate::{
+    signalservice::{
+        web_socket_message, WebSocketMessage, WebSocketRequestMessage, WebSocketResponseMessage,
+    },
+    web_api::SignalMessages,
 };
-use common::web_api::SignalMessages;
-use rand::rngs::OsRng;
-use rand::Rng;
-use serde::Deserialize;
-use std::str::FromStr;
-use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
-use url::Url;
+use axum::http::{StatusCode, Uri};
+use rand::{rngs::OsRng, Rng as _};
+use std::{
+    str::FromStr,
+    time::{SystemTime, SystemTimeError, UNIX_EPOCH},
+};
 
 pub struct PathExtractor {
     parts: Vec<String>,
@@ -113,12 +114,11 @@ pub fn current_millis() -> Result<u128, SystemTimeError> {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
-    use std::str::FromStr;
-
+mod test {
     use super::{create_request, create_response, unpack_messages, PathExtractor};
+    use crate::signalservice::web_socket_message;
     use axum::http::{StatusCode, Uri};
-    use common::signal_protobuf::web_socket_message;
+    use std::str::FromStr;
 
     #[test]
     fn test_path_extractor() {
@@ -170,20 +170,20 @@ pub(crate) mod test {
     #[test]
     fn test_unpack_messages() {
         let msg = r#"
-{
-    "messages":[
         {
-            "type": 1,
-            "destinationDeviceId": 3,
-            "destinationRegistrationId": 22,
-            "content": "aGVsbG8="
+            "messages":[
+                {
+                    "type": 1,
+                    "destinationDeviceId": 3,
+                    "destinationRegistrationId": 22,
+                    "content": "aGVsbG8="
+                }
+            ],
+            "online": false,
+            "urgent": true,
+            "timestamp": 1730217386
         }
-    ],
-    "online": false,
-    "urgent": true,
-    "timestamp": 1730217386
-}
-"#;
+        "#;
         let b = msg.as_bytes().to_vec();
 
         let req = create_request(1, "PUT", "/v1/messages", vec![], Some(b));

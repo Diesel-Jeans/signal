@@ -1,38 +1,103 @@
+use crate::errors::SendMessageError;
+use crate::socket_manager::{SignalStream, SocketManager};
 use crate::{
-    client::VerifiedSession,
-    contact_manager::Contact,
-    websockets::{KeepAliveOptions, SendRequestOptions, WebsocketHandler},
+    errors::{RegistrationError, SignalClientError},
+    persistent_receiver::PersistentReceiver,
+    socket_manager::signal_ws_connect,
 };
-use anyhow::Result;
 use async_native_tls::{Certificate, TlsConnector};
-use common::{
-    signal_protobuf::{WebSocketRequestMessage, WebSocketResponseMessage},
-    web_api::{
-        authorization::BasicAuthorizationHeader, AccountAttributes, RegistrationRequest,
-        UploadSignedPreKey,
-    },
+use common::signalservice::{
+    web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
 };
+use common::web_api::{
+    authorization::BasicAuthorizationHeader, PreKeyResponse, RegistrationRequest,
+    RegistrationResponse,
+};
+use common::web_api::{SetKeyRequest, SignalMessages};
+use common::websocket::net_helper::{create_request, create_response};
 use http_client::h1::H1Client;
-use std::{
-    env,
-    fmt::Display,
-    fs,
-    io::{Error, ErrorKind},
-    sync::Arc,
-    time::Duration,
-};
-use surf::{http::convert::json, Client, Config, Response, StatusCode, Url};
-use tokio_tungstenite::connect_async;
+use libsignal_core::{Aci, DeviceId, ServiceId};
+use libsignal_protocol::PreKeyBundle;
+use prost::Message;
+use serde_json::{from_slice, to_vec};
+use std::error::Error;
+use std::fmt::Display;
+use std::{env, fmt::Debug, fs, sync::Arc, time::Duration};
+use surf::{http::convert::json, Client, Config, Url};
+use surf::{Response, StatusCode};
+use tokio::sync::broadcast::Receiver;
 
-const CLIENT_URI: &str = "/client";
-const MSG_URI: &str = "v1/messages";
 const REGISTER_URI: &str = "v1/registration";
-const DEVICE_URI: &str = "/device";
-const BUNDLE_URI: &str = "/bundle";
+const MSG_URI: &str = "/v1/messages";
+const KEY_BUNDLE_URI: &str = "/v2/keys";
 
-pub struct ServerAPI {
-    client: Client,
-    ws: Option<WebsocketHandler>,
+#[allow(unused)]
+pub struct VerifiedSession {
+    session_id: String,
+}
+
+#[allow(unused)]
+impl VerifiedSession {
+    pub fn session_id(&self) -> &String {
+        &self.session_id
+    }
+}
+
+pub trait SignalServerAPI {
+    /// Connect with Websockets to the backend.
+    async fn connect(
+        &mut self,
+        username: &str,
+        password: &str,
+        url: &str,
+        tls_path: &str,
+    ) -> Result<(), SignalClientError>;
+
+    /// Publish a sigle [PreKeyBundle] for this device.
+    async fn publish_pre_key_bundle(
+        &mut self,
+        pre_key_bundle: SetKeyRequest,
+    ) -> Result<(), SignalClientError>;
+
+    /// Fetch [PreKeyBundle] for all of a users devices.
+    async fn fetch_pre_key_bundles(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<PreKeyBundle>, SignalClientError>;
+
+    /// Send a [RegistrationRequest] to the server.
+    /// Verifying the session is not implemented.
+    async fn register_client(
+        &self,
+        phone_number: String,
+        password: String,
+        registration_request: RegistrationRequest,
+        session: Option<&VerifiedSession>,
+    ) -> Result<RegistrationResponse, SignalClientError>;
+
+    /// Send a message to another user.
+    async fn send_msg(
+        &mut self,
+        messages: &SignalMessages,
+        service_id: &ServiceId,
+    ) -> Result<(), SignalClientError>;
+
+    async fn get_message(&mut self) -> Option<WebSocketRequestMessage>;
+
+    async fn send_response(
+        &mut self,
+        request: WebSocketRequestMessage,
+        status_code: axum::http::StatusCode,
+    ) -> Result<(), SignalClientError>;
+
+    fn create_auth_header(&mut self, aci: Aci, password: String, device_id: DeviceId) -> ();
+}
+
+pub struct SignalServer {
+    auth_header: Option<BasicAuthorizationHeader>,
+    http_client: Client,
+    socket_manager: SocketManager<SignalStream>,
+    message_queue: PersistentReceiver<WebSocketMessage>,
 }
 
 enum ReqType {
@@ -57,83 +122,59 @@ impl Display for ReqType {
     }
 }
 
-pub trait Server {
+impl SignalServerAPI for SignalServer {
     async fn connect(
         &mut self,
         username: &str,
         password: &str,
         url: &str,
-        port: &str,
-    ) -> Result<()>;
-    async fn publish_bundle(
-        &self,
-        uuid: String, //registration_id: u32,
-                      //bundle: &PreKeyBundle,
-    ) -> Result<Response, Box<dyn std::error::Error>>; // should take keys as parameter or struct
-    async fn fetch_bundle(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
-    async fn register_client(
-        &self,
-        phone_number: String,
-        password: String,
-        registration_request: RegistrationRequest,
-        session: Option<&VerifiedSession>,
-    ) -> Result<Response, Box<dyn std::error::Error>>;
-    async fn register_device(
-        &self,
-        client_info: &Contact,
-    ) -> Result<Response, Box<dyn std::error::Error>>;
-    async fn send_msg(
-        &self,
-        msg: String,
-        user_id: String,
-        device_id: u32,
-    ) -> Result<WebSocketResponseMessage>;
-    async fn update_client(
-        &self,
-        new_client: &Contact,
-    ) -> Result<Response, Box<dyn std::error::Error>>;
-    async fn delete_client(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
-    async fn delete_device(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>>;
-    fn new() -> Self;
-}
-
-impl Server for ServerAPI {
-    async fn connect(
-        &mut self,
-        username: &str,
-        password: &str,
-        url: &str,
-        port: &str,
-    ) -> Result<()> {
-        let options = KeepAliveOptions {
-            path: Some("/v1/keepalive".to_string()),
-        };
-        let ws = WebsocketHandler::try_new(
-            Some(options),
-            url.into(),
-            port.into(),
-            username.into(),
-            password.into(),
-        )
-        .await?;
-        self.ws = Some(ws);
-
-        println!("connected!");
+        tls_path: &str,
+    ) -> Result<(), SignalClientError> {
+        if self.socket_manager.is_active().await {
+            return Ok(());
+        }
+        let ws = signal_ws_connect(tls_path, url, username, password)
+            .await
+            .map_err(SignalClientError::WebSocketError)?;
+        let ws = SignalStream::new(ws);
+        self.socket_manager
+            .set_stream(ws)
+            .await
+            .map_err(SignalClientError::WebSocketError)?;
         Ok(())
     }
-    async fn publish_bundle(
-        &self,
-        uuid: String, /*, registration_id: u32, bundle: &PreKeyBundle*/
-    ) -> Result<Response, Box<dyn std::error::Error>> {
-        let payload = json!({
-            "key1": "value1"
-        });
-        let uri = format!("{}/{}", BUNDLE_URI, uuid);
-        self.make_request(ReqType::Post(payload), uri).await
+
+    async fn publish_pre_key_bundle(
+        &mut self,
+        pre_key_bundle: SetKeyRequest,
+    ) -> Result<(), SignalClientError> {
+        let uri = format!("{}?identity=aci", KEY_BUNDLE_URI);
+        self.make_request(ReqType::Put(json!(pre_key_bundle)), uri)
+            .await
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+        Ok(())
     }
-    async fn fetch_bundle(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>> {
-        let uri = format!("{}/{}", BUNDLE_URI, uuid);
-        self.make_request(ReqType::Get, uri).await
+
+    async fn fetch_pre_key_bundles(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<PreKeyBundle>, SignalClientError> {
+        let uri = format!("{}/{}/*", KEY_BUNDLE_URI, service_id.service_id_string());
+
+        let mut res = self
+            .make_request(ReqType::Get, uri)
+            .await
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+
+        let pre_key_res: PreKeyResponse = res
+            .body_json()
+            .await
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+
+        let bundle: Vec<PreKeyBundle> = Vec::<PreKeyBundle>::try_from(pre_key_res)
+            .map_err(|err| SignalClientError::KeyError(err.to_string()))?;
+
+        Ok(bundle)
     }
 
     async fn register_client(
@@ -141,88 +182,91 @@ impl Server for ServerAPI {
         phone_number: String,
         password: String,
         registration_request: RegistrationRequest,
-        session: Option<&VerifiedSession>,
-    ) -> Result<Response, Box<dyn std::error::Error>> {
+        _session: Option<&VerifiedSession>,
+    ) -> Result<RegistrationResponse, SignalClientError> {
         let payload = json!(registration_request);
         let auth_header = BasicAuthorizationHeader::new(phone_number, 1, password);
-        Ok(self
-            .client
+        let mut res = self
+            .http_client
             .post(REGISTER_URI)
             .body(payload)
             .header("Authorization", auth_header.encode())
-            .await?)
-    }
-
-    async fn register_device(
-        &self,
-        client_info: &Contact,
-    ) -> Result<Response, Box<dyn std::error::Error>> {
-        let payload = json!({
-            "uuid": client_info.uuid
-        });
-        let uri = format!("{}/{}", DEVICE_URI, client_info.uuid);
-
-        self.make_request(ReqType::Put(payload), uri).await
-    }
-
-    async fn send_msg(
-        &self,
-        msg: String,
-        user_id: String,
-        device_id: u32,
-    ) -> Result<WebSocketResponseMessage> {
-        let payload = json!({
-            "message": msg
-        })
-        .to_string()
-        .as_bytes()
-        .to_vec();
-        let uri = format!("{}/{}.{}", MSG_URI, user_id, device_id);
-        let options = SendRequestOptions::new("PUT", uri, payload);
-
-        if let Some(ws) = &self.ws {
-            Ok(ws.clone().send_request(options).await?)
+            .await
+            .map_err(|_| RegistrationError::NoResponse)?;
+        println!("Sent POST request to /{}", REGISTER_URI);
+        if res.status().is_success() {
+            Ok(from_slice(
+                res.body_bytes()
+                    .await
+                    .map_err(|err| RegistrationError::BadResponse(format!("{err}")))?
+                    .as_ref(),
+            )
+            .map_err(|err| RegistrationError::BadResponse(format!("{err}")))?)
         } else {
-            anyhow::bail!("No websocket connection is active")
+            Err(SignalClientError::RegistrationError(
+                RegistrationError::BadResponse(format!(
+                    "Received {}: {:?}",
+                    res.status(),
+                    res.body_string().await
+                )),
+            ))
         }
     }
 
-    async fn update_client(
-        &self,
-        client: &Contact,
-    ) -> Result<Response, Box<dyn std::error::Error>> {
-        let payload = json!({
-            "uuid": client.uuid
-        });
-        self.make_request(ReqType::Put(payload), CLIENT_URI.to_string())
+    async fn send_msg(
+        &mut self,
+        messages: &SignalMessages,
+        recipient: &ServiceId,
+    ) -> Result<(), SignalClientError> {
+        let payload = to_vec(&messages).unwrap();
+        let uri = format!("{}/{}", MSG_URI, recipient.service_id_string());
+        println!("Sending message to: {}", uri);
+
+        let id = self.socket_manager.next_id();
+        let response = self
+            .socket_manager
+            .send(id, create_request(id, "PUT", &uri, vec![], Some(payload)))
             .await
+            .map_err(SendMessageError::WebSocketError)?;
+
+        Ok(())
     }
 
-    async fn delete_client(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>> {
-        let payload = json!({
-            "uuid": uuid
-        });
-        let uri = format!("{}/{}", CLIENT_URI, uuid);
+    // FIX:
+    async fn send_response(
+        &mut self,
+        request: WebSocketRequestMessage,
+        status_code: axum::http::StatusCode,
+    ) -> Result<(), SignalClientError> {
+        let id = request.id.expect("This is always some");
+        self.socket_manager
+            .send_response(
+                create_response(id, status_code, vec![], None).expect("This always goes well"),
+            )
+            .await
+            .map_err(SendMessageError::WebSocketError)?;
 
-        self.make_request(ReqType::Delete(payload), uri).await
+        Ok(())
     }
 
-    async fn delete_device(&self, uuid: String) -> Result<Response, Box<dyn std::error::Error>> {
-        let payload = json!({
-            "uuid": uuid
-        });
-        let uri = format!("{}/{}", DEVICE_URI, uuid);
-
-        self.make_request(ReqType::Delete(payload), uri).await
+    async fn get_message(&mut self) -> Option<WebSocketRequestMessage> {
+        self.message_queue.recv().await?.request
     }
 
-    fn new() -> Self {
-        let cert_bytes =
-            fs::read("../server/cert/rootCA.crt").expect("Could not read certificate.");
+    fn create_auth_header(&mut self, aci: Aci, password: String, device_id: DeviceId) -> () {
+        self.auth_header = Some(BasicAuthorizationHeader::new(
+            aci.service_id_string(),
+            device_id.into(),
+            password.to_string(),
+        ));
+    }
+}
+
+impl SignalServer {
+    pub fn new(cert_path: &str, server_url: &str) -> Self {
+        let cert_bytes = fs::read(cert_path).expect("Could not read certificate.");
+
         let crt = Certificate::from_pem(&cert_bytes).expect("Could not parse certificate.");
-
-        let address =
-            env::var("SERVER_URL").expect("Could not read SERVER_URL environment variable.");
 
         let tls_config = Arc::new(TlsConnector::new().add_root_certificate(crt));
         let http_client: H1Client = http_client::Config::new()
@@ -230,51 +274,132 @@ impl Server for ServerAPI {
             .set_tls_config(Some(tls_config))
             .try_into()
             .expect("Could not create HTTP client");
-        let client = Config::new()
+        let http_client = Config::new()
             .set_http_client(http_client)
-            .set_base_url(Url::parse(&address).expect("Could not parse URL for server"))
+            .set_base_url(Url::parse(server_url).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
-        ServerAPI { client, ws: None }
+
+        let socket_mgr = SocketManager::new(16);
+
+        let filter = |x: &WebSocketMessage| -> Option<WebSocketMessage> {
+            if x.r#type() != web_socket_message::Type::Request || x.request.is_none() {
+                None
+            } else if x.request.as_ref().unwrap().path() == "/api/v1/message"
+                && x.request.as_ref().unwrap().verb() == "PUT"
+            {
+                Some(x.clone())
+            } else {
+                None
+            }
+        };
+
+        let msg_queue = PersistentReceiver::new(socket_mgr.subscribe(), Some(filter));
+
+        Self {
+            auth_header: None,
+            http_client,
+            socket_manager: socket_mgr,
+            message_queue: msg_queue,
+        }
+    }
+
+    fn create_auth_header(&mut self, aci: Aci, password: &str, device_id: DeviceId) -> () {
+        self.auth_header = Some(BasicAuthorizationHeader::new(
+            aci.service_id_string(),
+            device_id.into(),
+            password.to_string(),
+        ));
     }
 }
-impl ServerAPI {
+
+#[derive(Debug)]
+enum ServerRequestError {
+    /// The status code was not 200 - OK
+    StatusCodeError(StatusCode, String),
+    BodyDecodeError(String),
+    TransmissionError(String),
+    NoAuthDevice,
+}
+impl Display for ServerRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StatusCodeError(code, body) => write!(f, "Response was {}: {}", code, body),
+            Self::BodyDecodeError(err) => {
+                write!(f, "Could not decode response body: {err}")
+            }
+            Self::TransmissionError(err) => {
+                write!(f, "HTTP communication with server failed: {err}")
+            }
+            Self::NoAuthDevice => {
+                write!(
+                    f,
+                    "You cannot make requests without an authentication device."
+                )
+            }
+        }
+    }
+}
+
+impl Error for ServerRequestError {}
+
+impl SignalServer {
     async fn make_request(
         &self,
         req_type: ReqType,
         uri: String,
-    ) -> Result<Response, Box<dyn std::error::Error>> {
-        println!("Sent request {} {}", req_type, uri);
+    ) -> Result<Response, ServerRequestError> {
+        println!("Sent {} request to {}", req_type, uri);
+        let header = match &self.auth_header {
+            Some(header) => header,
+            None => Err(ServerRequestError::NoAuthDevice)?,
+        };
         let mut res = match req_type {
-            ReqType::Get => self.client.get(uri),
-            ReqType::Post(payload) => self.client.post(uri).body(surf::Body::from_json(&payload)?),
-            ReqType::Put(payload) => self.client.put(uri).body(surf::Body::from_json(&payload)?),
+            ReqType::Get => self
+                .http_client
+                .get(uri)
+                .header("Authorization", header.encode()),
+            ReqType::Post(payload) => self
+                .http_client
+                .post(uri)
+                .body(
+                    surf::Body::from_json(&payload)
+                        .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
+                )
+                .header("Authorization", header.encode()),
+            ReqType::Put(payload) => self
+                .http_client
+                .put(uri)
+                .body(
+                    surf::Body::from_json(&payload)
+                        .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
+                )
+                .header("Authorization", header.encode()),
             ReqType::Delete(payload) => self
-                .client
+                .http_client
                 .delete(uri)
-                .body(surf::Body::from_json(&payload)?),
+                .body(
+                    surf::Body::from_json(&payload)
+                        .map_err(|err| ServerRequestError::BodyDecodeError(format!("{err}")))?,
+                )
+                .header("Authorization", header.encode()),
         }
-        .await?;
+        .await
+        .map_err(|err| ServerRequestError::TransmissionError(format!("{err}")))?;
 
         match res.status() {
             StatusCode::Ok => Ok(res),
-            _ => Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "response returned: {:?}\n{}",
+            _ => {
+                println!(
+                    "Response code {}: {:?}",
                     res.status(),
-                    res.body_string().await.unwrap_or("".to_owned())
-                ),
-            )
-            .into()),
-        }
-    }
-
-    async fn get_incoming_messages(&mut self) -> Result<Vec<WebSocketRequestMessage>> {
-        if let Some(ws) = &self.ws {
-            Ok(ws.clone().get_messages().await)
-        } else {
-            anyhow::bail!("No websocket connection is active")
+                    res.body_string().await.unwrap().to_string()
+                );
+                Err(ServerRequestError::StatusCodeError(
+                    res.status(),
+                    res.body_string().await.unwrap_or("".to_owned()),
+                ))
+            }
         }
     }
 }

@@ -1,16 +1,38 @@
-use common::signal_protobuf::Envelope;
+use crate::message_cache::MessageAvailabilityListener;
+use common::signalservice::Envelope;
 use redis::cmd;
 use uuid::Uuid;
 
-use crate::message_cache::MessageAvailabilityListener;
-
 pub fn generate_uuid() -> String {
-    let guid = Uuid::new_v4();
-    guid.to_string()
+    Uuid::new_v4().to_string()
 }
 
-pub async fn teardown(mut con: deadpool_redis::Connection) {
-    cmd("FLUSHALL").query_async::<()>(&mut con).await.unwrap();
+pub async fn teardown(key: &str, mut con: deadpool_redis::Connection) {
+    let pattern = format!("{}*", key);
+
+    let mut cursor = 0;
+    loop {
+        let (new_cursor, keys): (u64, Vec<String>) = cmd("SCAN")
+            .arg(cursor)
+            .arg("MATCH")
+            .arg(pattern.clone())
+            .query_async(&mut con)
+            .await
+            .expect("Teardown scan failed");
+
+        if !keys.is_empty() {
+            cmd("DEL")
+                .arg(&keys)
+                .query_async::<u8>(&mut con)
+                .await
+                .expect("Teardown delete failed");
+        }
+
+        cursor = new_cursor;
+        if cursor == 0 {
+            break;
+        }
+    }
 }
 
 pub fn generate_envelope(uuid: &str) -> Envelope {

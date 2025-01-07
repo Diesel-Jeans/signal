@@ -1,17 +1,18 @@
-use crate::account::{Account, Device};
-use crate::database::SignalDatabase;
-use crate::managers::account_manager::AccountManager;
-use crate::managers::messages_manager::MessagesManager;
-use crate::message_cache::{MessageAvailabilityListener, MessageCache};
-use crate::postgres::PostgresDatabase;
-use anyhow::Result;
-use async_std::prelude::FutureExt;
-use common::signal_protobuf::Envelope;
+use crate::{
+    account::{Account, Device},
+    database::SignalDatabase,
+    managers::{account_manager::AccountManager, messages_manager::MessagesManager},
+    message_cache::{MessageAvailabilityListener, MessageCache},
+};
+use anyhow::{anyhow, Result};
 use libsignal_core::{ProtocolAddress, ServiceId};
-use std::fmt::Debug;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 const QUEUE_BATCH_LIMIT: u8 = 100;
 const MESSAGE_BATCH_LIMIT: u8 = 100;
@@ -82,11 +83,7 @@ where
 
     // Finds the message queues where the oldest message is >10 minutes old.
     async fn persist_next_queues(&mut self) -> Result<()> {
-        let mut queues_to_persist: Vec<String> = Vec::new();
-        let time_in_secs: u64 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Failed to get time")
-            .as_secs();
+        let mut queues_to_persist = Vec::new();
 
         while {
             let time_in_secs: u64 = SystemTime::now()
@@ -96,7 +93,7 @@ where
 
             queues_to_persist = self
                 .message_cache
-                .get_message_queues_to_persist((time_in_secs - PERSIST_DELAY), QUEUE_BATCH_LIMIT)
+                .get_message_queues_to_persist(time_in_secs - PERSIST_DELAY, QUEUE_BATCH_LIMIT)
                 .await?;
 
             !queues_to_persist.is_empty()
@@ -108,7 +105,7 @@ where
 
                 let service_id =
                     ServiceId::parse_from_service_id_string(&account_id).ok_or_else(|| {
-                        anyhow::anyhow!("Failed to parse service id from queue: {}", queue_key)
+                        anyhow!("Failed to parse service id from queue: {}", queue_key)
                     })?;
 
                 let account = self.account_manager.get_account(&service_id).await?;
@@ -118,7 +115,7 @@ where
                     .devices()
                     .iter()
                     .find(|device| device.device_id() == device_id.into())
-                    .ok_or_else(|| anyhow::anyhow!("Could not find device in account."))?;
+                    .ok_or_else(|| anyhow!("Could not find device in account."))?;
 
                 self.persist_queue(&account, device).await?;
             }
@@ -129,13 +126,13 @@ where
 
     // Takes the message queues where the oldest message is >10 minutes old.
     async fn persist_queue(&mut self, account: &Account, device: &Device) -> Result<()> {
-        let message_count: u32 = 0;
-        let mut messages: Vec<Envelope> = Vec::new();
+        let mut messages = Vec::new();
         let protocol_address =
             ProtocolAddress::new(account.aci().service_id_string(), device.device_id());
 
         self.message_cache
-            .lock_queue_for_persistence(&protocol_address);
+            .lock_queue_for_persistence(&protocol_address)
+            .await?;
 
         while {
             messages = self
@@ -145,34 +142,41 @@ where
 
             !messages.is_empty()
         } {
-            let messages_removed_from_cache = self
-                .messages_manager
+            self.messages_manager
                 .persist_messages(&protocol_address, messages)
                 .await?;
         }
 
         self.message_cache
             .unlock_queue_for_persistence(&protocol_address)
-            .await;
+            .await?;
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod message_persister_tests {
-    use super::*;
-    use crate::managers::messages_manager::message_manager_tests::*;
-    use crate::postgres::PostgresDatabase;
-    use crate::test_utils::database::database_connect;
-    use crate::test_utils::message_cache::{
-        generate_envelope, generate_uuid, teardown, MockWebSocketConnection,
+    use crate::{
+        database::SignalDatabase,
+        managers::{account_manager::AccountManager, messages_manager::MessagesManager},
+        message_cache::MessageCache,
+        postgres::PostgresDatabase,
+        test_utils::{
+            database::database_connect,
+            message_cache::{generate_envelope, generate_uuid, teardown, MockWebSocketConnection},
+            user::new_account_and_address,
+        },
     };
-    use crate::test_utils::user::new_account;
+    use common::signalservice::Envelope;
+    use libsignal_core::ProtocolAddress;
     use redis::cmd;
-    use serial_test::serial;
-    use std::time::Duration;
+    use std::{
+        sync::Arc,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
     use tokio::sync::Mutex;
-    use uuid::Uuid;
+
+    use super::MessagePersister;
 
     fn time_now_secs() -> u64 {
         SystemTime::now()
@@ -217,25 +221,25 @@ mod message_persister_tests {
         cmd("ZRANGE")
             .arg(&queue_index_key)
             .arg(0)
-            .arg(&max_time)
+            .arg(max_time)
             .arg("BYSCORE")
             .arg("LIMIT")
             .arg(0)
-            .arg(&limit)
+            .arg(limit)
             .query_async::<Vec<String>>(&mut connection)
             .await
             .unwrap()
     }
 
     async fn has_messages(
-        mut cache: &MessageCache<MockWebSocketConnection>,
+        cache: &MessageCache<MockWebSocketConnection>,
         queue_keys: &Vec<String>,
     ) -> bool {
         let mut connection = cache.get_connection().await.unwrap();
 
         for queue_key in queue_keys {
             if cmd("ZCARD")
-                .arg(&queue_key)
+                .arg(queue_key)
                 .query_async::<u64>(&mut connection)
                 .await
                 .unwrap()
@@ -262,7 +266,7 @@ mod message_persister_tests {
                 .await
                 .unwrap();
 
-            if let Some(queue_lock_key) = locked {
+            if locked.is_some() {
                 return false;
             }
         }
@@ -288,11 +292,7 @@ mod message_persister_tests {
         let mut protocol_addresses = Vec::new();
 
         for message_time in message_times {
-            let account = new_account();
-            let protocol_address = ProtocolAddress::new(
-                account.aci().service_id_string(),
-                account.devices()[0].device_id(),
-            );
+            let (account, protocol_address) = new_account_and_address();
             accounts.push(account.clone());
             protocol_addresses.push(protocol_address.clone());
 
@@ -313,12 +313,12 @@ mod message_persister_tests {
 
         message_manager
             .add_message_availability_listener(
-                &protocol_addresses.first().unwrap(),
+                protocol_addresses.first().unwrap(),
                 websocket.clone(),
             )
             .await;
 
-        let mut queue_keys_before_message_persister = check_queue_key_timestamp(
+        let queue_keys_before_message_persister = check_queue_key_timestamp(
             &cache,
             now_timestamp, // now time
             10,
@@ -348,7 +348,7 @@ mod message_persister_tests {
         let no_queue_persist_keys_in_cache =
             no_queue_persist_keys_in_cache(&cache, &protocol_addresses).await;
 
-        teardown(cache.get_connection().await.unwrap()).await;
+        teardown(&cache.test_key, cache.get_connection().await.unwrap()).await;
 
         for account in accounts {
             db.delete_account(&account.aci().into()).await.unwrap();
@@ -367,7 +367,6 @@ mod message_persister_tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_message_persister_late_msg() {
         let (
             handle_persisted_messages_evoked,
@@ -377,15 +376,14 @@ mod message_persister_tests {
             msg_after,
         ) = message_persister_test_setup_run(vec![time_now_secs() - 660]).await;
 
-        assert_eq!(handle_persisted_messages_evoked, true);
-        assert_eq!(no_queue_lock_keys_in_cache, true);
-        assert_eq!(old_msg_deleted, true);
+        assert!(handle_persisted_messages_evoked);
+        assert!(no_queue_lock_keys_in_cache);
+        assert!(old_msg_deleted);
         assert_eq!(msg_before.len(), 1);
         assert_eq!(msg_after.len(), 0);
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_message_persister_new_msg() {
         let (
             handle_persisted_messages_evoked,
@@ -395,15 +393,14 @@ mod message_persister_tests {
             msg_after,
         ) = message_persister_test_setup_run(vec![time_now_secs() - 300]).await;
 
-        assert_eq!(handle_persisted_messages_evoked, false);
-        assert_eq!(no_queue_lock_keys_in_cache, true);
-        assert_eq!(old_msg_deleted, true);
+        assert!(!handle_persisted_messages_evoked);
+        assert!(no_queue_lock_keys_in_cache);
+        assert!(old_msg_deleted);
         assert_eq!(msg_before.len(), 1);
         assert_eq!(msg_after.len(), 1);
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_message_persister_new_and_late_msg() {
         let message_time = time_now_secs() - 600;
 
@@ -423,9 +420,9 @@ mod message_persister_tests {
             msg_after,
         ) = message_persister_test_setup_run(message_times).await;
 
-        assert_eq!(handle_persisted_messages_evoked, true);
-        assert_eq!(no_queue_lock_keys_in_cache, true);
-        assert_eq!(old_msg_deleted, true);
+        assert!(handle_persisted_messages_evoked);
+        assert!(no_queue_lock_keys_in_cache);
+        assert!(old_msg_deleted);
         assert_eq!(msg_before.len(), 5);
         assert_eq!(msg_after.len(), 3);
     }

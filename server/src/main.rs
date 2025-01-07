@@ -1,5 +1,3 @@
-#![allow(unused)]
-use chrono::prelude::*;
 mod account;
 mod account_authenticator;
 pub mod database;
@@ -11,16 +9,17 @@ mod postgres;
 mod query;
 mod response;
 mod server;
+#[cfg(test)]
 mod test_utils;
 mod validators;
 
 #[tokio::main]
 pub async fn main() {
     //Starting logger
-    tracing_subscriber::fmt()
-        .log_internal_errors(true)
-        .with_max_level(tracing::Level::DEBUG)
-        .with_line_number(true)
-        .init();
+    /*tracing_subscriber::fmt()
+    .log_internal_errors(true)
+    .with_max_level(tracing::Level::DEBUG)
+    .with_line_number(true)
+    .init();*/
     server::start_server().await.unwrap();
 }

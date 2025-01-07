@@ -1,8 +1,7 @@
-use std::{fmt::Display, num::ParseIntError, str::FromStr};
-
 use anyhow::{anyhow, bail, Error, Result};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
+use std::{fmt::Display, num::ParseIntError, str::FromStr};
 
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -97,9 +96,8 @@ impl Display for BasicAuthorizationHeader {
 
 #[cfg(test)]
 mod tests {
-    use libsignal_protocol::DeviceId;
-
     use super::BasicAuthorizationHeader;
+
     fn username() -> String {
         "Darkros1245".to_owned()
     }

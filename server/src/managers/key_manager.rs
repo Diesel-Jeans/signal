@@ -1,33 +1,16 @@
-use crate::{
-    account::{self, AuthenticatedDevice},
-    database::SignalDatabase,
-    error::ApiError,
-};
+use crate::{account::AuthenticatedDevice, database::SignalDatabase, error::ApiError};
 use anyhow::Result;
 use axum::http::StatusCode;
-use common::{
-    pre_key,
-    web_api::{
-        DevicePreKeyBundle, PreKeyResponse, PreKeyResponseItem, SetKeyRequest, UploadPreKey,
-        UploadSignedPreKey,
-    },
-};
-use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
-use libsignal_protocol::IdentityKey;
+use common::web_api::{PreKeyResponse, PreKeyResponseItem, SetKeyRequest, UploadSignedPreKey};
+use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Default)]
-pub struct KeyManager<T>
-where
-    T: SignalDatabase,
-{
+pub struct KeyManager<T: SignalDatabase> {
     db: T,
 }
 
-impl<T> KeyManager<T>
-where
-    T: SignalDatabase,
-{
+impl<T: SignalDatabase> KeyManager<T> {
     pub fn new(db: T) -> Self {
         Self { db }
     }
@@ -43,17 +26,7 @@ where
             ServiceIdKind::Pni => auth_device.account().pni_identity_key(),
         };
 
-        if let Some(prekeys) = bundle.pre_key {
-            self.db
-                .store_one_time_ec_pre_keys(prekeys, &address)
-                .await
-                .map_err(|_| ApiError {
-                    status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
-                });
-        }
-
-        let verify_key = |prekey: &UploadSignedPreKey, msg: &str| -> Result<(), ApiError> {
+        let verify_key = |prekey: &UploadSignedPreKey| -> Result<(), ApiError> {
             if !identity_key
                 .public_key()
                 .verify_signature(&prekey.public_key, &prekey.signature)
@@ -61,46 +34,70 @@ where
             {
                 return Err(ApiError {
                     status_code: StatusCode::BAD_REQUEST,
-                    message: msg.into(),
+                    body: "Invalid signature".to_owned(),
                 });
             }
             Ok(())
         };
 
+        bundle
+            .signed_pre_key
+            .as_ref()
+            .map(|key| verify_key(key))
+            .transpose()?;
+        bundle
+            .pq_last_resort_pre_key
+            .as_ref()
+            .map(|key| verify_key(key))
+            .transpose()?;
+        bundle
+            .pq_pre_key
+            .as_ref()
+            .map(|keys| {
+                keys.iter()
+                    .map(|key| verify_key(key))
+                    .collect::<Result<(), ApiError>>()
+            })
+            .transpose()?;
+
+        if let Some(prekeys) = bundle.pre_key {
+            self.db
+                .store_one_time_ec_pre_keys(prekeys, &address)
+                .await
+                .map_err(|_| ApiError {
+                    status_code: StatusCode::INTERNAL_SERVER_ERROR,
+                    body: "Database fault".into(),
+                })?;
+        }
+
         if let Some(ref prekey) = bundle.signed_pre_key {
-            verify_key(prekey, "Could not verify signature for signed prekey")?;
             self.db
                 .store_signed_pre_key(prekey, &address)
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
-                });
+                    body: "Database fault".to_owned(),
+                })?;
         }
 
         if let Some(prekeys) = bundle.pq_pre_key {
-            prekeys.iter().try_for_each(|prekey| {
-                verify_key(prekey, "Could not verify signature for kem prekey")
-            })?;
-
             self.db
                 .store_one_time_pq_pre_keys(prekeys, &address)
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
-                });
+                    body: "Database fault".to_owned(),
+                })?;
         }
 
         if let Some(ref prekey) = bundle.pq_last_resort_pre_key {
-            verify_key(prekey, "Could not verify signature for kem prekey")?;
             self.db
                 .store_pq_signed_pre_key(prekey, &address)
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Database fault".into(),
-                });
+                    body: "Database fault".to_owned(),
+                })?;
         }
 
         Ok(())
@@ -111,21 +108,20 @@ where
         database: &S,
         auth_device: &AuthenticatedDevice,
         target_service_id: ServiceId,
-        target_device_id: Option<DeviceId>,
+        target_device_id: String,
     ) -> Result<PreKeyResponse, ApiError> {
         async fn get_key<S: SignalDatabase>(
             database: &S,
             service_id: &ServiceId,
             address: &ProtocolAddress,
             registration_id: u32,
-            device_id: u32,
         ) -> Result<PreKeyResponseItem, ApiError> {
             let bundle = database
                 .get_key_bundle(address)
                 .await
                 .map_err(|err| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: format!("Could not fetch user key bundle: {}", err),
+                    body: format!("Could not fetch user key bundle: {}", err),
                 })?;
             let (pq_pre_key, signed_pre_key) = match service_id {
                 ServiceId::Aci(_) => (bundle.aci_pq_pre_key, bundle.aci_signed_pre_key),
@@ -137,7 +133,7 @@ where
                 .await
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Could not fetch user pre key".into(),
+                    body: "Could not fetch user pre key".to_owned(),
                 })?;
 
             Ok(PreKeyResponseItem::new(
@@ -149,36 +145,50 @@ where
             ))
         }
 
+        database
+            .get_account(&auth_device.account().aci().into())
+            .await
+            .map_err(|_| ApiError {
+                status_code: StatusCode::UNAUTHORIZED,
+                body: "".to_owned(),
+            })?;
+
         let target_account = database
             .get_account(&target_service_id)
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::BAD_REQUEST,
-                message: format!(
+                body: format!(
                     "Could not find account for service id: {}",
                     target_service_id.service_id_string()
                 ),
             })?;
 
-        let devices = match target_device_id {
-            None => database
-                .get_all_devices(&target_service_id)
-                .await
-                .map_err(|_| ApiError {
-                    status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Could not get all targets devices".into(),
-                })?,
-            Some(device_id) => {
+        let devices = match target_device_id.parse::<u32>() {
+            Ok(device_id) => {
                 vec![database
                     .get_device(&ProtocolAddress::new(
                         target_service_id.service_id_string(),
-                        device_id,
+                        device_id.into(),
                     ))
                     .await
                     .map_err(|_| ApiError {
                         status_code: StatusCode::BAD_REQUEST,
-                        message: format!("Device id does not exist: {}", device_id),
+                        body: format!("Device id does not exist: {}", device_id),
                     })?]
+            }
+            _ if target_device_id == "*" => database
+                .get_all_devices(&target_service_id)
+                .await
+                .map_err(|_| ApiError {
+                    status_code: StatusCode::INTERNAL_SERVER_ERROR,
+                    body: "Could not get all targets devices".into(),
+                })?,
+            _ => {
+                return Err(ApiError {
+                    status_code: StatusCode::BAD_REQUEST,
+                    body: "Target device id is not a u32 or '*'".into(),
+                })
             }
         };
 
@@ -193,7 +203,6 @@ where
                         device.device_id(),
                     ),
                     device.registration_id(),
-                    device.device_id().into(),
                 )
                 .await?,
             );
@@ -228,7 +237,7 @@ where
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                message: "Could not fetch user key bundle".into(),
+                body: "Could not fetch user key bundle".to_owned(),
             })?;
 
         let mut digest = Sha256::new();
@@ -242,7 +251,7 @@ where
                         .public_key_bytes()
                         .map_err(|_| ApiError {
                             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                            message: "Could not convert key to bytes".into(),
+                            body: "Could not convert key to bytes".to_owned(),
                         })?,
                 );
                 digest.update(bundle.aci_signed_pre_key.key_id.to_be_bytes());
@@ -259,7 +268,7 @@ where
                         .public_key_bytes()
                         .map_err(|_| ApiError {
                             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                            message: "Could not convert key to bytes".into(),
+                            body: "Could not convert key to bytes".to_owned(),
                         })?,
                 );
                 digest.update(bundle.pni_signed_pre_key.key_id.to_be_bytes());
@@ -284,30 +293,27 @@ where
 
 #[cfg(test)]
 mod key_manager_tests {
-    use account::{Account, Device};
-    use common::web_api::AccountAttributes;
-    use libsignal_core::{Aci, Pni};
-    use libsignal_protocol::{IdentityKey, KeyPair, PublicKey};
+    use super::*;
+    use crate::test_utils::{database::*, user::*};
+    use crate::{
+        account::Account,
+        test_utils::key::{
+            new_device_pre_key_bundle, new_upload_pre_keys, new_upload_signed_pre_key,
+        },
+    };
+    use base64::prelude::BASE64_STANDARD;
+    use base64::Engine as _;
+    use libsignal_protocol::{IdentityKey, KeyPair};
     use rand::rngs::OsRng;
     use sha2::{Digest, Sha256};
-    use uuid::Uuid;
-
-    use crate::postgres::PostgresDatabase;
-    use crate::test_utils::key::new_device_pre_key_bundle;
-    use crate::test_utils::key::new_upload_pre_keys;
-    use crate::test_utils::key::new_upload_signed_pre_key;
-
-    use super::*;
-    use crate::test_utils::database::*;
-    use crate::test_utils::user::*;
 
     pub fn new_account_from_identity_key(identity_key: IdentityKey) -> Account {
         Account::new(
-            Pni::from(Uuid::new_v4()),
+            new_pni(),
             identity_key,
             identity_key,
             new_device(),
-            Uuid::new_v4().into(),
+            new_uuid().into(),
         )
     }
 
@@ -316,33 +322,31 @@ mod key_manager_tests {
         let database = database_connect().await;
         let km = KeyManager::new(database.clone());
 
-        let target = new_account();
-        let target_device = target.devices()[0].clone();
-        let target_address =
-            &ProtocolAddress::new(target.aci().service_id_string(), target_device.device_id());
+        let (target, target_device, target_address) = new_account_and_device_and_address();
 
         let key_bundle = new_device_pre_key_bundle();
         let one_time = new_upload_pre_keys(1);
 
-        database.add_account(&target).await;
+        database.add_account(&target).await.unwrap();
 
         database
-            .store_key_bundle(&key_bundle, target_address)
+            .store_key_bundle(&key_bundle, &target_address)
             .await
             .unwrap();
         database
-            .store_one_time_ec_pre_keys(one_time.clone(), target_address)
+            .store_one_time_ec_pre_keys(one_time.clone(), &target_address)
             .await
             .unwrap();
 
         let auth_device1 = new_authenticated_device();
+        database.add_account(auth_device1.account()).await.unwrap();
 
         let keys = km
             .handle_get_keys(
                 &database,
                 &auth_device1,
                 target.aci().into(),
-                Some(target_device.device_id()),
+                target_device.device_id().to_string(),
             )
             .await
             .unwrap();
@@ -351,7 +355,16 @@ mod key_manager_tests {
 
         database.delete_account(&target.aci().into()).await.unwrap();
 
-        assert_eq!(keys.identity_key().clone(), target.aci_identity_key());
+        assert_eq!(
+            IdentityKey::decode(
+                BASE64_STANDARD
+                    .decode(keys.identity_key())
+                    .unwrap()
+                    .as_slice()
+            )
+            .unwrap(),
+            target.aci_identity_key()
+        );
         assert!(device_bundle.len() == 1);
 
         assert_eq!(
@@ -362,13 +375,114 @@ mod key_manager_tests {
             device_bundle[0].registration_id(),
             target_device.registration_id()
         );
-        assert_eq!(device_bundle[0].pre_key().clone(), one_time[0]);
+        assert_eq!(
+            device_bundle[0].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
         assert_eq!(
             device_bundle[0].signed_pre_key().clone(),
             key_bundle.pni_signed_pre_key
         );
         assert_eq!(
             device_bundle[0].pq_pre_key().clone(),
+            key_bundle.pni_pq_pre_key
+        );
+    }
+
+    #[tokio::test]
+    async fn get_all_keys_test() {
+        let database = database_connect().await;
+        let km = KeyManager::new(database.clone());
+
+        let (target, target_device, target_address) = new_account_and_device_and_address();
+        let device2 = new_device();
+        let address2 = ProtocolAddress::new(target_address.name().into(), device2.device_id());
+
+        let key_bundle = new_device_pre_key_bundle();
+        let one_time = new_upload_pre_keys(1);
+
+        database.add_account(&target).await.unwrap();
+        database
+            .add_device(&target.aci().into(), &device2)
+            .await
+            .unwrap();
+
+        database
+            .store_key_bundle(&key_bundle, &target_address)
+            .await
+            .unwrap();
+        database
+            .store_one_time_ec_pre_keys(one_time.clone(), &target_address)
+            .await
+            .unwrap();
+        database
+            .store_key_bundle(&key_bundle, &address2)
+            .await
+            .unwrap();
+        database
+            .store_one_time_ec_pre_keys(one_time.clone(), &address2)
+            .await
+            .unwrap();
+
+        let auth_device1 = new_authenticated_device();
+        database.add_account(auth_device1.account()).await.unwrap();
+
+        let keys = km
+            .handle_get_keys(&database, &auth_device1, target.aci().into(), "*".into())
+            .await
+            .unwrap();
+
+        let device_bundle = keys.keys();
+
+        database.delete_account(&target.aci().into()).await.unwrap();
+
+        assert_eq!(
+            IdentityKey::decode(
+                BASE64_STANDARD
+                    .decode(keys.identity_key())
+                    .unwrap()
+                    .as_slice()
+            )
+            .unwrap(),
+            target.aci_identity_key()
+        );
+        assert!(device_bundle.len() == 2);
+
+        assert_eq!(
+            device_bundle[0].device_id().clone(),
+            target_device.device_id()
+        );
+        assert_eq!(
+            device_bundle[0].registration_id(),
+            target_device.registration_id()
+        );
+        assert_eq!(
+            device_bundle[0].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
+        assert_eq!(
+            device_bundle[0].signed_pre_key().clone(),
+            key_bundle.pni_signed_pre_key
+        );
+        assert_eq!(
+            device_bundle[0].pq_pre_key().clone(),
+            key_bundle.pni_pq_pre_key
+        );
+        assert_eq!(device_bundle[1].device_id().clone(), device2.device_id());
+        assert_eq!(
+            device_bundle[1].registration_id(),
+            device2.registration_id()
+        );
+        assert_eq!(
+            device_bundle[1].pre_key().clone(),
+            Some(one_time[0].clone())
+        );
+        assert_eq!(
+            device_bundle[1].signed_pre_key().clone(),
+            key_bundle.pni_signed_pre_key
+        );
+        assert_eq!(
+            device_bundle[1].pq_pre_key().clone(),
             key_bundle.pni_pq_pre_key
         );
     }
@@ -383,16 +497,7 @@ mod key_manager_tests {
         let account = new_account_from_identity_key(IdentityKey::from(identity_key.public_key));
         let device = account.devices()[0].clone();
         let auth_device = AuthenticatedDevice::new(account, device);
-
-        let target_device_id = auth_device.device().device_id();
-        let target_service_id = auth_device.account().pni();
-        let address = auth_device.get_protocol_address(ServiceIdKind::Pni);
-
-        let key = Box::new([1, 2, 3, 4]);
-        let sign = identity_key
-            .private_key
-            .calculate_signature(&*key, &mut csprng)
-            .unwrap();
+        let target_address = auth_device.get_protocol_address(ServiceIdKind::Aci);
 
         let prekey = new_upload_pre_keys(1);
         let signed_pre_key = new_upload_signed_pre_key(Some(identity_key.private_key));
@@ -408,35 +513,39 @@ mod key_manager_tests {
 
         database.add_account(auth_device.account()).await.unwrap();
 
-        km.handle_put_keys(&auth_device, request.clone(), ServiceIdKind::Pni)
+        km.handle_put_keys(&auth_device, request.clone(), ServiceIdKind::Aci)
             .await
             .unwrap();
 
-        let prekey_db = database.get_one_time_ec_pre_key(&address).await.unwrap();
-        let signed_pre_key_db = get_ec_pni_signed_pre_key(
+        let prekey_db = database
+            .get_one_time_ec_pre_key(&target_address)
+            .await
+            .unwrap();
+        let signed_pre_key_db = get_aci_signed_pre_key(
             &database,
             request.signed_pre_key.unwrap().key_id,
-            &target_service_id.into(),
-            target_device_id.into(),
+            &target_address,
         )
         .await
         .unwrap();
-        let pq_pre_key_db = database.get_one_time_pq_pre_key(&address).await.unwrap();
-        let pq_last_resort_pre_key_db = get_pq_last_resort_pre_key(
+        let pq_pre_key_db = database
+            .get_one_time_pq_pre_key(&target_address)
+            .await
+            .unwrap();
+        let pq_last_resort_pre_key_db = get_aci_pq_last_resort_pre_key(
             &database,
             request.pq_last_resort_pre_key.unwrap().key_id,
-            &target_service_id.into(),
-            target_device_id.into(),
+            &target_address,
         )
         .await
         .unwrap();
 
         database
-            .delete_account(&target_service_id.into())
+            .delete_account(&auth_device.account().pni().into())
             .await
             .unwrap();
 
-        assert_eq!(prekey[0], prekey_db);
+        assert_eq!(Some(prekey[0].clone()), prekey_db);
         assert_eq!(signed_pre_key, signed_pre_key_db);
         assert_eq!(pq_pre_key, pq_pre_key_db);
         assert_eq!(pq_last_resort_pre_key, pq_last_resort_pre_key_db);
@@ -445,7 +554,7 @@ mod key_manager_tests {
     async fn check_keys_test() {
         let database = database_connect().await;
         let auth_device = new_authenticated_device();
-        database.add_account(auth_device.account()).await;
+        database.add_account(auth_device.account()).await.unwrap();
 
         let key_bundle = new_device_pre_key_bundle();
         let signed_pre_key = key_bundle.pni_signed_pre_key.clone();

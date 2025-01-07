@@ -1,7 +1,6 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use common::web_api::{
-    AccountAttributes, AccountCapabilityMode, DeviceCapability, DeviceCapabilityEnum,
-    UploadSignedPreKey,
+    AccountAttributes, AccountCapabilityMode, DeviceCapability, DeviceCapabilityEnum
 };
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKind};
 use libsignal_protocol::IdentityKey;
@@ -74,14 +73,11 @@ impl Account {
     }
 
     pub fn add_device(&mut self, device: Device) -> Result<()> {
-        if !self.devices.contains(&device) {
-            self.devices.push(device);
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(
-                "Device is already registered on the account"
-            ))
+        if self.devices.contains(&device) {
+            bail!("Device is already registered on the account")
         }
+        self.devices.push(device);
+        Ok(())
     }
 
     pub fn phone_number(&self) -> &str {

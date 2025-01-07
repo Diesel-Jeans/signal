@@ -1,29 +1,43 @@
-use crate::account::{Account, AuthenticatedDevice, Device};
-use crate::account_authenticator::SaltedTokenHash;
-use crate::database::SignalDatabase;
-use crate::envelope::ToEnvelope;
-use crate::error::ApiError;
-use crate::managers::state::SignalServerState;
-use crate::managers::websocket::connection::{UserIdentity, WebSocketConnection};
-use crate::managers::websocket::wsstream::WSStream;
-use crate::postgres::PostgresDatabase;
-use crate::response::{LinkDeviceResponse, LinkDeviceToken, SendMessageResponse};
-use crate::validators::pre_key_signature_validator::PreKeySignatureValidator;
+use crate::{
+    account::{Account, AuthenticatedDevice, Device},
+    account_authenticator::SaltedTokenHash,
+    database::SignalDatabase,
+    destination_device_validator::DestinationDeviceValidator,
+    envelope::ToEnvelope,
+    error::ApiError,
+    managers::{
+        message_persister::MessagePersister,
+        state::SignalServerState,
+        websocket::connection::{SignalWebSocket, UserIdentity, WebSocketConnection},
+    },
+    postgres::PostgresDatabase,
+    query::CheckKeysRequest,
+    response::{LinkDeviceResponse, LinkDeviceToken, SendMessageResponse,
+    validators::{pre_key_signature_validator::PreKeySignatureValidator, destination_device_validator::DestinationDeviceValidator}
+}};
 use anyhow::Result;
-use axum::extract::{connect_info::ConnectInfo, FromRequest, Host, Path, State};
-use axum::handler::HandlerWithoutStateExt;
-use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN};
-use axum::http::{HeaderMap, Method, StatusCode, Uri};
-use axum::response::{IntoResponse, Redirect};
-use axum::routing::{any, delete, get, post, put};
-use axum::{debug_handler, BoxError, Json, Router};
+use axum::{
+    debug_handler,
+    extract::{connect_info::ConnectInfo, ws::WebSocketUpgrade, Host, Path, Query, State, ws::Message},
+    handler::HandlerWithoutStateExt,
+    http::{
+        header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
+        HeaderMap, Method, StatusCode, Uri,
+    },
+    response::{IntoResponse, Redirect},
+    routing::{any, delete, get, post, put},
+    BoxError, Json, Router,
+};
 use base64::prelude::{Engine as _, BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD};
 use common::signal_protobuf::{envelope, Envelope};
-use common::web_api::authorization::BasicAuthorizationHeader;
+use axum_extra::{headers, TypedHeader};
+use axum_server::tls_rustls::RustlsConfig;
 use common::web_api::{
-    DeviceCapabilityEnum, DevicePreKeyBundle, LinkDeviceRequest, RegistrationRequest,
-    RegistrationResponse, SetKeyRequest, SignalMessages, UploadKeys,
+    authorization::BasicAuthorizationHeader, DeviceCapabilityEnum, DevicePreKeyBundle, PreKeyResponse,
+    LinkDeviceRequest, RegistrationRequest,
+    RegistrationResponse, SetKeyRequest, SetKeyRequest, SignalMessages, UploadKeys,
 };
+use common::websocket::wsstream::WSStream;
 use futures_util::StreamExt;
 use futures_util::TryFutureExt;
 use headers::authorization::Basic;
@@ -31,17 +45,21 @@ use headers::Authorization;
 use hmac::{Hmac, Mac};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
 use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
-use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::env;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::collections::HashMap;
+use std::{
+    env,
+    fmt::Debug,
+    net::SocketAddr,
+    str::FromStr,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tower_http::cors::CorsLayer;
 use uuid::{timestamp, Uuid};
 
+
 use crate::managers::message_persister::MessagePersister;
 use crate::message_cache::MessageAvailabilityListener;
-use crate::message_cache::MessageCache;
-use crate::validators::destination_device_validator::DestinationDeviceValidator;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::{
     body::{self, Bytes, *},
@@ -77,7 +95,7 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
     if *destination_identifier == authenticated_device.account().pni() {
         return Err(ApiError {
             status_code: StatusCode::FORBIDDEN,
-            message: "".to_owned(),
+            body: "".to_owned(),
         });
     }
 
@@ -91,7 +109,7 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::NOT_FOUND,
-                message: "Destination account not found".to_owned(),
+                body: "Destination account not found".to_owned(),
             })?
     };
     let exclude_device_ids: Vec<u32> = if is_sync_message {
@@ -110,18 +128,19 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
         &message_device_ids,
         &exclude_device_ids,
     )
-    .map_err(|_| ApiError {
-        status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        message: "".to_owned(),
+    .map_err(|err| ApiError {
+        status_code: StatusCode::CONFLICT,
+        body: serde_json::to_string(&err).expect("Can serialize device ids"),
     })?;
+
     DestinationDeviceValidator::validate_registration_id_from_messages(
         &destination,
         &payload.messages,
         destination_identifier.kind() == ServiceIdKind::Pni,
     )
-    .map_err(|_| ApiError {
-        status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        message: "".to_owned(),
+    .map_err(|err| ApiError {
+        status_code: StatusCode::GONE,
+        body: serde_json::to_string(&err).expect("Can serialize device ids"),
     })?;
 
     for message in payload.messages {
@@ -142,7 +161,7 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
             .await
             .map_err(|_| ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                message: "Could not insert message".to_owned(),
+                body: "Could not insert message".to_owned(),
             })?;
     }
 
@@ -150,14 +169,14 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
     Ok(SendMessageResponse { needs_sync })
 }
 
-async fn handle_get_messages<T: SignalDatabase, U: WSStream + Debug>(
+async fn handle_get_messages<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
     state: SignalServerState<T, U>,
     address: ProtocolAddress,
 ) {
-    println!("Get messages")
+    todo!("Get messages")
 }
 
-async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
+async fn handle_post_registration<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
     state: SignalServerState<T, U>,
     auth_header: BasicAuthorizationHeader,
     registration: RegistrationRequest,
@@ -192,11 +211,7 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
             registration.pni_identity_key().to_owned(),
             device.clone(),
         )
-        .await
-        .map_err(|err| ApiError {
-            message: format!("Could not create account:{}", err),
-            status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        })?;
+        .await?;
 
     let aci = account.aci();
     let address = ProtocolAddress::new(aci.service_id_string(), device.device_id());
@@ -205,7 +220,11 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream + Debug>(
     state
         .account_manager
         .store_key_bundle(&device_pre_key_bundle, &address)
-        .await;
+        .await
+        .map_err(|err| ApiError {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            body: err.to_string(),
+        })?;
 
     Ok(RegistrationResponse {
         uuid: aci.into(),
@@ -481,15 +500,15 @@ fn parse_protocol_address(string: String) -> Result<ProtocolAddress, ApiError> {
     let (user_id, dev_id) = string
         .find(".")
         .ok_or(ApiError {
-            message: "Could not parse address. Address did not contain '.'".to_owned(),
             status_code: StatusCode::BAD_REQUEST,
+            body: "Could not parse address. Address did not contain '.'".to_owned(),
         })
         .map(|pos| string.split_at(pos))?;
     let device_id: DeviceId = dev_id[1..]
         .parse::<u32>()
         .map_err(|e| ApiError {
-            message: format!("Could not parse device_id: {}.", e),
             status_code: StatusCode::BAD_REQUEST,
+            body: format!("Could not parse device_id: {}.", e),
         })?
         .into();
 
@@ -498,15 +517,15 @@ fn parse_protocol_address(string: String) -> Result<ProtocolAddress, ApiError> {
 
 fn parse_service_id(string: String) -> Result<ServiceId, ApiError> {
     ServiceId::parse_from_service_id_string(&string).ok_or_else(|| ApiError {
-        message: "Could not parse service id".to_owned(),
         status_code: StatusCode::BAD_REQUEST,
+        body: "Could not parse service id".to_owned(),
     })
 }
 
 /// Handler for the PUT v1/messages/{address} endpoint.
 #[debug_handler]
 async fn put_messages_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
     authenticated_device: AuthenticatedDevice,
     Path(destination_identifier): Path<String>,
     Json(payload): Json<SignalMessages>,
@@ -524,7 +543,7 @@ async fn put_messages_endpoint(
 /// Handler for the GET v1/messages endpoint.
 #[debug_handler]
 async fn get_messages_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
 ) {
     // TODO: Call `handle_get_messages`
 }
@@ -532,28 +551,28 @@ async fn get_messages_endpoint(
 /// Handler for the POST v1/registration endpoint.
 #[debug_handler]
 async fn post_registration_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
     headers: HeaderMap,
     Json(registration): Json<RegistrationRequest>,
 ) -> Result<Json<RegistrationResponse>, ApiError> {
     let auth_header = headers
         .get("Authorization")
         .ok_or_else(|| ApiError {
-            message: "Missing authorization header".to_owned(),
             status_code: StatusCode::UNAUTHORIZED,
+            body: "Missing authorization header".to_owned(),
         })?
         .to_str()
         .map_err(|err| ApiError {
-            message: format!(
+            status_code: StatusCode::UNAUTHORIZED,
+            body: format!(
                 "Authorization header could not be parsed as string: {}",
                 err
             ),
-            status_code: StatusCode::UNAUTHORIZED,
         })?
         .parse()
         .map_err(|err| ApiError {
-            message: format!("Authorization header could not be parsed: {}", err),
             status_code: StatusCode::UNAUTHORIZED,
+            body: format!("Authorization header could not be parsed: {}", err),
         })?;
 
     handle_post_registration(state, auth_header, registration)
@@ -563,28 +582,70 @@ async fn post_registration_endpoint(
 
 /// Handler for the GET v2/keys endpoint.
 #[debug_handler]
-async fn get_keys_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
-    // TODO: Call `handle_get_keys`
+async fn get_keys_endpoint(
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    authenticated_device: AuthenticatedDevice,
+    Path((identifier, device_id)): Path<(String, String)>,
+) -> Result<Json<PreKeyResponse>, ApiError> {
+    state
+        .key_manager
+        .handle_get_keys(
+            &state.db,
+            &authenticated_device,
+            ServiceId::parse_from_service_id_string(&identifier).ok_or_else(|| ApiError {
+                status_code: StatusCode::BAD_REQUEST,
+                body: "Identifier is not of right format".into(),
+            })?,
+            device_id,
+        )
+        .await
+        .map(Json)
 }
 
 /// Handler for the POST v2/keys/check endpoint.
 #[debug_handler]
 async fn post_keycheck_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
-) {
-    // TODO: Call `handle_post_keycheck`
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    authenticated_device: AuthenticatedDevice,
+    Json(check_keys_request): Json<CheckKeysRequest>,
+) -> Result<(), ApiError> {
+    state
+        .key_manager
+        .handle_post_keycheck(
+            &authenticated_device,
+            get_kind(check_keys_request.identity_type)?,
+            check_keys_request.user_digest,
+        )
+        .await?
+        .then_some(())
+        .ok_or_else(|| ApiError {
+            status_code: StatusCode::CONFLICT,
+            body: "".into(),
+        })
 }
 
 /// Handler for the PUT v2/keys endpoint.
 #[debug_handler]
-async fn put_keys_endpoint(State(state): State<SignalServerState<PostgresDatabase, WebSocket>>) {
-    // TODO: Call `handle_put_keys`
+async fn put_keys_endpoint(
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    authenticated_device: AuthenticatedDevice,
+    Query(params): Query<HashMap<String, String>>,
+    Json(set_keys_request): Json<SetKeyRequest>,
+) -> Result<(), ApiError> {
+    state
+        .key_manager
+        .handle_put_keys(
+            &authenticated_device,
+            set_keys_request,
+            get_kind(params.get("identity").unwrap().to_owned())?,
+        )
+        .await
 }
 
 /// Handler for the DELETE v1/accounts/me endpoint.
 #[debug_handler]
 async fn delete_account_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
     authenticated_device: AuthenticatedDevice,
 ) -> Result<(), ApiError> {
     handle_delete_account(state, authenticated_device).await
@@ -593,7 +654,7 @@ async fn delete_account_endpoint(
 /// Handler for the DELETE v1/devices/{device_id} endpoint.
 #[debug_handler]
 async fn delete_device_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
     Path(device_id): Path<u32>,
     authenticated_device: AuthenticatedDevice,
 ) -> Result<(), ApiError> {
@@ -612,7 +673,7 @@ async fn get_link_device_token(
 /// Handler for the POST v1/devices/link endpoint.
 #[debug_handler]
 async fn post_link_device_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
     TypedHeader(Authorization(basic)): TypedHeader<Authorization<Basic>>,
     Json(link_device_request): Json<LinkDeviceRequest>,
 ) -> Result<LinkDeviceResponse, ApiError> {
@@ -622,7 +683,7 @@ async fn post_link_device_endpoint(
 // Websocket upgrade handler '/v1/websocket'
 #[debug_handler]
 async fn create_websocket_endpoint(
-    State(mut state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+    State(mut state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
     authenticated_device: AuthenticatedDevice,
     ws: WebSocketUpgrade,
     user_agent: Option<TypedHeader<headers::UserAgent>>,
@@ -637,7 +698,8 @@ async fn create_websocket_endpoint(
     ws.on_upgrade(move |socket| {
         let mut wmgr = state.websocket_manager.clone();
         async move {
-            let (mut sender, mut receiver) = socket.split();
+            let wrap = SignalWebSocket::new(socket);
+            let (sender, receiver) = wrap.split();
             let ws = WebSocketConnection::new(
                 UserIdentity::AuthenticatedDevice(authenticated_device.into()),
                 addr,
@@ -650,11 +712,12 @@ async fn create_websocket_endpoint(
                 println!("ws.on_upgrade: WebSocket does not exist in WebSocketManager");
                 return;
             };
-            ws.lock().await.send_messages(false);
+            ws.lock().await.send_messages(false).await;
             state
                 .message_manager
-                .add_message_availability_listener(&addr, ws)
+                .add_message_availability_listener(&addr, ws.clone())
                 .await;
+            state.client_presence_manager.set_present(&addr, ws).await;
         }
     })
 }
@@ -682,7 +745,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
 
-    let state = SignalServerState::<PostgresDatabase, WebSocket>::new().await;
+    let state = SignalServerState::<PostgresDatabase, SignalWebSocket>::new().await;
 
     let message_persister = MessagePersister::start(
         state.message_manager.clone(),
@@ -696,7 +759,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/messages", get(get_messages_endpoint))
         .route("/v1/messages/:destination", put(put_messages_endpoint))
         .route("/v1/registration", post(post_registration_endpoint))
-        .route("/v2/keys", get(get_keys_endpoint))
+        .route("/v2/keys/:identifier/:device_id", get(get_keys_endpoint))
         .route("/v2/keys/check", post(post_keycheck_endpoint))
         .route("/v2/keys", put(put_keys_endpoint))
         .route("/v1/accounts/me", delete(delete_account_endpoint))
@@ -705,7 +768,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/devices/:device_id", delete(delete_device_endpoint))
         .route("/v1/websocket", any(create_websocket_endpoint))
         .with_state(state)
-        .layer(
+        /*.layer(
             ServiceBuilder::new()
                 .layer(
                     TraceLayer::new_for_http()
@@ -714,7 +777,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
                                                                                             // .on_body_chunk(trace::DefaultOnBodyChunk::new()),
                 )
                 .layer(TraceLayer::new_for_grpc()),
-        )
+        )*/
         .layer(cors);
 
     let address = env::var("SERVER_ADDRESS")?;
@@ -735,7 +798,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
-    message_persister.stop();
+    message_persister.stop().await;
 
     Ok(())
 }
@@ -745,14 +808,39 @@ fn time_now() -> Result<u128, ApiError> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "".into(),
+            body: "".into(),
         })?
         .as_millis())
 }
 
+fn get_kind(identity_string: String) -> Result<ServiceIdKind, ApiError> {
+    match identity_string.as_str() {
+        "aci" | "ACI" | "" => Ok(ServiceIdKind::Aci),
+        "pni" | "PNI" => Ok(ServiceIdKind::Pni),
+        _ => {
+             Err(ApiError {
+                status_code: StatusCode::BAD_REQUEST,
+                body: "Identity type needs to be either of: aci | pni | ACI | PNI or none which will default to aci".into(),
+            })
+        }
+    }
+}
+
+fn get_kind(identity_string: String) -> Result<ServiceIdKind, ApiError> {
+    match identity_string.as_str() {
+        "aci" | "ACI" | "" => Ok(ServiceIdKind::Aci),
+        "pni" | "PNI" => Ok(ServiceIdKind::Pni),
+        _ => {
+             Err(ApiError {
+                status_code: StatusCode::BAD_REQUEST,
+                body: "Identity type needs to be either of: aci | pni | ACI | PNI or none which will default to aci".into(),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod server_tests {
-    use common::web_api::AccountAttributes;
 
     #[ignore = "Not implemented"]
     #[tokio::test]
@@ -775,12 +863,6 @@ mod server_tests {
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_post_keycheck_test() {
-        todo!()
-    }
-
-    #[ignore = "Not implemented"]
-    #[tokio::test]
-    async fn handle_() {
         todo!()
     }
 

@@ -1,46 +1,13 @@
-use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use axum::extract::Query;
-use axum::http::{StatusCode, Uri};
-use axum::routing::head;
+use super::connection::{ClientConnection, ConnectionMap, WebSocketConnection};
+use crate::database::SignalDatabase;
+use axum::extract::ws::Message;
+use common::signalservice::WebSocketMessage;
+use common::websocket::wsstream::WSStream;
 use futures_util::stream::{SplitStream, StreamExt};
 use libsignal_core::ProtocolAddress;
-use serde::de::IntoDeserializer;
-use serde::Deserialize;
-use serde_json::json;
-use sha2::digest::consts::False;
-use sha2::digest::typenum::Integer;
-use std::fmt::{self, format, Debug};
-use std::future::Future;
-use std::net::SocketAddr;
-use tonic::ConnectError;
-use uuid::fmt::Braced;
-
-use std::str::FromStr;
-use std::thread::current;
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{Mutex, MutexGuard, RwLock};
-
-use common::signal_protobuf::{
-    envelope, web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
-    WebSocketResponseMessage,
-};
-use common::web_api::{SignalMessage, SignalMessages};
 use prost::{bytes::Bytes, Message as PMessage};
-
-use rand::rngs::OsRng;
-use rand::Rng;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use url::Url;
-
-use super::connection::{ClientConnection, ConnectionMap, ConnectionState, WebSocketConnection};
-use super::wsstream::WSStream;
-use crate::account::Account;
-use crate::database::SignalDatabase;
-use crate::error::{ApiError, SocketManagerError};
-use crate::managers::state::SignalServerState;
-use crate::query::PutV1MessageParams;
-
-use chrono::Utc;
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use tokio::sync::Mutex;
 
 /*const WS_ENDPOINTS: [&str; 24] = [
     "v4/attachments/form/upload",
@@ -72,7 +39,7 @@ use chrono::Utc;
 #[derive(Default, Debug)]
 pub struct WebSocketManager<T, U>
 where
-    T: WSStream + Debug,
+    T: WSStream<Message, axum::Error> + Debug,
     U: SignalDatabase,
 {
     sockets: ConnectionMap<T, U>,
@@ -80,7 +47,7 @@ where
 
 impl<T, U> Clone for WebSocketManager<T, U>
 where
-    T: WSStream + Debug,
+    T: WSStream<Message, axum::Error> + Debug,
     U: SignalDatabase,
 {
     fn clone(&self) -> Self {
@@ -92,7 +59,7 @@ where
 
 impl<T, U> WebSocketManager<T, U>
 where
-    T: WSStream + Debug + Send + 'static,
+    T: WSStream<Message, axum::Error> + Debug + Send + 'static,
     U: SignalDatabase + Send + 'static,
 {
     pub fn new() -> Self {
@@ -117,18 +84,18 @@ where
 
         tokio::spawn(async move {
             while let Some(res) = receiver.next().await {
-                if let Err(x) = res {
-                    println!("WebSocketManager recv ERROR: {}", x);
+                let Ok(msg) = res else {
+                    println!("WebSocketManager recv ERROR: {}", res.unwrap_err());
                     connection.lock().await.close().await;
                     break;
                 };
 
-                match res.unwrap() {
+                match msg {
                     Message::Binary(b) => {
                         let msg = match WebSocketMessage::decode(Bytes::from(b)) {
-                            Ok(x) => x,
-                            Err(y) => {
-                                println!("WebSocketManager ERROR - Message::Binary: {}", y);
+                            Ok(msg) => msg,
+                            Err(err) => {
+                                println!("WebSocketManager ERROR - Message::Binary: {}", err);
                                 connection
                                     .lock()
                                     .await
@@ -137,7 +104,7 @@ where
                                 break;
                             }
                         };
-                        connection.lock().await.on_receive(msg).await;
+                        connection.lock().await.on_receive(msg).await.unwrap();
                     }
                     Message::Text(t) => {
                         println!("Message '{}' from '{}'", t, address);
@@ -179,25 +146,22 @@ where
 }
 
 #[cfg(test)]
-pub(crate) mod test {
-    use async_std::channel::Send;
+mod test {
+    use crate::{
+        managers::{
+            state::SignalServerState,
+            websocket::connection::{test::create_connection, ClientConnection},
+        },
+        test_utils::websocket::{MockDB, MockSocket},
+    };
     use axum::extract::ws::Message;
-    use common::web_api::SignalMessages;
+    use common::websocket::net_helper;
     use prost::Message as PMessage;
-
-    use crate::managers::state;
-    use crate::managers::state::SignalServerState;
-    use crate::managers::websocket::connection::test::{create_connection, mock_envelope};
-    use crate::managers::websocket::connection::{ClientConnection, WebSocketConnection};
-    use crate::managers::websocket::net_helper;
-    use crate::managers::websocket::websocket_manager::WebSocketManager;
-    use crate::test_utils::websocket::{MockDB, MockSocket};
 
     #[tokio::test]
     async fn test_insert() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
+        let (ws, _, _, mreceiver) = create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -208,8 +172,7 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_none_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
+        let (ws, sender, _, mreceiver) = create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -228,8 +191,7 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_error_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
+        let (ws, sender, _, mreceiver) = create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -238,7 +200,10 @@ pub(crate) mod test {
 
         assert!(ws.lock().await.is_active());
 
-        sender.send(Err(axum::Error::new("Error message"))).await;
+        sender
+            .send(Err(axum::Error::new("Error message")))
+            .await
+            .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         assert!(!mgr.is_connected(&address).await);
@@ -248,8 +213,7 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_close_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
+        let (ws, sender, _, mreceiver) = create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -258,7 +222,7 @@ pub(crate) mod test {
 
         assert!(ws.lock().await.is_active());
 
-        sender.send(Ok(Message::Close(None))).await;
+        sender.send(Ok(Message::Close(None))).await.unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         assert!(!mgr.is_connected(&address).await);
@@ -268,8 +232,8 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_text_msg() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
+        let (ws, sender, mut receiver, mreceiver) =
+            create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -278,7 +242,10 @@ pub(crate) mod test {
 
         assert!(ws.lock().await.is_active());
 
-        sender.send(Ok(Message::Text("hello".to_string()))).await;
+        sender
+            .send(Ok(Message::Text("hello".to_string())))
+            .await
+            .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
@@ -295,8 +262,8 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_binary_decode_error() {
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
+        let (ws, sender, mut receiver, mreceiver) =
+            create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -307,7 +274,8 @@ pub(crate) mod test {
 
         sender
             .send(Ok(Message::Binary("hello".as_bytes().to_vec())))
-            .await;
+            .await
+            .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
@@ -344,8 +312,8 @@ pub(crate) mod test {
 "#;
 
         let state = SignalServerState::<MockDB, MockSocket>::new();
-        let (ws, sender, mut receiver, mut mreceiver) =
-            create_connection("a", 1, "127.0.0.1:4043", state.clone()).await;
+        let (ws, sender, receiver, mreceiver) =
+            create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
         let mut mgr = state.websocket_manager.clone();
         mgr.insert(ws, mreceiver).await;
@@ -363,7 +331,10 @@ pub(crate) mod test {
             Some(msg.as_bytes().to_vec()),
         );
 
-        sender.send(Ok(Message::Binary(req.encode_to_vec()))).await;
+        sender
+            .send(Ok(Message::Binary(req.encode_to_vec())))
+            .await
+            .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 

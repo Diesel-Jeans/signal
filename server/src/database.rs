@@ -1,12 +1,9 @@
-use std::option;
-
 use crate::account::{Account, Device};
 use anyhow::Result;
 use axum::async_trait;
-use common::signal_protobuf::Envelope;
+use common::signalservice::Envelope;
 use common::web_api::{DeviceCapabilityEnum, DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
-use sqlx::Transaction;
 
 /// Represents a database connection that can store objects related to the signal protocol.
 #[async_trait]
@@ -109,7 +106,10 @@ pub trait SignalDatabase: Clone + Send + Sync + 'static {
 
     /// Get a one time prekey so that you can start a conversation with the
     /// device that is associated with the given [ProtocolAddress].
-    async fn get_one_time_ec_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadPreKey>;
+    async fn get_one_time_ec_pre_key(
+        &self,
+        owner: &ProtocolAddress,
+    ) -> Result<Option<UploadPreKey>>;
 
     async fn get_one_time_pq_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadSignedPreKey>;
 

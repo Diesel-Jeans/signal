@@ -1,10 +1,8 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use crate::account::Account;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-use common::signal_protobuf::{envelope, Envelope};
-use common::web_api::{SignalMessage, SignalMessages};
-use libsignal_core::{DeviceId, ServiceId};
+use common::{signalservice::Envelope, web_api::SignalMessage};
+use libsignal_core::ServiceId;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub trait ToEnvelope {
     fn to_envelope(
@@ -30,7 +28,7 @@ impl ToEnvelope for SignalMessage {
             r#type: Some(self.r#type),
             source_service_id: Some(source_account.aci().service_id_string()),
             source_device: Some(source_device_id as u32),
-            client_timestamp: Some(timestamp),
+            timestamp: Some(timestamp),
             content: Some(BASE64_STANDARD.decode(&self.content).unwrap()),
             server_guid: None,
             server_timestamp: Some(
@@ -44,8 +42,7 @@ impl ToEnvelope for SignalMessage {
             urgent: Some(urgent),
             updated_pni: None,
             story: None,
-            report_spam_token: None,
-            shared_mrm_key: None,
+            reporting_token: None,
         }
     }
 }

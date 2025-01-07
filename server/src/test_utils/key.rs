@@ -1,5 +1,5 @@
 use common::web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
-use libsignal_protocol::{PrivateKey, PublicKey};
+use libsignal_protocol::PrivateKey;
 use rand::{
     rngs::{OsRng, StdRng},
     Rng, SeedableRng,
@@ -45,12 +45,12 @@ pub fn new_upload_signed_pre_key(signer: Option<PrivateKey>) -> UploadSignedPreK
     let key = Box::new([1, 2, 3, 4]);
     match signer {
         Some(signer) => UploadSignedPreKey {
-            key_id: StdRng::from_entropy().gen::<u32>().into(),
+            key_id: StdRng::from_entropy().gen::<u32>(),
             public_key: key.clone(),
             signature: signer.calculate_signature(&*key, &mut OsRng).unwrap(),
         },
         None => UploadSignedPreKey {
-            key_id: StdRng::from_entropy().gen::<u32>().into(),
+            key_id: StdRng::from_entropy().gen::<u32>(),
             public_key: key.clone(),
             signature: key.clone(),
         },
