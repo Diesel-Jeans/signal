@@ -20,8 +20,22 @@ mod test_utils;
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv()?;
 
-    let alice_db_url = "sqlite://C:\\Users\\UnluckyBird\\source\\repos\\AAU\\Semester 9\\signal\\client\\client_db\\alice.db";
-    let bob_db_url = "sqlite://C:\\Users\\UnluckyBird\\source\\repos\\AAU\\Semester 9\\signal\\client\\client_db\\bob.db";
+    let alice_db_url = format!(
+        "sqlite://{}",
+        fs::canonicalize(PathBuf::from("./client_db".to_string()))
+            .unwrap()
+            .into_os_string()
+            .into_string()
+            .unwrap()
+    ) + "/alice.db";
+    let bob_db_url = format!(
+        "sqlite://{}",
+        fs::canonicalize(PathBuf::from("./client_db".to_string()))
+            .unwrap()
+            .into_os_string()
+            .into_string()
+            .unwrap()
+    ) + "/bob.db";
     let server_url = var("SERVER_URL").expect("Could not find SERVER_URL");
     let cert_path = var("CERT_PATH").expect("Could not find CERT_PATH");
 
@@ -29,7 +43,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
-    let mut alice = Client::<Device, SignalServer>::register(
+    /*let mut alice = Client::<Device, SignalServer>::register(
         "alice_device",
         "123456789".into(),
         &alice_db_url,
@@ -44,11 +58,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &server_url,
         &cert_path,
     )
-    .await?;
-    /*let mut alice =
+    .await?;*/
+    let mut alice =
         Client::<Device, SignalServer>::login(&alice_db_url, &cert_path, &server_url).await?;
     let mut bob =
-        Client::<Device, SignalServer>::login(&bob_db_url, &cert_path, &server_url).await?;*/
+        Client::<Device, SignalServer>::login(&bob_db_url, &cert_path, &server_url).await?;
 
     // 1st message
     alice
