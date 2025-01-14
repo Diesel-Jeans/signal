@@ -4,7 +4,7 @@ use crate::{
     error::ApiError,
 };
 use anyhow::Result;
-use common::web_api::{AccountAttributes, DevicePreKeyBundle};
+use common::web_api::DevicePreKeyBundle;
 use hyper::StatusCode;
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::IdentityKey;

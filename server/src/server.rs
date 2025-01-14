@@ -2,7 +2,6 @@ use crate::{
     account::{Account, AuthenticatedDevice, Device},
     account_authenticator::SaltedTokenHash,
     database::SignalDatabase,
-    destination_device_validator::DestinationDeviceValidator,
     envelope::ToEnvelope,
     error::ApiError,
     managers::{
@@ -12,13 +11,18 @@ use crate::{
     },
     postgres::PostgresDatabase,
     query::CheckKeysRequest,
-    response::{LinkDeviceResponse, LinkDeviceToken, SendMessageResponse,
-    validators::{pre_key_signature_validator::PreKeySignatureValidator, destination_device_validator::DestinationDeviceValidator}
-}};
+    response::{LinkDeviceResponse, LinkDeviceToken, SendMessageResponse},
+    validators::{
+        destination_device_validator::DestinationDeviceValidator,
+        pre_key_signature_validator::PreKeySignatureValidator,
+    },
+};
 use anyhow::Result;
 use axum::{
     debug_handler,
-    extract::{connect_info::ConnectInfo, ws::WebSocketUpgrade, Host, Path, Query, State, ws::Message},
+    extract::{
+        connect_info::ConnectInfo, ws::Message, ws::WebSocketUpgrade, Host, Path, Query, State,
+    },
     handler::HandlerWithoutStateExt,
     http::{
         header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
@@ -28,23 +32,21 @@ use axum::{
     routing::{any, delete, get, post, put},
     BoxError, Json, Router,
 };
-use base64::prelude::{Engine as _, BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD};
-use common::signal_protobuf::{envelope, Envelope};
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
+use base64::prelude::{Engine as _, BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD};
 use common::web_api::{
-    authorization::BasicAuthorizationHeader, DeviceCapabilityEnum, DevicePreKeyBundle, PreKeyResponse,
-    LinkDeviceRequest, RegistrationRequest,
-    RegistrationResponse, SetKeyRequest, SetKeyRequest, SignalMessages, UploadKeys,
+    authorization::BasicAuthorizationHeader, DeviceCapabilityEnum, DevicePreKeyBundle,
+    LinkDeviceRequest, PreKeyResponse, RegistrationRequest, RegistrationResponse, SetKeyRequest,
+    SignalMessages,
 };
 use common::websocket::wsstream::WSStream;
 use futures_util::StreamExt;
-use futures_util::TryFutureExt;
 use headers::authorization::Basic;
 use headers::Authorization;
 use hmac::{Hmac, Mac};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
-use libsignal_protocol::{kem, IdentityKey, PreKeyBundle, PublicKey};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::{
@@ -55,38 +57,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tower_http::cors::CorsLayer;
-use uuid::{timestamp, Uuid};
 
-
-use crate::managers::message_persister::MessagePersister;
-use crate::message_cache::MessageAvailabilityListener;
-use axum::extract::ws::{WebSocket, WebSocketUpgrade};
-use axum::{
-    body::{self, Bytes, *},
-    extract::{Extension, FromRequestParts},
-    http::Request,
-    middleware::Next,
-    response::Response,
-};
-use axum_extra::{headers, TypedHeader};
-use axum_server::tls_rustls::RustlsConfig;
-use std::fmt::Debug;
-use std::io::BufRead;
-use std::net::SocketAddr;
-use std::str::FromStr;
-use tonic::service::AxumBody;
-use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
-use tracing::trace;
-use tracing::Level;
-
-use async_trait::async_trait;
-use futures::future::{self, Ready};
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use tower::{Layer, Service, ServiceBuilder};
-use tower_http::trace;
-
-pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
+pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
     state: &SignalServerState<T, U>,
     authenticated_device: &AuthenticatedDevice,
     destination_identifier: &ServiceId,
@@ -168,19 +140,16 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream + Debug>(
     let needs_sync = !is_sync_message && authenticated_device.account().devices().len() > 1;
     Ok(SendMessageResponse { needs_sync })
 }
-
-async fn handle_get_messages<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
-    state: SignalServerState<T, U>,
-    address: ProtocolAddress,
-) {
-    todo!("Get messages")
-}
-
+use base64::prelude::{Engine as _, BASE64_STANDARD};
 async fn handle_post_registration<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
     state: SignalServerState<T, U>,
     auth_header: BasicAuthorizationHeader,
     registration: RegistrationRequest,
 ) -> Result<RegistrationResponse, ApiError> {
+    println!(
+        "registraion aci: {}",
+        BASE64_STANDARD.encode(registration.aci_identity_key().public_key().serialize())
+    );
     let time_now = time_now()?;
     let phone_number = auth_header.username();
     let hash = SaltedTokenHash::generate_for(auth_header.password())?;
@@ -235,14 +204,17 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream<Message, axum::
     })
 }
 
-async fn handle_get_link_device_token<T: SignalDatabase, U: WSStream + Debug>(
-    state: SignalServerState<T, U>,
+async fn handle_get_link_device_token<
+    T: SignalDatabase,
+    U: WSStream<Message, axum::Error> + Debug,
+>(
+    _state: SignalServerState<T, U>,
     authenticated_device: AuthenticatedDevice,
 ) -> Result<LinkDeviceToken, ApiError> {
     if authenticated_device.device().device_id() != 1.into() {
         return Err(ApiError {
             status_code: StatusCode::UNAUTHORIZED,
-            message: "".to_owned(),
+            body: "".to_owned(),
         });
     }
 
@@ -271,7 +243,7 @@ async fn handle_get_link_device_token<T: SignalDatabase, U: WSStream + Debug>(
     })
 }
 
-async fn handle_post_link_device<T: SignalDatabase, U: WSStream + Debug>(
+async fn handle_post_link_device<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
     state: SignalServerState<T, U>,
     auth_header: Basic,
     link_device_request: LinkDeviceRequest,
@@ -281,7 +253,7 @@ async fn handle_post_link_device<T: SignalDatabase, U: WSStream + Debug>(
         .split_once(':')
         .ok_or(ApiError {
             status_code: StatusCode::FORBIDDEN,
-            message: "".to_owned(),
+            body: "".to_owned(),
         })?;
 
     let link_device_secret =
@@ -294,26 +266,26 @@ async fn handle_post_link_device<T: SignalDatabase, U: WSStream + Debug>(
         .decode(b64_signature)
         .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "".to_owned(),
+            body: "".to_owned(),
         })?;
     if expected_signature.as_slice() != signature {
         return Err(ApiError {
             status_code: StatusCode::FORBIDDEN,
-            message: "".to_owned(),
+            body: "".to_owned(),
         });
     }
 
     let (aci_str, timestamp_str) = claims.split_once('.').ok_or(ApiError {
         status_code: StatusCode::FORBIDDEN,
-        message: "".to_owned(),
+        body: "".to_owned(),
     })?;
     let aci = ServiceId::parse_from_service_id_string(aci_str).ok_or(ApiError {
         status_code: StatusCode::FORBIDDEN,
-        message: "".to_owned(),
+        body: "".to_owned(),
     })?;
     let timestamp = timestamp_str.parse().map_err(|_| ApiError {
         status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        message: "".to_owned(),
+        body: "".to_owned(),
     })?;
     let time_then = Duration::from_millis(timestamp);
     let time_now = SystemTime::now()
@@ -323,7 +295,7 @@ async fn handle_post_link_device<T: SignalDatabase, U: WSStream + Debug>(
     if elapsed_time.as_secs() > 600 {
         return Err(ApiError {
             status_code: StatusCode::FORBIDDEN,
-            message: "".to_owned(),
+            body: "".to_owned(),
         });
     }
 
@@ -333,7 +305,7 @@ async fn handle_post_link_device<T: SignalDatabase, U: WSStream + Debug>(
         .await
         .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "".to_owned(),
+            body: "".to_owned(),
         })?;
 
     let account_attributes = link_device_request.account_attributes;
@@ -356,7 +328,7 @@ async fn handle_post_link_device<T: SignalDatabase, U: WSStream + Debug>(
     if !all_keys_valid {
         return Err(ApiError {
             status_code: StatusCode::UNPROCESSABLE_ENTITY,
-            message: "".to_owned(),
+            body: "".to_owned(),
         });
     }
 
@@ -373,7 +345,7 @@ async fn handle_post_link_device<T: SignalDatabase, U: WSStream + Debug>(
     {
         return Err(ApiError {
             status_code: StatusCode::CONFLICT,
-            message: "".to_owned(),
+            body: "".to_owned(),
         });
     }
 
@@ -381,9 +353,9 @@ async fn handle_post_link_device<T: SignalDatabase, U: WSStream + Debug>(
         .db
         .add_used_device_link_token(link_device_request.verification_code)
         .await
-        .map_err(|err| ApiError {
-            message: "".to_owned(),
+        .map_err(|_| ApiError {
             status_code: StatusCode::FORBIDDEN,
+            body: "".to_owned(),
         })?;
 
     let new_device_id = account.get_next_device_id();
@@ -403,9 +375,9 @@ async fn handle_post_link_device<T: SignalDatabase, U: WSStream + Debug>(
         .account_manager
         .add_device(&aci, &device)
         .await
-        .map_err(|err| ApiError {
-            message: "".to_owned(),
+        .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            body: "".to_owned(),
         })?;
 
     Ok(LinkDeviceResponse {
@@ -415,7 +387,7 @@ async fn handle_post_link_device<T: SignalDatabase, U: WSStream + Debug>(
     })
 }
 
-async fn handle_delete_account<T: SignalDatabase, U: WSStream + Debug>(
+async fn handle_delete_account<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
     state: SignalServerState<T, U>,
     authenticated_device: AuthenticatedDevice,
 ) -> Result<(), ApiError> {
@@ -423,13 +395,13 @@ async fn handle_delete_account<T: SignalDatabase, U: WSStream + Debug>(
         .account_manager
         .delete_account(&authenticated_device.account().aci().into())
         .await
-        .map_err(|err| ApiError {
-            message: "".to_owned(),
+        .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            body: "".to_owned(),
         })
 }
 
-async fn handle_delete_device<T: SignalDatabase, U: WSStream + Debug>(
+async fn handle_delete_device<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
     state: SignalServerState<T, U>,
     device_id: u32,
     authenticated_device: AuthenticatedDevice,
@@ -439,14 +411,14 @@ async fn handle_delete_device<T: SignalDatabase, U: WSStream + Debug>(
     {
         return Err(ApiError {
             status_code: StatusCode::UNAUTHORIZED,
-            message: "".to_owned(),
+            body: "".to_owned(),
         });
     }
 
     if device_id == 1 {
         return Err(ApiError {
             status_code: StatusCode::FORBIDDEN,
-            message: "".to_owned(),
+            body: "".to_owned(),
         });
     }
 
@@ -459,7 +431,7 @@ async fn handle_delete_device<T: SignalDatabase, U: WSStream + Debug>(
         .await
         .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "".to_owned(),
+            body: "".to_owned(),
         })
 }
 
@@ -538,14 +510,6 @@ async fn put_messages_endpoint(
         payload,
     )
     .await
-}
-
-/// Handler for the GET v1/messages endpoint.
-#[debug_handler]
-async fn get_messages_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
-) {
-    // TODO: Call `handle_get_messages`
 }
 
 /// Handler for the POST v1/registration endpoint.
@@ -632,6 +596,7 @@ async fn put_keys_endpoint(
     Query(params): Query<HashMap<String, String>>,
     Json(set_keys_request): Json<SetKeyRequest>,
 ) -> Result<(), ApiError> {
+    println!("{}", json!(set_keys_request.signed_pre_key));
     state
         .key_manager
         .handle_put_keys(
@@ -664,7 +629,7 @@ async fn delete_device_endpoint(
 /// Handler for the GET v1/devices/provisioning/code endpoint.
 #[debug_handler]
 async fn get_link_device_token(
-    State(state): State<SignalServerState<PostgresDatabase, WebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
     authenticated_device: AuthenticatedDevice,
 ) -> Result<LinkDeviceToken, ApiError> {
     handle_get_link_device_token(state, authenticated_device).await
@@ -717,7 +682,7 @@ async fn create_websocket_endpoint(
                 .message_manager
                 .add_message_availability_listener(&addr, ws.clone())
                 .await;
-            state.client_presence_manager.set_present(&addr, ws).await;
+            let _ = state.client_presence_manager.set_present(&addr, ws).await;
         }
     })
 }
@@ -756,7 +721,6 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = Router::new()
         .route("/", get(|| async { "Hello from Signal Server" }))
-        .route("/v1/messages", get(get_messages_endpoint))
         .route("/v1/messages/:destination", put(put_messages_endpoint))
         .route("/v1/registration", post(post_registration_endpoint))
         .route("/v2/keys/:identifier/:device_id", get(get_keys_endpoint))
@@ -826,28 +790,8 @@ fn get_kind(identity_string: String) -> Result<ServiceIdKind, ApiError> {
     }
 }
 
-fn get_kind(identity_string: String) -> Result<ServiceIdKind, ApiError> {
-    match identity_string.as_str() {
-        "aci" | "ACI" | "" => Ok(ServiceIdKind::Aci),
-        "pni" | "PNI" => Ok(ServiceIdKind::Pni),
-        _ => {
-             Err(ApiError {
-                status_code: StatusCode::BAD_REQUEST,
-                body: "Identity type needs to be either of: aci | pni | ACI | PNI or none which will default to aci".into(),
-            })
-        }
-    }
-}
-
 #[cfg(test)]
 mod server_tests {
-
-    #[ignore = "Not implemented"]
-    #[tokio::test]
-    async fn handle_get_messages_pops_message_queue() {
-        todo!()
-    }
-
     #[ignore = "Not implemented"]
     #[tokio::test]
     async fn handle_register_account_registers_account() {

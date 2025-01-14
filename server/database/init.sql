@@ -43,7 +43,6 @@ CREATE TABLE aci_signed_pre_key_store (
     public_key  bytea NOT NULL,
     signature   bytea NOT NULL,
     UNIQUE(owner, key_id)
-
 );
 
 CREATE TABLE pni_signed_pre_key_store (
@@ -53,7 +52,6 @@ CREATE TABLE pni_signed_pre_key_store (
     public_key  bytea NOT NULL,
     signature   bytea NOT NULL,
     UNIQUE(owner, key_id)
-
 );
 
 CREATE TABLE aci_pq_last_resort_pre_key_store (

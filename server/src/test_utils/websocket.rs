@@ -69,37 +69,19 @@ impl SignalDatabase for MockDB {
 
     async fn get_device_capabilities(
         &self,
-        address: &ProtocolAddress,
+        _: &ProtocolAddress,
     ) -> Result<Vec<DeviceCapabilityEnum>> {
         todo!()
     }
 
     async fn get_all_device_capabilities(
         &self,
-        service_id: &ServiceId,
+        _: &ServiceId,
     ) -> Result<Vec<(i32, DeviceCapabilityEnum)>> {
         todo!()
     }
 
-    async fn add_used_device_link_token(&self, device_link_token: String) -> Result<()> {
-        todo!()
-    }
-
-    async fn get_device_capabilities(
-        &self,
-        address: &ProtocolAddress,
-    ) -> Result<Vec<DeviceCapabilityEnum>> {
-        todo!()
-    }
-
-    async fn get_all_device_capabilities(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<(i32, DeviceCapabilityEnum)>> {
-        todo!()
-    }
-
-    async fn add_used_device_link_token(&self, device_link_token: String) -> Result<()> {
+    async fn add_used_device_link_token(&self, _: String) -> Result<()> {
         todo!()
     }
 

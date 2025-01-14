@@ -1,8 +1,6 @@
 use anyhow::{bail, Result};
-use common::web_api::{
-    AccountAttributes, AccountCapabilityMode, DeviceCapability, DeviceCapabilityEnum
-};
-use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId, ServiceIdKind};
+use common::web_api::{AccountCapabilityMode, DeviceCapabilityEnum};
+use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceIdKind};
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
 
@@ -19,8 +17,8 @@ pub struct Account {
 impl Account {
     pub fn new(
         pni: Pni,
-        pni_identity_key: IdentityKey,
         aci_identity_key: IdentityKey,
+        pni_identity_key: IdentityKey,
         device: Device,
         phone_number: String,
     ) -> Self {

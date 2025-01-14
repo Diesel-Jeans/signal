@@ -3,7 +3,7 @@ use base64::{prelude::BASE64_STANDARD, Engine as _};
 use core::str;
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use rand::{rngs::OsRng, Rng};
-use sqlx::{decode, migrate::MigrateDatabase, Sqlite, SqlitePool};
+use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use std::collections::HashMap;
 
 use crate::{
@@ -22,9 +22,7 @@ use crate::{
 };
 use common::{
     signalservice::{envelope, Content, DataMessage, Envelope},
-    web_api::{
-        AccountAttributes, DeviceCapabilities, RegistrationRequest, SignalMessage, SignalMessages,
-    },
+    web_api::{AccountAttributes, RegistrationRequest, SignalMessage, SignalMessages},
 };
 use libsignal_protocol::{
     message_decrypt, process_prekey_bundle, CiphertextMessage, CiphertextMessageType,
@@ -402,7 +400,7 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
         .await
         .map_err(ReceiveMessageError::DecryptMessageError)?;
 
-        self.server_api.send_response(request, StatusCode::OK).await;
+        let _ = self.server_api.send_response(request, StatusCode::OK).await;
         // The final message is stored within a DataMessage inside a Content.
         Ok(
             Content::decode(unpad_message(plaintext.as_ref()).unwrap().as_ref())

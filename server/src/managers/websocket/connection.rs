@@ -101,7 +101,8 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
         };
 
         for envelope in envelopes {
-            self.send_message(envelope)
+            let _ = self
+                .send_message(envelope)
                 .await
                 .map_err(|e| println!("{}", e));
         }
@@ -133,7 +134,7 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
         if let ConnectionState::Active(mut socket) =
             std::mem::replace(&mut self.ws, ConnectionState::Closed)
         {
-            socket
+            let _ = socket
                 .send(Message::Close(Some(CloseFrame {
                     code: axum::extract::ws::close_code::NORMAL,
                     reason: "Goodbye".into(),
@@ -386,6 +387,7 @@ pub type ConnectionMap<T, U> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnecti
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
+        account::Device,
         database::SignalDatabase,
         managers::state::SignalServerState,
         postgres::PostgresDatabase,
@@ -430,27 +432,7 @@ pub(crate) mod test {
         let (mock, sender, receiver) = MockSocket::new();
         let (msender, mreceiver) = mock.split();
         let who = SocketAddr::from_str(socket_addr).unwrap();
-        let device = Device::builder()
-            .device_id(0.into())
-            .name("bob_device".to_string())
-            .last_seen(0)
-            .created(0)
-            .auth_token("bob_token".into())
-            .salt("bob_salt".into())
-            .registration_id(1)
-            .pni_registration_id(1)
-            .capabilities(Vec::new())
-            .build();
-        let mut identity_key = [0u8; 33];
-        identity_key[0] = 5;
-        let account = Account::new(
-            Pni::from(Uuid::new_v4()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            IdentityKey::new(PublicKey::deserialize(&identity_key).unwrap()),
-            device.clone(),
-            Uuid::new_v4().to_string(),
-        );
-        let auth_device = AuthenticatedDevice::new(account, device);
+        let auth_device = new_authenticated_device();
 
         let ws = WebSocketConnection::new(
             UserIdentity::AuthenticatedDevice(Box::new(auth_device)),

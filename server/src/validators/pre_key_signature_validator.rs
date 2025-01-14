@@ -1,7 +1,5 @@
-use anyhow::{Ok, Result};
-use base64::{prelude::BASE64_STANDARD, Engine as _};
 use common::web_api::UploadSignedPreKey;
-use libsignal_protocol::{GenericSignedPreKey, IdentityKey};
+use libsignal_protocol::IdentityKey;
 
 pub struct PreKeySignatureValidator;
 
