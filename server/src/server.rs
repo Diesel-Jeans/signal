@@ -21,11 +21,14 @@ use anyhow::Result;
 use axum::{
     debug_handler,
     extract::{
-        connect_info::ConnectInfo, ws::{Message, WebSocketUpgrade}, Host, Path, Query, Request, State
+        connect_info::ConnectInfo,
+        ws::{Message, WebSocketUpgrade},
+        Host, Path, Query, Request, State,
     },
     handler::HandlerWithoutStateExt,
     http::{
-        header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN}, HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri
+        header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
+        HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri,
     },
     middleware::{from_fn, Next},
     response::{IntoResponse, Redirect, Response},
@@ -58,6 +61,8 @@ use std::{
     str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tower::ServiceBuilder;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 
 pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
@@ -732,10 +737,15 @@ pub async fn get_keepalive(
 async fn signal_time_middleware(req: Request, next: Next) -> Response {
     let mut response = next.run(req).await;
 
-    response.headers_mut().insert("x-signal-timestamp", HeaderValue::from(SystemTime::now()
-    .duration_since(UNIX_EPOCH)
-    .expect("Time went backwards")
-    .as_millis() as u64));
+    response.headers_mut().insert(
+        "x-signal-timestamp",
+        HeaderValue::from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_millis() as u64,
+        ),
+    );
 
     response
 }
@@ -762,7 +772,15 @@ pub async fn start_server(use_tls: bool) -> Result<(), Box<dyn std::error::Error
         ])
         .max_age(Duration::from_secs(5184000))
         .allow_credentials(true)
-        .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN, HeaderName::from_static("x-requested-with"), HeaderName::from_static("x-signal-agent")]);
+        .allow_headers([
+            AUTHORIZATION,
+            CONTENT_TYPE,
+            CONTENT_LENGTH,
+            ACCEPT,
+            ORIGIN,
+            HeaderName::from_static("x-requested-with"),
+            HeaderName::from_static("x-signal-agent"),
+        ]);
 
     let state = SignalServerState::<PostgresDatabase, SignalWebSocket>::new().await;
 
@@ -787,6 +805,7 @@ pub async fn start_server(use_tls: bool) -> Result<(), Box<dyn std::error::Error
         .route("/v1/websocket", any(create_websocket_endpoint))
         .route("/v1/keepalive", get(get_keepalive))
         .with_state(state)
+        .layer(CompressionLayer::new().gzip(true))
         .layer(cors)
         .layer(from_fn(signal_time_middleware));
 
@@ -798,7 +817,7 @@ pub async fn start_server(use_tls: bool) -> Result<(), Box<dyn std::error::Error
     let https_addr = SocketAddr::from_str(format!("{}:{}", address, https_port).as_str())?;
 
     // we should probably sometime in future a proxy or something to redirect instead
-    
+
     if use_tls {
         tokio::spawn(redirect_http_to_https(
             http_addr,
@@ -810,7 +829,9 @@ pub async fn start_server(use_tls: bool) -> Result<(), Box<dyn std::error::Error
             .serve(app.into_make_service_with_connect_info::<SocketAddr>())
             .await?;
     } else {
-        axum_server::bind(http_addr).serve(app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+        axum_server::bind(http_addr)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await?;
     }
 
     message_persister.stop().await;

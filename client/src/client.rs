@@ -251,7 +251,7 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
         ))
     }
 
-    pub async fn disconnect(&mut self){
+    pub async fn disconnect(&mut self) {
         self.server_api.disconnect().await;
     }
 
@@ -505,9 +505,6 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
         Ok(device_ids)
     }
 }
-
-
-
 
 fn decode_ciphertext(
     bytes: Vec<u8>,

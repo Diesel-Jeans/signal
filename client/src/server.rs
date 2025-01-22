@@ -19,13 +19,13 @@ use http_client::h1::H1Client;
 use libsignal_core::{Aci, DeviceId, ServiceId};
 use libsignal_protocol::PreKeyBundle;
 use serde_json::{from_slice, to_vec};
-use surf::middleware::{Middleware, Next};
 use std::error::Error;
 use std::fmt::Display;
+use std::io::Read;
 use std::{fmt::Debug, fs, sync::Arc, time::Duration};
+use surf::middleware::{Middleware, Next};
 use surf::{http::convert::json, Client, Config, Url};
 use surf::{Request, Response, StatusCode};
-use std::io::Read;
 
 const REGISTER_URI: &str = "v1/registration";
 const MSG_URI: &str = "/v1/messages";
@@ -146,7 +146,7 @@ impl SignalServerAPI for SignalServer {
             .map_err(SignalClientError::WebSocketError)?;
         Ok(())
     }
-    async fn disconnect(&mut self){
+    async fn disconnect(&mut self) {
         self.socket_manager.close().await;
     }
 
@@ -271,7 +271,7 @@ impl SignalServerAPI for SignalServer {
 struct SignalLayer;
 
 #[surf::utils::async_trait]
-impl Middleware for SignalLayer{
+impl Middleware for SignalLayer {
     async fn handle(
         &self,
         mut req: Request,
@@ -281,7 +281,7 @@ impl Middleware for SignalLayer{
         req.append_header("user-agent", "Signal Client Clone");
         req.append_header("x-signal-agent", "OWA");
         req.append_header("accept-encoding", "gzip");
-        
+
         let mut res = next.run(req, client).await?;
         if let Some(encoding) = res.header("Content-Encoding") {
             if encoding.iter().all(|x| x.as_str() == "gzip") {
@@ -306,13 +306,13 @@ impl SignalServer {
         } else {
             None
         };
-        
+
         let http_client: H1Client = http_client::Config::new()
             .set_timeout(Some(Duration::from_secs(5)))
             .set_tls_config(tls_config)
             .try_into()
             .expect("Could not create HTTP client");
-        
+
         let http_client: Client = Config::new()
             .set_http_client(http_client)
             .set_base_url(Url::parse(server_url).expect("Could not parse URL for server"))

@@ -54,6 +54,9 @@ cargo run
 ```
 As an example, two clients should then be created and messages between them will be send.
 
+### TLS Configuration
+If you do not want to use HTTPS and WSS you can run the server and client with `--no-tls` and then they will just communicate over HTTP and WS
+
 ## Clean up
 ### Resetting the server database
 1. Go into `server`

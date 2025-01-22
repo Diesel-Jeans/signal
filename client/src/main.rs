@@ -44,9 +44,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         rustls::crypto::ring::default_provider()
             .install_default()
             .expect("Failed to install rustls crypto provider");
-        (Some(var("CERT_PATH").expect("Could not find CERT_PATH")), var("HTTPS_SERVER_URL").expect("Could not find SERVER_URL"))
+        (
+            Some(var("CERT_PATH").expect("Could not find CERT_PATH")),
+            var("HTTPS_SERVER_URL").expect("Could not find SERVER_URL"),
+        )
     } else {
-        (None, var("HTTP_SERVER_URL").expect("Could not find SERVER_URL"))
+        (
+            None,
+            var("HTTP_SERVER_URL").expect("Could not find SERVER_URL"),
+        )
     };
 
     let mut alice = if Path::exists(Path::new(&alice_path)) {
@@ -57,7 +63,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "123456789".into(),
             &alice_db_url,
             &server_url,
-            &cert_path
+            &cert_path,
         )
         .await?
     };
@@ -118,7 +124,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Ok(message) => println!("{message}"),
         Err(err) => println!("{:?}", err),
     }
-
 
     alice.disconnect().await;
     bob.disconnect().await;
