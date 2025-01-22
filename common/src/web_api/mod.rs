@@ -390,6 +390,14 @@ impl UploadKeys {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct PreKeyCount {
+    pub count: u32,
+    pub pq_count: u32
+}
+
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct DevicePreKeyBundle {
     pub aci_signed_pre_key: UploadSignedPreKey,
     pub pni_signed_pre_key: UploadSignedPreKey,
