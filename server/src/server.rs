@@ -34,6 +34,7 @@ use axum::{
 };
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
+use base64::prelude::{Engine as _, BASE64_STANDARD};
 use base64::prelude::{Engine as _, BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD};
 use common::web_api::{
     authorization::BasicAuthorizationHeader, DeviceCapabilityType, DevicePreKeyBundle,
@@ -49,6 +50,7 @@ use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::io::BufRead;
 use std::{
     env,
     fmt::Debug,
@@ -140,7 +142,40 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::E
     let needs_sync = !is_sync_message && authenticated_device.account().devices().len() > 1;
     Ok(SendMessageResponse { needs_sync })
 }
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+
+pub async fn handle_keepalive<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
+    state: &SignalServerState<T, U>,
+    authenticated_device: &AuthenticatedDevice,
+) -> Result<(), ApiError> {
+    //Check if present in presencemanager. If not present, close connection for device. Else return 200 Ok
+    if !state
+        .client_presence_manager
+        .is_locally_present(&authenticated_device.get_protocol_address(ServiceIdKind::Aci))
+    {
+        if let Some(connection) = state
+            .websocket_manager
+            .get(&authenticated_device.get_protocol_address(ServiceIdKind::Aci))
+            .await
+        {
+            connection
+                .lock()
+                .await
+                .close_reason(1000, "OK")
+                .await
+                .map_err(|err| err.to_string());
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_get_messages<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
+    state: SignalServerState<T, U>,
+    address: ProtocolAddress,
+) {
+    todo!("Get messages")
+}
+
 async fn handle_post_registration<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
     state: SignalServerState<T, U>,
     auth_header: BasicAuthorizationHeader,
@@ -687,6 +722,14 @@ async fn create_websocket_endpoint(
     })
 }
 
+#[debug_handler]
+pub async fn get_keepalive(
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    authenticated_device: AuthenticatedDevice,
+) -> impl IntoResponse {
+    handle_keepalive(&state, &authenticated_device).await
+}
+
 /// To add a new endpoint:
 ///  * create an async router function: `<method>_<endpoint_name>_endpoint`.
 ///  * create an async handler function: `handle_<method>_<endpoint_name>`
@@ -731,6 +774,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/devices/link", post(post_link_device_endpoint))
         .route("/v1/devices/:device_id", delete(delete_device_endpoint))
         .route("/v1/websocket", any(create_websocket_endpoint))
+        .route("/v1/keepalive", get(get_keepalive))
         .with_state(state)
         /*.layer(
             ServiceBuilder::new()
