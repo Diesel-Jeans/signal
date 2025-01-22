@@ -35,7 +35,7 @@ impl DeviceCapabilityEnum {
         Self::Transfer,
         Self::DeleteSync,
         Self::VersionedExpirationTimer,
-        Self::VersionedExpirationTimer,
+        Self::StorageServiceRecordKeyRotation,
     ];
 
     pub fn value(&self) -> DeviceCapability {
