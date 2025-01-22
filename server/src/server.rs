@@ -631,7 +631,6 @@ async fn put_keys_endpoint(
     Query(params): Query<HashMap<String, String>>,
     Json(set_keys_request): Json<SetKeyRequest>,
 ) -> Result<(), ApiError> {
-    println!("{}", json!(set_keys_request.signed_pre_key));
     state
         .key_manager
         .handle_put_keys(

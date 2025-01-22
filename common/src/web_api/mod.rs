@@ -422,26 +422,29 @@ impl SetKeyRequest {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreKeyResponse {
-    identity_key: String, // Base64 endcoded
-    keys: Vec<PreKeyResponseItem>,
+    #[serde_as(as = "Base64")]
+    identity_key: Box<[u8]>,
+    devices: Vec<PreKeyResponseItem>,
 }
 
 impl PreKeyResponse {
-    pub fn new(identity_key: IdentityKey, keys: Vec<PreKeyResponseItem>) -> Self {
+    pub fn new(identity_key: IdentityKey, devices: Vec<PreKeyResponseItem>) -> Self {
         Self {
-            identity_key: BASE64_STANDARD.encode(identity_key.serialize()),
-            keys,
+            identity_key: identity_key.serialize(),
+            devices,
         }
     }
 
-    pub fn identity_key(&self) -> &str {
+    pub fn identity_key(&self) -> &Box<[u8]> {
         &self.identity_key
     }
-    pub fn keys(&self) -> &Vec<PreKeyResponseItem> {
-        &self.keys
+
+    pub fn devices(&self) -> &Vec<PreKeyResponseItem> {
+        &self.devices
     }
 }
 
@@ -492,16 +495,11 @@ impl TryFrom<PreKeyResponse> for Vec<PreKeyBundle> {
     type Error = String;
 
     fn try_from(items: PreKeyResponse) -> Result<Vec<PreKeyBundle>, Self::Error> {
-        let identity_key = IdentityKey::decode(
-            BASE64_STANDARD
-                .decode(items.identity_key())
-                .map_err(|_| "Failed decoding identity key")?
-                .as_slice(),
-        )
-        .map_err(|_| "Failed decoding identity key")?;
+        let identity_key = IdentityKey::decode(items.identity_key())
+            .map_err(|_| "Failed decoding identity key")?;
 
         let mut bundles = Vec::new();
-        for pre_key_items in items.keys() {
+        for pre_key_items in items.devices() {
             let pre_key = if let Some(pre_key) = pre_key_items.pre_key() {
                 Some((
                     pre_key.key_id.into(),

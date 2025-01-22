@@ -33,7 +33,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 .unwrap()
             {
                 return Err(ApiError {
-                    status_code: StatusCode::BAD_REQUEST,
+                    status_code: StatusCode::UNPROCESSABLE_ENTITY,
                     body: "Invalid signature".to_owned(),
                 });
             }
@@ -157,7 +157,7 @@ impl<T: SignalDatabase> KeyManager<T> {
             .get_account(&target_service_id)
             .await
             .map_err(|_| ApiError {
-                status_code: StatusCode::BAD_REQUEST,
+                status_code: StatusCode::NOT_FOUND,
                 body: format!(
                     "Could not find account for service id: {}",
                     target_service_id.service_id_string()
@@ -173,7 +173,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                     ))
                     .await
                     .map_err(|_| ApiError {
-                        status_code: StatusCode::BAD_REQUEST,
+                        status_code: StatusCode::NOT_FOUND,
                         body: format!("Device id does not exist: {}", device_id),
                     })?]
             }
@@ -186,7 +186,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                 })?,
             _ => {
                 return Err(ApiError {
-                    status_code: StatusCode::BAD_REQUEST,
+                    status_code: StatusCode::UNPROCESSABLE_ENTITY,
                     body: "Target device id is not a u32 or '*'".into(),
                 })
             }
@@ -351,18 +351,12 @@ mod key_manager_tests {
             .await
             .unwrap();
 
-        let device_bundle = keys.keys();
+        let device_bundle = keys.devices();
 
         database.delete_account(&target.aci().into()).await.unwrap();
 
         assert_eq!(
-            IdentityKey::decode(
-                BASE64_STANDARD
-                    .decode(keys.identity_key())
-                    .unwrap()
-                    .as_slice()
-            )
-            .unwrap(),
+            IdentityKey::decode(keys.identity_key()).unwrap(),
             target.aci_identity_key()
         );
         assert!(device_bundle.len() == 1);
@@ -432,18 +426,12 @@ mod key_manager_tests {
             .await
             .unwrap();
 
-        let device_bundle = keys.keys();
+        let device_bundle = keys.devices();
 
         database.delete_account(&target.aci().into()).await.unwrap();
 
         assert_eq!(
-            IdentityKey::decode(
-                BASE64_STANDARD
-                    .decode(keys.identity_key())
-                    .unwrap()
-                    .as_slice()
-            )
-            .unwrap(),
+            IdentityKey::decode(keys.identity_key()).unwrap(),
             target.aci_identity_key()
         );
         assert!(device_bundle.len() == 2);
