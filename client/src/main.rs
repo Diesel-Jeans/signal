@@ -1,7 +1,7 @@
 use client::Client;
 use dotenv::dotenv;
 use server::SignalServer;
-use std::{env::var, error::Error, fs, path::PathBuf, path::Path};
+use std::{env::var, error::Error, fs, path::Path, path::PathBuf};
 use storage::device::Device;
 
 mod client;
@@ -16,13 +16,15 @@ mod storage;
 #[cfg(test)]
 mod test_utils;
 
-
 fn client_db_path() -> String {
     fs::canonicalize(PathBuf::from("./client_db".to_string()))
         .unwrap()
         .into_os_string()
         .into_string()
-        .unwrap().replace("\\", "/").trim_start_matches("//?/").to_owned()
+        .unwrap()
+        .replace("\\", "/")
+        .trim_start_matches("//?/")
+        .to_owned()
 }
 
 #[tokio::main]
@@ -42,8 +44,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
-    
-    let mut alice = if Path::exists(Path::new(&alice_path)){
+    let mut alice = if Path::exists(Path::new(&alice_path)) {
         Client::<Device, SignalServer>::login(&alice_db_url, &cert_path, &server_url).await?
     } else {
         Client::<Device, SignalServer>::register(
@@ -56,7 +57,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await?
     };
 
-    let mut bob = if Path::exists(Path::new(&bob_path)){
+    let mut bob = if Path::exists(Path::new(&bob_path)) {
         Client::<Device, SignalServer>::login(&bob_db_url, &cert_path, &server_url).await?
     } else {
         Client::<Device, SignalServer>::register(
@@ -68,7 +69,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )
         .await?
     };
-
 
     // 1st message
     alice
