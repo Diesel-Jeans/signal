@@ -1,33 +1,28 @@
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId};
-use libsignal_protocol::SignalProtocolError;
 use std::collections::{HashMap, HashSet};
 
+use crate::errors::{ContactManagerError, SignalClientError};
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct Contact {
     pub service_id: ServiceId,
     pub device_ids: HashSet<DeviceId>,
 }
 
 impl Contact {
-    pub fn new(service_id: ServiceId, device_id: DeviceId) -> Contact {
-        let mut set = HashSet::new();
-        set.insert(device_id);
+    pub fn new(service_id: ServiceId) -> Contact {
         Self {
             service_id,
-            device_ids: set,
+            device_ids: HashSet::new(),
         }
     }
-    pub fn get_address(
-        &self,
-        device_id: &DeviceId,
-    ) -> Result<ProtocolAddress, SignalProtocolError> {
+    pub fn get_address(&self, device_id: &DeviceId) -> Result<ProtocolAddress, SignalClientError> {
         Ok(ProtocolAddress::new(
             self.service_id.service_id_string(),
-            *self.device_ids.get(device_id).ok_or_else(|| {
-                SignalProtocolError::InvalidArgument(format!(
-                    "Device id: {} does not exist",
-                    device_id
-                ))
-            })?,
+            *self
+                .device_ids
+                .get(device_id)
+                .ok_or(ContactManagerError::DeviceNotFound(device_id.to_owned()))?,
         ))
     }
 }
@@ -43,45 +38,43 @@ impl ContactManager {
         }
     }
 
-    pub fn add_contact(
-        &mut self,
-        service_id: &ServiceId,
-        device_id: DeviceId,
-    ) -> Result<(), String> {
+    pub fn new_with_contacts(contacts: HashMap<ServiceId, Contact>) -> Self {
+        Self { contacts }
+    }
+
+    pub fn add_contact(&mut self, service_id: &ServiceId) -> Result<(), ContactManagerError> {
         if self.contacts.contains_key(service_id) {
-            return Err(format!(
-                "Contact with service id: '{}', already exists",
-                service_id.service_id_string()
+            return Err(ContactManagerError::ServiceIDAlreadyExists(
+                service_id.to_owned(),
             ));
         }
-        self.contacts
-            .insert(service_id.clone(), Contact::new(*service_id, device_id));
+        self.contacts.insert(*service_id, Contact::new(*service_id));
         Ok(())
     }
 
-    pub fn get_contact(&self, service_id: &ServiceId) -> Result<&Contact, String> {
-        self.contacts.get(service_id).ok_or_else(|| {
-            format!(
-                "Contact with service id: '{}', not found",
-                service_id.service_id_string()
-            )
-        })
+    pub fn get_contact(&self, service_id: &ServiceId) -> Result<&Contact, ContactManagerError> {
+        self.contacts
+            .get(service_id)
+            .ok_or(ContactManagerError::ServiceIDNotFound(
+                service_id.to_owned(),
+            ))
     }
 
-    fn get_contact_mut(&mut self, service_id: &ServiceId) -> Result<&mut Contact, String> {
-        self.contacts.get_mut(service_id).ok_or_else(|| {
-            format!(
-                "Contact with service id: '{}', not found",
-                service_id.service_id_string()
-            )
-        })
+    fn get_contact_mut(
+        &mut self,
+        service_id: &ServiceId,
+    ) -> Result<&mut Contact, ContactManagerError> {
+        self.contacts
+            .get_mut(service_id)
+            .ok_or(ContactManagerError::ServiceIDNotFound(
+                service_id.to_owned(),
+            ))
     }
 
-    pub fn remove_contact(&mut self, service_id: &ServiceId) -> Result<(), String> {
+    pub fn remove_contact(&mut self, service_id: &ServiceId) -> Result<(), ContactManagerError> {
         if !self.contacts.contains_key(service_id) {
-            return Err(format!(
-                "Contact with service id: '{}', not found",
-                service_id.service_id_string()
+            return Err(ContactManagerError::ServiceIDNotFound(
+                service_id.to_owned(),
             ));
         }
         self.contacts.remove(service_id);
@@ -92,7 +85,7 @@ impl ContactManager {
         &mut self,
         service_id: &ServiceId,
         device_ids: Vec<DeviceId>,
-    ) -> Result<(), String> {
+    ) -> Result<(), ContactManagerError> {
         self.get_contact_mut(service_id).map(|contact| {
             for id in device_ids {
                 contact.device_ids.insert(id);
@@ -110,17 +103,15 @@ mod test {
     fn test_cm_add() {
         let mut cm = ContactManager::new();
         let charlie = new_service_id();
-        let device_id: DeviceId = 0.into();
 
-        cm.add_contact(&charlie, device_id).unwrap();
+        cm.add_contact(&charlie).unwrap();
     }
 
     #[test]
     fn test_cm_remove() {
         let mut cm = ContactManager::new();
         let charlie = new_service_id();
-        let device_id: DeviceId = 0.into();
-        cm.add_contact(&charlie, device_id).unwrap();
+        cm.add_contact(&charlie).unwrap();
 
         cm.remove_contact(&charlie).unwrap()
     }
@@ -129,8 +120,9 @@ mod test {
     fn test_cm_get() {
         let mut cm = ContactManager::new();
         let charlie = new_service_id();
-        let device_id: DeviceId = 0.into();
-        cm.add_contact(&charlie, device_id).unwrap();
+        cm.add_contact(&charlie).unwrap();
+        let device_id: DeviceId = 1.into();
+        cm.update_contact(&charlie, vec![device_id]);
 
         let c = cm.get_contact(&charlie).unwrap();
         assert!(c.service_id == charlie);
@@ -141,18 +133,11 @@ mod test {
     async fn test_cm_update() {
         let mut cm = ContactManager::new();
         let charlie = new_service_id();
-        let device_id: DeviceId = 0.into();
-        cm.add_contact(&charlie, device_id).unwrap();
+        cm.add_contact(&charlie).unwrap();
 
         let new_device_id: DeviceId = 1.into();
         cm.update_contact(&charlie, vec![new_device_id]).unwrap();
         assert!(cm.get_contact(&charlie).is_ok(), "Charlie was not ok");
-        assert!(cm
-            .get_contact(&charlie)
-            .unwrap()
-            .device_ids
-            .get(&device_id)
-            .is_some());
         assert!(cm
             .get_contact(&charlie)
             .unwrap()

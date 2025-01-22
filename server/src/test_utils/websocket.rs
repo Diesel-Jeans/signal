@@ -1,10 +1,10 @@
 use crate::{
     account::{Account, Device},
     database::SignalDatabase,
-    managers::websocket::wsstream::WSStream,
 };
 use anyhow::Result;
 use axum::{async_trait, extract::ws::Message, Error};
+use common::websocket::wsstream::WSStream;
 use common::{
     signalservice::Envelope,
     web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
@@ -104,7 +104,7 @@ impl SignalDatabase for MockDB {
         todo!()
     }
 
-    async fn get_one_time_ec_pre_key(&self, _: &ProtocolAddress) -> Result<UploadPreKey> {
+    async fn get_one_time_ec_pre_key(&self, _: &ProtocolAddress) -> Result<Option<UploadPreKey>> {
         todo!()
     }
 
@@ -178,7 +178,7 @@ impl Sink<Message> for MockSocket {
 }
 
 #[async_trait::async_trait]
-impl WSStream for MockSocket {
+impl WSStream<Message, axum::Error> for MockSocket {
     async fn recv(&mut self) -> Option<Result<Message, Error>> {
         self.client_sender.recv().await
     }

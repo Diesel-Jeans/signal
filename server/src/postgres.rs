@@ -117,8 +117,8 @@ impl SignalDatabase for PostgresDatabase {
         .await
         .map(|row| {
             Account::from_db(
-                Pni::parse_from_service_id_string(&row.pni).unwrap(),
                 Aci::parse_from_service_id_string(&row.aci).unwrap(),
+                Pni::parse_from_service_id_string(&row.pni).unwrap(),
                 IdentityKey::new(PublicKey::deserialize(row.aci_identity_key.as_slice()).unwrap()),
                 IdentityKey::new(PublicKey::deserialize(row.pni_identity_key.as_slice()).unwrap()),
                 devices,
@@ -648,7 +648,10 @@ impl SignalDatabase for PostgresDatabase {
         Ok(())
     }
 
-    async fn get_one_time_ec_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadPreKey> {
+    async fn get_one_time_ec_pre_key(
+        &self,
+        owner: &ProtocolAddress,
+    ) -> Result<Option<UploadPreKey>> {
         sqlx::query!(
             r#"
             WITH key AS
@@ -675,11 +678,16 @@ impl SignalDatabase for PostgresDatabase {
         )
         .fetch_one(&self.pool)
         .await
-        .map(|row| UploadPreKey {
-            key_id: row.key_id.parse().unwrap(),
-            public_key: row.public_key.into(),
+        .map(|row| {
+            Some(UploadPreKey {
+                key_id: row.key_id.parse().unwrap(),
+                public_key: row.public_key.into(),
+            })
         })
-        .map_err(|err| err.into())
+        .or_else(|err| match err {
+            sqlx::Error::RowNotFound => Ok(None), // If there is no one-time prekey
+            _err => Err(_err.into()),
+        })
     }
 
     async fn get_one_time_pq_pre_key(&self, owner: &ProtocolAddress) -> Result<UploadSignedPreKey> {
@@ -1333,7 +1341,7 @@ mod db_tests {
         db.store_one_time_ec_pre_keys(otpks.clone(), &address)
             .await
             .unwrap();
-        let retrieved_key = db.get_one_time_ec_pre_key(&address).await.unwrap();
+        let retrieved_key = db.get_one_time_ec_pre_key(&address).await.unwrap().unwrap();
         db.delete_account(&account.aci().into()).await.unwrap();
 
         assert_eq!(otpks, vec![retrieved_key])

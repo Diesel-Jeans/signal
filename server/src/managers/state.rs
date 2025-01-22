@@ -3,20 +3,20 @@ use super::{
     client_presence_manager::ClientPresenceManager,
     key_manager::KeyManager,
     messages_manager::MessagesManager,
-    websocket::{
-        connection::WebSocketConnection, websocket_manager::WebSocketManager, wsstream::WSStream,
-    },
+    websocket::{connection::WebSocketConnection, websocket_manager::WebSocketManager},
 };
 #[cfg(test)]
 use crate::test_utils::websocket::{MockDB, MockSocket};
 use crate::{database::SignalDatabase, message_cache::MessageCache, postgres::PostgresDatabase};
+use axum::extract::ws::Message;
+use common::websocket::wsstream::WSStream;
 use std::fmt::Debug;
 
 #[derive(Debug)]
 pub struct SignalServerState<T, U>
 where
     T: SignalDatabase,
-    U: WSStream + Debug,
+    U: WSStream<Message, axum::Error> + Debug,
 {
     pub db: T,
     pub websocket_manager: WebSocketManager<U, T>,
@@ -30,7 +30,7 @@ where
 impl<T, U> Clone for SignalServerState<T, U>
 where
     T: SignalDatabase + Clone,
-    U: WSStream + Debug,
+    U: WSStream<Message, axum::Error> + Debug,
 {
     fn clone(&self) -> Self {
         Self {
@@ -47,7 +47,7 @@ where
 
 impl<U> SignalServerState<PostgresDatabase, U>
 where
-    U: WSStream + Debug,
+    U: WSStream<Message, axum::Error> + Debug,
 {
     pub async fn new() -> Self {
         SignalServerState::connect("DATABASE_URL").await

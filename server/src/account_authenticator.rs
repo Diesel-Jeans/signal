@@ -2,8 +2,9 @@ use crate::{
     account::{Account, AuthenticatedDevice, Device},
     database::SignalDatabase,
     error::ApiError,
-    managers::{state::SignalServerState, websocket::wsstream::WSStream},
+    managers::state::SignalServerState,
 };
+use axum::extract::ws::Message;
 use axum::{
     async_trait,
     extract::FromRequestParts,
@@ -14,6 +15,7 @@ use axum_extra::{
     typed_header::TypedHeaderRejectionReason,
     TypedHeader,
 };
+use common::websocket::wsstream::WSStream;
 use libsignal_core::ServiceId;
 use rand::{rngs::OsRng, RngCore};
 use std::fmt::Debug;
@@ -22,8 +24,8 @@ const SALT_SIZE: usize = 16;
 const AUTH_TOKEN_HKDF_INFO: &[u8] = "authtoken".as_bytes();
 
 #[async_trait]
-impl<T: SignalDatabase, U: WSStream + Debug> FromRequestParts<SignalServerState<T, U>>
-    for AuthenticatedDevice
+impl<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>
+    FromRequestParts<SignalServerState<T, U>> for AuthenticatedDevice
 where
     T: Sync + Send,
 {
@@ -39,11 +41,11 @@ where
                 .map_err(|err| match err.reason() {
                     TypedHeaderRejectionReason::Missing => ApiError {
                         status_code: StatusCode::UNAUTHORIZED,
-                        message: "Authorization header is missing".to_owned(),
+                        body: "Authorization header is missing".to_owned(),
                     },
                     _ => ApiError {
                         status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                        message: "Error parsing Authorization header".to_owned(),
+                        body: "Error parsing Authorization header".to_owned(),
                     },
                 })?;
 
@@ -53,27 +55,27 @@ where
             )
             .ok_or(ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                message: "Error parsing service id".to_owned(),
+                body: "Error parsing service id".to_owned(),
             })?;
             let device_id = basic.username()[(v + 1)..]
                 .parse::<u32>()
                 .map_err(|_| ApiError {
                     status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "Error parsing device id".to_owned(),
+                    body: "Error parsing device id".to_owned(),
                 })?;
             authenticate_device(state, &service_id, device_id, basic.password()).await
         } else {
             let service_id: ServiceId = ServiceId::parse_from_service_id_string(basic.username())
                 .ok_or(ApiError {
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                message: "Error parsing service id".to_owned(),
+                body: "Error parsing service id".to_owned(),
             })?;
             authenticate_device(state, &service_id, 1, basic.password()).await
         }
     }
 }
 
-async fn authenticate_device<T: SignalDatabase, U: WSStream + Debug>(
+async fn authenticate_device<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
     state: &SignalServerState<T, U>,
     service_id: &ServiceId,
     device_id: u32,
@@ -85,7 +87,7 @@ async fn authenticate_device<T: SignalDatabase, U: WSStream + Debug>(
         .await
         .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "Error getting account".to_owned(),
+            body: "Error getting account".to_owned(),
         })?;
 
     let device: Device = account
@@ -94,7 +96,7 @@ async fn authenticate_device<T: SignalDatabase, U: WSStream + Debug>(
         .find(|&d| d.device_id() == device_id.into())
         .ok_or(ApiError {
             status_code: StatusCode::NOT_FOUND,
-            message: "Device not found".to_owned(),
+            body: "Device not found".to_owned(),
         })?
         .to_owned();
 
@@ -108,7 +110,7 @@ async fn authenticate_device<T: SignalDatabase, U: WSStream + Debug>(
     } else {
         Err(ApiError {
             status_code: StatusCode::UNAUTHORIZED,
-            message: "Wrong password".to_owned(),
+            body: "Wrong password".to_owned(),
         })
     }
 }
@@ -167,7 +169,7 @@ fn HKDF_DeriveSecrets(
         .expand(label, &mut buffer)
         .map_err(|_| ApiError {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: format!("output too long ({})", output_length),
+            body: format!("output too long ({})", output_length),
         })?;
     Ok(buffer)
 }

@@ -13,10 +13,6 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: postgres://root:root@0.0.0.0:5432/signal_db
-      DATABASE_URL_TEST: postgres://test:test@127.0.0.1:3306/signal_db_test
-      REDIS_URL: redis://127.0.0.1:6379
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -42,7 +38,18 @@ jobs:
       uses: hoverkraft-tech/compose-action@v2.0.1
       with:
         compose-file: "./server/docker-compose.yml"
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+    - name: Setup sqlx
+      run: cargo install sqlx-cli && cd client/client_db/ && sqlx db create -D sqlite://dev.db && sqlx migrate run -D sqlite://dev.db && cd ../..
+    - name: Build server
+      run: DATABASE_URL=${{ secrets.DATABASE_URL_SERVER }} cargo build --bin server --verbose
+    - name: Build client
+      run: DATABASE_URL=${{ secrets.DATABASE_URL_CLIENT }} cargo build --bin client --verbose
+    - name: Build common
+      run: cargo build --lib --verbose
+    - name: Run tests server
+      run: DATABASE_URL=${{ secrets.DATABASE_URL_SERVER }} DATABASE_URL_TEST=${{ secrets.DATABASE_URL_SERVER_TEST }} REDIS_URL=${{ secrets.REDIS_URL }} cargo test --bin server --verbose
+    - name: Run tests client
+      run: DATABASE_URL=${{ secrets.DATABASE_URL_CLIENT }} DATABASE_URL_TEST="sqlite::memory:" cargo test --bin client --verbose
+    - name: Run tests common
+      run: cargo test --lib --verbose
+

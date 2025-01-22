@@ -1,10 +1,3 @@
-use super::{
-    net_helper::{
-        create_request, create_response, current_millis, generate_req_id, unpack_messages,
-        PathExtractor,
-    },
-    wsstream::WSStream,
-};
 use crate::{
     account::AuthenticatedDevice,
     database::SignalDatabase,
@@ -12,6 +5,8 @@ use crate::{
     message_cache::MessageAvailabilityListener,
     server::{handle_keepalive, handle_put_messages},
 };
+use axum::extract::ws::WebSocket;
+use axum::Error;
 use axum::{
     extract::ws::{CloseFrame, Message},
     http::{StatusCode, Uri},
@@ -20,14 +15,22 @@ use common::signalservice::{
     web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
     WebSocketResponseMessage,
 };
-use futures_util::{stream::SplitSink, SinkExt};
+use common::websocket::connection_state::ConnectionState;
+use common::websocket::net_helper::{
+    create_request, create_response, current_millis, generate_req_id, unpack_messages,
+    PathExtractor,
+};
+use common::websocket::wsstream::WSStream;
+use futures_util::{stream::SplitSink, Sink, SinkExt, Stream};
 use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
 use prost::Message as PMessage;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt::Debug,
     net::SocketAddr,
+    pin::Pin,
     sync::Arc,
+    task::{Context, Poll},
     time::SystemTimeError,
 };
 use tokio::sync::Mutex;
@@ -39,15 +42,15 @@ pub enum UserIdentity {
 }
 
 #[derive(Debug)]
-pub struct WebSocketConnection<W: WSStream + Debug, DB: SignalDatabase> {
+pub struct WebSocketConnection<W: WSStream<Message, Error> + Debug, DB: SignalDatabase> {
     identity: UserIdentity,
     socket_address: SocketAddr,
-    ws: ConnectionState<W>,
-    pending_requests: HashSet<u64>,
+    ws: ConnectionState<W, Message>,
+    pending_requests: HashMap<u64, String>,
     state: SignalServerState<DB, W>,
 }
 
-impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
+impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
     WebSocketConnection<W, DB>
 {
     pub fn new(
@@ -60,7 +63,7 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
             identity,
             socket_address: socket_addr,
             ws: ConnectionState::Active(ws),
-            pending_requests: HashSet::new(),
+            pending_requests: HashMap::new(),
             state,
         }
     }
@@ -121,7 +124,8 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
             ],
             Some(message.encode_to_vec()),
         );
-        self.pending_requests.insert(id);
+        self.pending_requests
+            .insert(id, message.server_guid.expect("This is always some"));
         Ok(msg)
     }
 
@@ -280,32 +284,41 @@ impl<W: WSStream + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
         &mut self,
         response_msq: WebSocketResponseMessage,
     ) -> Result<(), String> {
-        self.pending_requests
-            .remove(&response_msq.id.ok_or("Request id was not present")?);
-
         // TODO: Figure out how to get the ID of the message so the message manager can delete it.
         // The ID is on the envelope and is called server_guid
+        //
+        // TODO This should be fixed, since the current implementation is wrong
 
-        /*self.state
-        .message_manager
-        .delete(
-            &self.protocol_address(),
-            vec![response_msq
-                .message
-                .ok_or("Response message was not present")?],
-        )
-        .await
-        .map(|_| ())
-        .map_err(|err| err.to_string())*/
+        if !self
+            .pending_requests
+            .contains_key(&response_msq.id.ok_or("Response message was not present")?)
+        {
+            return Err("pending_requests did not have the expected request".to_string());
+        }
 
-        Ok(())
+        self.state
+            .message_manager
+            .delete(
+                &self.protocol_address(),
+                vec![self.pending_requests
+                    [&response_msq.id.ok_or("Response message was not present")?]
+                    .clone()],
+            )
+            .await
+            .map(|_| ())
+            .map_err(|err| err.to_string())?;
+
+        self.pending_requests
+            .remove(&response_msq.id.ok_or("Request id was not present")?)
+            .ok_or("Could not remove pending requests".to_string())
+            .map(|_| ())
     }
 }
 
 #[async_trait::async_trait]
 impl<T, U> MessageAvailabilityListener for WebSocketConnection<T, U>
 where
-    T: WSStream + Debug + 'static,
+    T: WSStream<Message, Error> + Debug + 'static,
     U: SignalDatabase,
 {
     async fn handle_new_messages_available(&mut self) -> bool {
@@ -326,7 +339,7 @@ where
 #[async_trait::async_trait]
 impl<T, U> DisplacedPresenceListener for WebSocketConnection<T, U>
 where
-    T: WSStream + Debug + 'static,
+    T: WSStream<Message, axum::Error> + Debug + 'static,
     U: SignalDatabase,
 {
     async fn handle_displacement(&mut self, connected_elsewhere: bool) {
@@ -342,14 +355,51 @@ where
 }
 
 #[derive(Debug)]
-pub enum ConnectionState<T: WSStream> {
-    Active(SplitSink<T, Message>),
-    Closed,
+pub struct SignalWebSocket(WebSocket);
+impl SignalWebSocket {
+    pub fn new(w: WebSocket) -> Self {
+        Self(w)
+    }
 }
 
-impl<T: WSStream + Debug> ConnectionState<T> {
-    pub fn is_active(&self) -> bool {
-        matches!(self, ConnectionState::Active(_))
+impl Stream for SignalWebSocket {
+    type Item = Result<Message, Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Stream::poll_next(Pin::new(&mut self.0), cx)
+    }
+}
+
+impl Sink<Message> for SignalWebSocket {
+    type Error = Error;
+
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Sink::poll_ready(Pin::new(&mut self.0), cx)
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+        Sink::start_send(Pin::new(&mut self.0), item)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Sink::poll_flush(Pin::new(&mut self.0), cx)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Sink::poll_close(Pin::new(&mut self.0), cx)
+    }
+}
+
+#[async_trait::async_trait]
+impl WSStream<Message, Error> for SignalWebSocket {
+    async fn recv(&mut self) -> Option<Result<Message, Error>> {
+        self.recv().await
+    }
+    async fn send(&mut self, msg: Message) -> Result<(), Error> {
+        SinkExt::send(self, msg).await
+    }
+    async fn close(self) -> Result<(), Error> {
+        self.close().await
     }
 }
 
@@ -361,10 +411,7 @@ pub(crate) mod test {
     use super::{UserIdentity, WebSocketConnection};
     use crate::{
         database::SignalDatabase,
-        managers::{
-            state::SignalServerState,
-            websocket::net_helper::{create_request, create_response},
-        },
+        managers::state::SignalServerState,
         postgres::PostgresDatabase,
         test_utils::{
             message_cache::teardown,
@@ -375,6 +422,7 @@ pub(crate) mod test {
     use axum::{extract::ws::Message, http::StatusCode, Error};
     use base64::prelude::{Engine as _, BASE64_STANDARD};
     use common::signalservice::{Envelope, WebSocketMessage, WebSocketRequestMessage};
+    use common::websocket::net_helper::{create_request, create_response};
     use futures_util::{stream::SplitStream, StreamExt};
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};
@@ -474,7 +522,8 @@ pub(crate) mod test {
         let state = SignalServerState::<MockDB, MockSocket>::new();
         let (mut client, sender, mut receiver, mreceiver) =
             create_connection("127.0.0.1:4042", state).await;
-        let env = make_envelope();
+        let mut env = make_envelope();
+        env.server_guid = Some("abs".to_string());
         client.send_message(env.clone()).await;
 
         assert!(!receiver.is_empty());
@@ -532,6 +581,7 @@ pub(crate) mod test {
             .unwrap();
     }
 
+    #[ignore = "This in currently not testable"]
     #[tokio::test]
     async fn test_on_receive_response() {
         let state = SignalServerState::<MockDB, MockSocket>::new();

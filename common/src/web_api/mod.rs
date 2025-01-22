@@ -1,9 +1,14 @@
 pub mod authorization;
+pub mod errors;
+
 use base64::{prelude::BASE64_STANDARD, Engine};
 use libsignal_protocol::{
-    DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyRecord, SignedPreKeyRecord,
+    kem::{self},
+    DeviceId, GenericSignedPreKey, IdentityKey, KyberPreKeyRecord, PreKeyBundle, PreKeyRecord,
+    PublicKey, SignedPreKeyRecord,
 };
 use serde::{Deserialize, Serialize};
+use serde_with::{base64::Base64, serde_as};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -41,6 +46,7 @@ impl Default for DeviceCapabilities {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountAttributes {
@@ -49,6 +55,7 @@ pub struct AccountAttributes {
     pub registration_id: u32,
     pub pni_registration_id: u32,
     pub capabilities: DeviceCapabilities,
+    #[serde_as(as = "Base64")]
     pub unidentified_access_key: Box<[u8]>,
 }
 
@@ -206,12 +213,15 @@ pub struct AccountIdentityResponse {
 
 /// Used to upload any type of prekey along with a signature that is used
 /// to verify the authenticity of the prekey.
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadSignedPreKey {
     pub key_id: u32,
+    #[serde_as(as = "Base64")]
     pub public_key: Box<[u8]>, // TODO: Make this a PublicKey and implement Serialize
-    pub signature: Box<[u8]>,  // TODO: Make this a PublicKey and implement Serialize
+    #[serde_as(as = "Base64")]
+    pub signature: Box<[u8]>, // TODO: Make this a PublicKey and implement Serialize
 }
 
 impl From<SignedPreKeyRecord> for UploadSignedPreKey {
@@ -243,17 +253,21 @@ impl From<PreKeyRecord> for UploadPreKey {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadPreKey {
     pub key_id: u32,
+    #[serde_as(as = "Base64")]
     pub public_key: Box<[u8]>,
 }
 
 /// Used to upload a new prekeys.
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadKeys {
+    #[serde_as(as = "Base64")]
     identity_key: Box<[u8]>,
     // If a field is not provided, the server won't update its data.
     pre_keys: Option<UploadSignedPreKey>,
@@ -297,6 +311,22 @@ pub struct SetKeyRequest {
     pub pq_last_resort_pre_key: Option<UploadSignedPreKey>,
 }
 
+impl SetKeyRequest {
+    pub fn new(
+        pre_key: Option<Vec<UploadPreKey>>,
+        signed_pre_key: Option<UploadSignedPreKey>,
+        pq_pre_key: Option<Vec<UploadSignedPreKey>>,
+        pq_last_resort_pre_key: Option<UploadSignedPreKey>,
+    ) -> Self {
+        Self {
+            pre_key,
+            signed_pre_key,
+            pq_pre_key,
+            pq_last_resort_pre_key,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreKeyResponse {
@@ -325,7 +355,7 @@ impl PreKeyResponse {
 pub struct PreKeyResponseItem {
     device_id: u32,
     registration_id: u32,
-    pre_key: UploadPreKey,
+    pre_key: Option<UploadPreKey>,
     pq_pre_key: UploadSignedPreKey,
     signed_pre_key: UploadSignedPreKey,
 }
@@ -334,7 +364,7 @@ impl PreKeyResponseItem {
     pub fn new(
         device_id: DeviceId,
         registration_id: u32,
-        pre_key: UploadPreKey,
+        pre_key: Option<UploadPreKey>,
         pq_pre_key: UploadSignedPreKey,
         signed_pre_key: UploadSignedPreKey,
     ) -> Self {
@@ -352,7 +382,7 @@ impl PreKeyResponseItem {
     pub fn registration_id(&self) -> u32 {
         self.registration_id
     }
-    pub fn pre_key(&self) -> &UploadPreKey {
+    pub fn pre_key(&self) -> &Option<UploadPreKey> {
         &self.pre_key
     }
     pub fn pq_pre_key(&self) -> &UploadSignedPreKey {
@@ -360,6 +390,54 @@ impl PreKeyResponseItem {
     }
     pub fn signed_pre_key(&self) -> &UploadSignedPreKey {
         &self.signed_pre_key
+    }
+}
+
+impl TryFrom<PreKeyResponse> for Vec<PreKeyBundle> {
+    type Error = String;
+
+    fn try_from(items: PreKeyResponse) -> Result<Vec<PreKeyBundle>, Self::Error> {
+        let identity_key = IdentityKey::decode(
+            BASE64_STANDARD
+                .decode(items.identity_key())
+                .map_err(|_| "Failed decoding identity key")?
+                .as_slice(),
+        )
+        .map_err(|_| "Failed decoding identity key")?;
+
+        let mut bundles = Vec::new();
+        for pre_key_items in items.keys() {
+            let pre_key = if let Some(pre_key) = pre_key_items.pre_key() {
+                Some((
+                    pre_key.key_id.into(),
+                    PublicKey::deserialize(&pre_key.public_key)
+                        .map_err(|_| "Failed decoding pre key")?,
+                ))
+            } else {
+                None
+            };
+            let bundle = PreKeyBundle::new(
+                pre_key_items.registration_id(),
+                pre_key_items.device_id(),
+                pre_key,
+                pre_key_items.signed_pre_key().key_id.into(),
+                PublicKey::deserialize(&pre_key_items.signed_pre_key().public_key)
+                    .map_err(|_| "Failed decoding signed pre key key")?,
+                pre_key_items.signed_pre_key().signature.to_vec(),
+                identity_key,
+            )
+            .map_err(|_| "Creation of key bundle failed")?;
+
+            bundles.push(
+                bundle.with_kyber_pre_key(
+                    pre_key_items.pq_pre_key().key_id.into(),
+                    kem::PublicKey::deserialize(&pre_key_items.pq_pre_key().public_key)
+                        .map_err(|_| "Failed decoding kem pre key key")?,
+                    pre_key_items.pq_pre_key().signature.to_vec(),
+                ),
+            )
+        }
+        Ok(bundles)
     }
 }
 
@@ -379,4 +457,42 @@ pub struct SignalMessage {
     pub destination_device_id: u32,
     pub destination_registration_id: u32,
     pub content: String,
+}
+
+#[cfg(test)]
+mod api_structs_tests {
+    use libsignal_protocol::{kem, IdentityKeyPair, KeyPair, PreKeyBundle};
+    use rand::rngs::OsRng;
+
+    use super::{PreKeyResponse, PreKeyResponseItem, UploadPreKey, UploadSignedPreKey};
+
+    #[test]
+    fn test_try_from_pre_key_response() {
+        let identity_key = IdentityKeyPair::generate(&mut OsRng);
+        let prekey = KeyPair::generate(&mut OsRng);
+        let pq_pre_key = kem::KeyPair::generate(kem::KeyType::Kyber1024);
+
+        let mut keys = Vec::new();
+        keys.push(PreKeyResponseItem::new(
+            1.into(),
+            1,
+            Some(UploadPreKey {
+                key_id: 1,
+                public_key: prekey.public_key.serialize(),
+            }),
+            UploadSignedPreKey {
+                key_id: 1,
+                public_key: pq_pre_key.public_key.serialize(),
+                signature: Box::new([1, 2, 3, 4]),
+            },
+            UploadSignedPreKey {
+                key_id: 1,
+                public_key: prekey.public_key.serialize(),
+                signature: Box::new([1, 2, 3, 4]),
+            },
+        ));
+
+        let res = PreKeyResponse::new(*identity_key.identity_key(), keys);
+        let _: Vec<PreKeyBundle> = res.try_into().unwrap();
+    }
 }

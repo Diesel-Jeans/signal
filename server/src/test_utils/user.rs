@@ -31,8 +31,8 @@ pub fn new_account() -> Account {
     let identity_key = KeyPair::generate(&mut csprng);
 
     Account::new(
-        new_pni(),
         new_device(),
+        new_pni(),
         IdentityKey::new(identity_key.public_key),
         IdentityKey::new(identity_key.public_key),
         new_uuid().into(),
@@ -83,7 +83,7 @@ pub fn new_aci() -> Aci {
 }
 
 pub fn new_pni() -> Pni {
-    Pni::from(new_uuid()).into()
+    Pni::from(new_uuid())
 }
 
 pub fn new_device_id() -> DeviceId {
