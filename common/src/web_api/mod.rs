@@ -21,7 +21,7 @@ pub enum AccountCapabilityMode {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase", tag = "capability_type")]
-pub enum DeviceCapabilityEnum {
+pub enum DeviceCapabilityType {
     Storage,
     Transfer,
     DeleteSync,
@@ -29,7 +29,7 @@ pub enum DeviceCapabilityEnum {
     StorageServiceRecordKeyRotation,
 }
 
-impl DeviceCapabilityEnum {
+impl DeviceCapabilityType {
     pub const VALUES: [Self; 5] = [
         Self::Storage,
         Self::Transfer,
@@ -40,31 +40,31 @@ impl DeviceCapabilityEnum {
 
     pub fn value(&self) -> DeviceCapability {
         match *self {
-            DeviceCapabilityEnum::Storage => DeviceCapability {
+            DeviceCapabilityType::Storage => DeviceCapability {
                 name: "storage".to_owned(),
                 account_capability_mode: AccountCapabilityMode::AnyDevice,
                 prevent_downgrade: false,
                 include_in_profile: false,
             },
-            DeviceCapabilityEnum::Transfer => DeviceCapability {
+            DeviceCapabilityType::Transfer => DeviceCapability {
                 name: "transfer".to_owned(),
                 account_capability_mode: AccountCapabilityMode::PrimaryDevice,
                 prevent_downgrade: false,
                 include_in_profile: false,
             },
-            DeviceCapabilityEnum::DeleteSync => DeviceCapability {
+            DeviceCapabilityType::DeleteSync => DeviceCapability {
                 name: "deleteSync".to_owned(),
                 account_capability_mode: AccountCapabilityMode::AllDevices,
                 prevent_downgrade: true,
                 include_in_profile: true,
             },
-            DeviceCapabilityEnum::VersionedExpirationTimer => DeviceCapability {
+            DeviceCapabilityType::VersionedExpirationTimer => DeviceCapability {
                 name: "versionedExpirationTimer".to_owned(),
                 account_capability_mode: AccountCapabilityMode::AllDevices,
                 prevent_downgrade: true,
                 include_in_profile: true,
             },
-            DeviceCapabilityEnum::StorageServiceRecordKeyRotation => DeviceCapability {
+            DeviceCapabilityType::StorageServiceRecordKeyRotation => DeviceCapability {
                 name: "ssre2".to_owned(),
                 account_capability_mode: AccountCapabilityMode::AllDevices,
                 prevent_downgrade: true,
@@ -74,27 +74,27 @@ impl DeviceCapabilityEnum {
     }
 }
 
-impl From<i32> for DeviceCapabilityEnum {
+impl From<i32> for DeviceCapabilityType {
     fn from(value: i32) -> Self {
         match value {
-            0 => DeviceCapabilityEnum::Storage,
-            1 => DeviceCapabilityEnum::Transfer,
-            2 => DeviceCapabilityEnum::DeleteSync,
-            3 => DeviceCapabilityEnum::VersionedExpirationTimer,
-            4 => DeviceCapabilityEnum::StorageServiceRecordKeyRotation,
+            0 => Self::Storage,
+            1 => Self::Transfer,
+            2 => Self::DeleteSync,
+            3 => Self::VersionedExpirationTimer,
+            4 => Self::StorageServiceRecordKeyRotation,
             _ => todo!(),
         }
     }
 }
 
-impl From<DeviceCapabilityEnum> for i32 {
-    fn from(value: DeviceCapabilityEnum) -> Self {
+impl From<DeviceCapabilityType> for i32 {
+    fn from(value: DeviceCapabilityType) -> Self {
         match value {
-            DeviceCapabilityEnum::Storage => 0,
-            DeviceCapabilityEnum::Transfer => 1,
-            DeviceCapabilityEnum::DeleteSync => 2,
-            DeviceCapabilityEnum::VersionedExpirationTimer => 3,
-            DeviceCapabilityEnum::StorageServiceRecordKeyRotation => 4,
+            DeviceCapabilityType::Storage => 0,
+            DeviceCapabilityType::Transfer => 1,
+            DeviceCapabilityType::DeleteSync => 2,
+            DeviceCapabilityType::VersionedExpirationTimer => 3,
+            DeviceCapabilityType::StorageServiceRecordKeyRotation => 4,
         }
     }
 }
@@ -132,7 +132,7 @@ pub struct AccountAttributes {
     pub fetches_messages: bool,
     pub registration_id: u32,
     pub pni_registration_id: u32,
-    pub capabilities: Vec<DeviceCapabilityEnum>,
+    pub capabilities: Vec<DeviceCapabilityType>,
     #[serde_as(as = "Base64")]
     pub unidentified_access_key: Box<[u8]>,
 }
@@ -143,7 +143,7 @@ impl AccountAttributes {
         fetches_messages: bool,
         registration_id: u32,
         pni_registration_id: u32,
-        capabilities: Vec<DeviceCapabilityEnum>,
+        capabilities: Vec<DeviceCapabilityType>,
         unidentified_access_key: Box<[u8]>,
     ) -> Self {
         Self {

@@ -36,7 +36,7 @@ use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
 use base64::prelude::{Engine as _, BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD};
 use common::web_api::{
-    authorization::BasicAuthorizationHeader, DeviceCapabilityEnum, DevicePreKeyBundle,
+    authorization::BasicAuthorizationHeader, DeviceCapabilityType, DevicePreKeyBundle,
     LinkDeviceRequest, PreKeyResponse, RegistrationRequest, RegistrationResponse, SetKeyRequest,
     SignalMessages,
 };
@@ -332,7 +332,7 @@ async fn handle_post_link_device<T: SignalDatabase, U: WSStream<Message, axum::E
         });
     }
 
-    if !DeviceCapabilityEnum::VALUES
+    if !DeviceCapabilityType::VALUES
         .iter()
         .filter(|capability| {
             capability.value().prevent_downgrade && account.has_capability(capability)

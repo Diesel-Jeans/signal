@@ -6,7 +6,7 @@ use anyhow::{anyhow, bail, Result};
 use axum::async_trait;
 use common::{
     signalservice::Envelope,
-    web_api::{DeviceCapabilityEnum, DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
+    web_api::{DeviceCapabilityType, DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
 };
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{IdentityKey, PublicKey};
@@ -205,7 +205,7 @@ impl SignalDatabase for PostgresDatabase {
     }
 
     async fn get_all_devices(&self, service_id: &ServiceId) -> Result<Vec<Device>> {
-        let device_capabilities: Vec<(i32, DeviceCapabilityEnum)> =
+        let device_capabilities: Vec<(i32, DeviceCapabilityType)> =
             self.get_all_device_capabilities(service_id).await?;
 
         sqlx::query!(
@@ -318,7 +318,7 @@ impl SignalDatabase for PostgresDatabase {
     async fn get_device_capabilities(
         &self,
         address: &ProtocolAddress,
-    ) -> Result<Vec<DeviceCapabilityEnum>> {
+    ) -> Result<Vec<DeviceCapabilityType>> {
         sqlx::query!(
             r#"
             SELECT
@@ -334,7 +334,7 @@ impl SignalDatabase for PostgresDatabase {
         .await
         .map(|rows| {
             rows.into_iter()
-                .map(|row| DeviceCapabilityEnum::from(row.capability_type))
+                .map(|row| DeviceCapabilityType::from(row.capability_type))
                 .collect()
         })
         .map_err(|err| err.into())
@@ -343,7 +343,7 @@ impl SignalDatabase for PostgresDatabase {
     async fn get_all_device_capabilities(
         &self,
         service_id: &ServiceId,
-    ) -> Result<Vec<(i32, DeviceCapabilityEnum)>> {
+    ) -> Result<Vec<(i32, DeviceCapabilityType)>> {
         sqlx::query!(
             r#"
             SELECT
@@ -375,7 +375,7 @@ impl SignalDatabase for PostgresDatabase {
         .await
         .map(|rows| {
             rows.into_iter()
-                .map(|row| (row.owner, DeviceCapabilityEnum::from(row.capability_type)))
+                .map(|row| (row.owner, DeviceCapabilityType::from(row.capability_type)))
                 .collect()
         })
         .map_err(|err| err.into())

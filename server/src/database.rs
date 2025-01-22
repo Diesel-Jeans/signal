@@ -2,7 +2,7 @@ use crate::account::{Account, Device};
 use anyhow::Result;
 use axum::async_trait;
 use common::signalservice::Envelope;
-use common::web_api::{DeviceCapabilityEnum, DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
+use common::web_api::{DeviceCapabilityType, DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey};
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 
 /// Represents a database connection that can store objects related to the signal protocol.
@@ -39,12 +39,12 @@ pub trait SignalDatabase: Clone + Send + Sync + 'static {
     async fn get_device_capabilities(
         &self,
         address: &ProtocolAddress,
-    ) -> Result<Vec<DeviceCapabilityEnum>>;
+    ) -> Result<Vec<DeviceCapabilityType>>;
 
     async fn get_all_device_capabilities(
         &self,
         service_id: &ServiceId,
-    ) -> Result<Vec<(i32, DeviceCapabilityEnum)>>;
+    ) -> Result<Vec<(i32, DeviceCapabilityType)>>;
 
     async fn add_used_device_link_token(&self, device_link_token: String) -> Result<()>;
 

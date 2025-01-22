@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use common::web_api::{AccountCapabilityMode, DeviceCapabilityEnum};
+use common::web_api::{AccountCapabilityMode, DeviceCapabilityType};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceIdKind};
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
@@ -82,7 +82,7 @@ impl Account {
         &self.phone_number
     }
 
-    pub fn has_capability(&self, device_capability: &DeviceCapabilityEnum) -> bool {
+    pub fn has_capability(&self, device_capability: &DeviceCapabilityType) -> bool {
         match device_capability.value().account_capability_mode {
             AccountCapabilityMode::PrimaryDevice => self
                 .devices()
@@ -121,7 +121,7 @@ pub struct Device {
     salt: String,
     registration_id: u32,
     pni_registration_id: u32,
-    capabilities: Vec<DeviceCapabilityEnum>,
+    capabilities: Vec<DeviceCapabilityType>,
 }
 impl Device {
     pub fn device_id(&self) -> DeviceId {
@@ -153,11 +153,11 @@ impl Device {
         self.pni_registration_id
     }
 
-    pub fn capabilities(&self) -> Vec<DeviceCapabilityEnum> {
+    pub fn capabilities(&self) -> Vec<DeviceCapabilityType> {
         self.capabilities.clone()
     }
 
-    pub fn has_capability(&self, capability: &DeviceCapabilityEnum) -> bool {
+    pub fn has_capability(&self, capability: &DeviceCapabilityType) -> bool {
         self.capabilities.contains(capability)
     }
 }
