@@ -326,9 +326,26 @@ impl SignalDatabase for PostgresDatabase {
             FROM
                 device_capabilities
             WHERE
-                owner = $1
+                owner = (
+                    SELECT
+                        id
+                    FROM
+                        devices
+                    WHERE
+                        owner = (
+                            SELECT
+                                id
+                            FROM
+                                accounts
+                            WHERE
+                                aci = $1 OR
+                                pni = $1
+                        )
+                        AND device_id = $2
+                )
             "#,
-            u32::from(address.device_id()) as i32
+            address.name(),
+            address.device_id().to_string()
         )
         .fetch_all(&self.pool)
         .await
@@ -352,7 +369,7 @@ impl SignalDatabase for PostgresDatabase {
             FROM
                 device_capabilities
             WHERE
-                owner = (
+                owner IN (
                     SELECT
                         id
                     FROM
