@@ -356,8 +356,7 @@ mod key_manager_tests {
         database.delete_account(&target.aci().into()).await.unwrap();
 
         assert_eq!(
-            IdentityKey::decode(keys.identity_key())
-            .unwrap(),
+            IdentityKey::decode(keys.identity_key()).unwrap(),
             target.aci_identity_key()
         );
         assert!(device_bundle.len() == 1);
