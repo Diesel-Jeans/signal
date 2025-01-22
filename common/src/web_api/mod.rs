@@ -392,9 +392,8 @@ impl UploadKeys {
 #[serde(rename_all = "camelCase")]
 pub struct PreKeyCount {
     pub count: u32,
-    pub pq_count: u32
+    pub pq_count: u32,
 }
-
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
