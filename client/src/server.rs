@@ -6,6 +6,7 @@ use crate::{
     socket_manager::signal_ws_connect,
 };
 use async_native_tls::{Certificate, TlsConnector};
+use axum::http;
 use common::signalservice::{web_socket_message, WebSocketMessage, WebSocketRequestMessage};
 use common::web_api::{
     authorization::BasicAuthorizationHeader, PreKeyResponse, RegistrationRequest,
@@ -13,15 +14,18 @@ use common::web_api::{
 };
 use common::web_api::{SetKeyRequest, SignalMessages};
 use common::websocket::net_helper::{create_request, create_response};
+use flate2::read::GzDecoder;
 use http_client::h1::H1Client;
 use libsignal_core::{Aci, DeviceId, ServiceId};
 use libsignal_protocol::PreKeyBundle;
 use serde_json::{from_slice, to_vec};
+use surf::middleware::{Middleware, Next};
 use std::error::Error;
 use std::fmt::Display;
 use std::{fmt::Debug, fs, sync::Arc, time::Duration};
 use surf::{http::convert::json, Client, Config, Url};
-use surf::{Response, StatusCode};
+use surf::{Request, Response, StatusCode};
+use std::io::Read;
 
 const REGISTER_URI: &str = "v1/registration";
 const MSG_URI: &str = "/v1/messages";
@@ -264,11 +268,37 @@ impl SignalServerAPI for SignalServer {
     }
 }
 
+struct SignalLayer;
+
+#[surf::utils::async_trait]
+impl Middleware for SignalLayer{
+    async fn handle(
+        &self,
+        mut req: Request,
+        client: Client,
+        next: Next<'_>,
+    ) -> surf::Result<Response> {
+        req.append_header("user-agent", "Signal Client Clone");
+        req.append_header("x-signal-agent", "OWA");
+        req.append_header("accept-encoding", "gzip");
+        
+        let mut res = next.run(req, client).await?;
+        if let Some(encoding) = res.header("Content-Encoding") {
+            if encoding.iter().all(|x| x.as_str() == "gzip") {
+                let body_bytes = res.body_bytes().await?;
+                let mut gz = GzDecoder::new(body_bytes.as_slice());
+                let mut decompressed_body = Vec::new();
+                gz.read_to_end(&mut decompressed_body)?;
+
+                res.set_body(decompressed_body);
+            }
+        }
+        Ok(res)
+    }
+}
+
 impl SignalServer {
     pub fn new(cert_path: &Option<String>, server_url: &str) -> Self {
-
-        
-        
         let tls_config = if let Some(path) = cert_path {
             let cert_bytes = fs::read(path).expect("Could not read certificate.");
             let crt = Certificate::from_pem(&cert_bytes).expect("Could not parse certificate.");
@@ -283,12 +313,12 @@ impl SignalServer {
             .try_into()
             .expect("Could not create HTTP client");
         
-        let http_client = Config::new()
+        let http_client: Client = Config::new()
             .set_http_client(http_client)
             .set_base_url(Url::parse(server_url).expect("Could not parse URL for server"))
             .try_into()
             .expect("Could not connect to server.");
-
+        let http_client = http_client.with(SignalLayer);
         let socket_mgr = SocketManager::new(16);
 
         let filter = |x: &WebSocketMessage| -> Option<WebSocketMessage> {

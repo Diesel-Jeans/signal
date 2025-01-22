@@ -110,16 +110,23 @@ pub async fn signal_ws_connect(
         .into_client_request()
         .map_err(|_| "Failed to convert to client request".to_string())?;
 
+    // TODO: do some smarter header handling than this, now both middleware and this defines headers
     // Create Signal auth
-    req.headers_mut().insert(
-        "Authorization",
-        format!(
-            "Basic {}",
-            BASE64_STANDARD.encode(format!("{}:{}", username, password))
-        )
-        .parse()
-        .unwrap(),
-    );
+    let headers = [
+        ("Authorization", format!("Basic {}", BASE64_STANDARD.encode(format!("{}:{}", username, password)))),
+        ("Accept-Encoding", "gzip".to_string()),
+        ("user-agent", "Signal Clone Client".to_string()),
+        ("x-signal-agent", "OWA".to_string()),
+        ("sec-websocket-extensions", "permessage-deflate".to_string()), // TODO: does not actually support this: https://github.com/snapview/tungstenite-rs/pull/426
+        ("x-signal-receive-stories", "false".to_string())
+    ];
+
+    for (key, value) in headers.iter() {
+        req.headers_mut().insert(
+            *key,
+            value.parse().map_err(|_| format!("failed to add {} header", key))?,
+        );
+    }
 
     let addr = req.uri().host().ok_or("No Host".to_string())?;
     let port = req.uri().port_u16().ok_or("No Port".to_string())?;
