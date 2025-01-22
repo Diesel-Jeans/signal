@@ -1,6 +1,6 @@
 use crate::{
     errors::{DecodeContentError, DecodeDataMessageError, DecodeEnvelopeError},
-    signalservice::{data_message, envelope::Type, Content, DataMessage, Envelope},
+    signalservice::{envelope::Type, Content, DataMessage, Envelope},
     SignalError,
 };
 use libsignal_protocol::Pni;
@@ -169,10 +169,4 @@ impl Content {
         self.data_message
             .ok_or(DecodeContentError("No data message in Content".to_owned()))
     }
-}
-
-#[cfg(test)]
-mod envelope_tests {
-
-    fn decrypted_envelope_contains_message() {}
 }
