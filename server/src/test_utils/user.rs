@@ -1,5 +1,5 @@
 use crate::account::{Account, AuthenticatedDevice, Device};
-use common::web_api::{AccountAttributes, DeviceCapabilities};
+use common::web_api::AccountAttributes;
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{IdentityKey, KeyPair};
 use rand::{
@@ -31,12 +31,11 @@ pub fn new_account() -> Account {
     let identity_key = KeyPair::generate(&mut csprng);
 
     Account::new(
-        new_device(),
         new_pni(),
         IdentityKey::new(identity_key.public_key),
         IdentityKey::new(identity_key.public_key),
+        new_device(),
         new_uuid().into(),
-        new_account_attributes(),
     )
 }
 pub fn new_device() -> Device {
@@ -49,24 +48,8 @@ pub fn new_device() -> Device {
         .salt("bob_salt".into())
         .registration_id(new_rand_number())
         .pni_registration_id(new_rand_number())
+        .capabilities(Vec::new())
         .build()
-}
-
-pub fn new_account_attributes() -> AccountAttributes {
-    AccountAttributes {
-        name: "name".into(),
-        fetches_messages: true,
-        registration_id: 1,
-        pni_registration_id: 1,
-        capabilities: DeviceCapabilities {
-            storage: true,
-            transfer: true,
-            payment_activation: true,
-            delete_sync: true,
-            versioned_expiration_timer: true,
-        },
-        unidentified_access_key: Box::new([1u8, 2u8, 3u8]),
-    }
 }
 
 pub fn new_protocol_address() -> ProtocolAddress {

@@ -7,7 +7,7 @@ use axum::{async_trait, extract::ws::Message, Error};
 use common::websocket::wsstream::WSStream;
 use common::{
     signalservice::Envelope,
-    web_api::{DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
+    web_api::{DeviceCapabilityType, DevicePreKeyBundle, UploadPreKey, UploadSignedPreKey},
 };
 use futures_util::{stream::Stream, Sink};
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
@@ -64,6 +64,24 @@ impl SignalDatabase for MockDB {
     }
 
     async fn delete_account(&self, _: &ServiceId) -> Result<()> {
+        todo!()
+    }
+
+    async fn get_device_capabilities(
+        &self,
+        _: &ProtocolAddress,
+    ) -> Result<Vec<DeviceCapabilityType>> {
+        todo!()
+    }
+
+    async fn get_all_device_capabilities(
+        &self,
+        _: &ServiceId,
+    ) -> Result<Vec<(i32, DeviceCapabilityType)>> {
+        todo!()
+    }
+
+    async fn add_used_device_link_token(&self, _: String) -> Result<()> {
         todo!()
     }
 

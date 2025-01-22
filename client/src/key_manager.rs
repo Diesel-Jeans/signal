@@ -1,4 +1,5 @@
-use crate::storage::generic::{ProtocolStore, StorageType};
+use crate::storage::database::ClientDB;
+use crate::storage::generic::ProtocolStore;
 use common::utils::time_now;
 use common::web_api::{SetKeyRequest, UploadPreKey, UploadSignedPreKey};
 use derive_more::derive::{Display, Error, From};
@@ -52,13 +53,25 @@ pub enum KeyManagerErrorType {
     Get,
 }
 
-impl KeyManager {
-    pub fn new() -> Self {
+impl Default for KeyManager {
+    fn default() -> Self {
         Self {
             key_incrementer_map: HashMap::from([
                 (PreKeyType::Signed, 0u32),
                 (PreKeyType::Kyber, 0u32),
                 (PreKeyType::OneTime, 0u32),
+            ]),
+        }
+    }
+}
+
+impl KeyManager {
+    pub fn new(signed: u32, kyber: u32, one_time: u32) -> Self {
+        Self {
+            key_incrementer_map: HashMap::from([
+                (PreKeyType::Signed, signed),
+                (PreKeyType::Kyber, kyber),
+                (PreKeyType::OneTime, one_time),
             ]),
         }
     }
@@ -155,7 +168,6 @@ impl KeyManager {
             err_type: KeyManagerErrorType::Generate,
             error,
         })?;
-
         kyber_pre_key_store
             .save_kyber_pre_key(id, &record)
             .await
@@ -167,7 +179,7 @@ impl KeyManager {
         Ok(record)
     }
 
-    pub async fn generate_key_bundle<T: StorageType>(
+    pub async fn generate_key_bundle<T: ClientDB>(
         &mut self,
         store: &mut ProtocolStore<T>,
     ) -> Result<SetKeyRequest, KeyManagerError> {
@@ -214,20 +226,30 @@ impl KeyManager {
 
 #[cfg(test)]
 mod key_manager_tests {
-    use crate::storage::{generic::ProtocolStore, in_memory::InMemory};
+    use crate::{
+        key_manager::{KeyManager, PreKeyType},
+        storage::{generic::ProtocolStore, in_memory::InMemory},
+        test_utils::user::{new_aci, new_pni},
+    };
 
-    use super::*;
+    use libsignal_protocol::{
+        GenericSignedPreKey, IdentityKeyPair, KyberPreKeyStore, PreKeyStore, SignedPreKeyStore,
+    };
     use rand::rngs::OsRng;
 
     fn store(reg: u32) -> ProtocolStore<InMemory> {
-        let mut rng = OsRng;
-        let p = KeyPair::generate(&mut rng).into();
-        ProtocolStore::new(p, reg)
+        ProtocolStore::new(InMemory::new(
+            "password".to_string(),
+            new_aci(),
+            new_pni(),
+            IdentityKeyPair::generate(&mut OsRng),
+            reg,
+        ))
     }
 
     #[test]
     fn get_id_test() {
-        let mut manager = KeyManager::new();
+        let mut manager = KeyManager::default();
         let id0 = manager.get_new_key_id(PreKeyType::OneTime);
         assert_eq!(id0, 0);
         let id1 = manager.get_new_key_id(PreKeyType::OneTime);
@@ -237,7 +259,7 @@ mod key_manager_tests {
     #[tokio::test]
     async fn generate_kyper_key() {
         let mut store = store(0);
-        let mut manager = KeyManager::new();
+        let mut manager = KeyManager::default();
         let key = manager
             .generate_kyber_pre_key(
                 &mut store.identity_key_store,
@@ -245,16 +267,9 @@ mod key_manager_tests {
             )
             .await
             .unwrap();
-
         let stored_sign = store
-            .get_kyber_pre_key(
-                store
-                    .kyber_pre_key_store
-                    .all_kyber_pre_key_ids()
-                    .next()
-                    .unwrap()
-                    .to_owned(),
-            )
+            .kyber_pre_key_store
+            .get_kyber_pre_key(key.id().unwrap())
             .await
             .unwrap()
             .signature()
@@ -267,7 +282,7 @@ mod key_manager_tests {
     async fn generate_signed_key() {
         let mut rng = OsRng;
         let mut store = store(0);
-        let mut manager = KeyManager::new();
+        let mut manager = KeyManager::default();
         let key = manager
             .generate_signed_pre_key(
                 &mut store.identity_key_store,
@@ -278,14 +293,8 @@ mod key_manager_tests {
             .unwrap();
 
         let stored_sign = store
-            .get_signed_pre_key(
-                store
-                    .signed_pre_key_store
-                    .all_signed_pre_key_ids()
-                    .next()
-                    .unwrap()
-                    .to_owned(),
-            )
+            .signed_pre_key_store
+            .get_signed_pre_key(key.id().unwrap())
             .await
             .unwrap()
             .signature()
@@ -298,60 +307,84 @@ mod key_manager_tests {
     async fn generate_onetime_key() {
         let mut rng = OsRng;
         let mut store = store(0);
-        let mut manager = KeyManager::new();
+        let mut manager = KeyManager::default();
         let key = manager
             .generate_pre_key(&mut store.pre_key_store, &mut rng)
             .await
             .unwrap();
+
         let stored_key_pair = store
-            .get_pre_key(
-                store
-                    .pre_key_store
-                    .all_pre_key_ids()
-                    .next()
-                    .unwrap()
-                    .to_owned(),
-            )
+            .pre_key_store
+            .get_pre_key(key.id().unwrap())
             .await
             .unwrap()
             .key_pair()
             .unwrap();
+
         assert_eq!(key.public_key().unwrap(), stored_key_pair.public_key);
     }
 
     #[tokio::test]
     async fn generate_key_bundle() {
         let mut store = store(0);
-        let mut manager = KeyManager::new();
+        let mut manager = KeyManager::default();
         let keys = manager.generate_key_bundle(&mut store).await.unwrap();
 
-        assert_eq!(
-            &keys.pre_key.unwrap().len(),
-            &store.pre_key_store.all_pre_key_ids().count()
-        );
-
-        assert_eq!(
-            keys.pq_pre_key.unwrap().len() + keys.pq_last_resort_pre_key.iter().count(),
-            store.kyber_pre_key_store.all_kyber_pre_key_ids().count()
-        );
-
-        let stored_sign = store
-            .get_signed_pre_key(
-                store
-                    .signed_pre_key_store
-                    .all_signed_pre_key_ids()
-                    .next()
-                    .unwrap()
-                    .to_owned(),
-            )
-            .await
+        for (pre_key, pq_pre_key) in keys
+            .pre_key
             .unwrap()
-            .signature()
+            .iter()
+            .zip(keys.pq_pre_key.unwrap().iter())
+        {
+            assert_eq!(
+                store
+                    .pre_key_store
+                    .get_pre_key(pre_key.key_id.into())
+                    .await
+                    .unwrap()
+                    .public_key()
+                    .unwrap()
+                    .serialize(),
+                pre_key.public_key
+            );
+
+            assert_eq!(
+                store
+                    .kyber_pre_key_store
+                    .get_kyber_pre_key(pq_pre_key.key_id.into())
+                    .await
+                    .unwrap()
+                    .public_key()
+                    .unwrap()
+                    .serialize(),
+                pq_pre_key.public_key
+            );
+
+            assert_eq!(
+                store
+                    .kyber_pre_key_store
+                    .get_kyber_pre_key(pq_pre_key.key_id.into())
+                    .await
+                    .unwrap()
+                    .signature()
+                    .unwrap(),
+                pq_pre_key.signature.to_vec()
+            );
+        }
+
+        let stored_signed_key = store
+            .signed_pre_key_store
+            .get_signed_pre_key(keys.signed_pre_key.as_ref().unwrap().key_id.into())
+            .await
             .unwrap();
 
         assert_eq!(
-            Vec::from(keys.signed_pre_key.unwrap().signature),
-            stored_sign
+            stored_signed_key.public_key().unwrap().serialize(),
+            keys.signed_pre_key.as_ref().unwrap().public_key
+        );
+        assert_eq!(
+            stored_signed_key.signature().unwrap(),
+            keys.signed_pre_key.as_ref().unwrap().signature.to_vec()
         );
     }
 }

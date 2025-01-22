@@ -4,7 +4,7 @@ use std::fmt::Display;
 
 use common::protocol_address::ParseProtocolAddressError;
 use derive_more::derive::{Display, Error, From};
-use libsignal_core::DeviceId;
+use libsignal_core::{DeviceId, ServiceId};
 use libsignal_protocol::SignalProtocolError;
 
 use crate::key_manager::KeyManagerError;
@@ -23,7 +23,8 @@ pub enum SignalClientError {
     #[from]
     SendMessageError(SendMessageError),
     WebSocketError(String),
-    DatabaseError(String),
+    #[from]
+    DatabaseError(DatabaseError),
     DotenvError(String),
     #[from]
     ReceiveMessageError(ReceiveMessageError),
@@ -40,23 +41,14 @@ impl Error for SignalClientError {}
 #[derive(Debug, Display, From, Error)]
 pub struct ProcessPreKeyBundleError(pub SignalProtocolError);
 
+#[derive(Debug, Display, From)]
 pub enum ContactManagerError {
+    #[from]
     DeviceNotFound(DeviceId),
-}
-
-impl fmt::Debug for ContactManagerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self::Display::fmt(&self, f)
-    }
-}
-
-impl fmt::Display for ContactManagerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            Self::DeviceNotFound(id) => format!("The user did does not have a device with id {id}"),
-        };
-        write!(f, "Error in ContactManager - {}", message)
-    }
+    #[display("Contact with service id: '{}', not found", 0)]
+    ServiceIDNotFound(ServiceId),
+    #[display("Contact with service id: '{}', already exists", 0)]
+    ServiceIDAlreadyExists(ServiceId),
 }
 
 impl Error for ContactManagerError {}
@@ -124,6 +116,7 @@ pub enum ReceiveMessageError {
     ProtobufDecodeContentError(prost::DecodeError),
     InvalidMessageContent,
     NoMessageReceived,
+    EnvelopeDecodeError,
 }
 
 impl From<ParseProtocolAddressError> for SignalClientError {
@@ -131,5 +124,17 @@ impl From<ParseProtocolAddressError> for SignalClientError {
         SignalClientError::ReceiveMessageError(ReceiveMessageError::ParseProtocolAddressError(
             value,
         ))
+    }
+}
+
+#[derive(Debug, Display)]
+pub enum DatabaseError {
+    AlreadyExists,
+    Custom(Box<dyn std::error::Error + 'static>),
+}
+
+impl<E: std::error::Error + 'static> From<E> for DatabaseError {
+    fn from(value: E) -> Self {
+        Self::Custom(Box::new(value))
     }
 }
