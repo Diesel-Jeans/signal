@@ -495,13 +495,8 @@ impl TryFrom<PreKeyResponse> for Vec<PreKeyBundle> {
     type Error = String;
 
     fn try_from(items: PreKeyResponse) -> Result<Vec<PreKeyBundle>, Self::Error> {
-        let identity_key = IdentityKey::decode(
-            BASE64_STANDARD
-                .decode(items.identity_key())
-                .map_err(|_| "Failed decoding identity key")?
-                .as_slice(),
-        )
-        .map_err(|_| "Failed decoding identity key")?;
+        let identity_key = IdentityKey::decode(items.identity_key())
+            .map_err(|_| "Failed decoding identity key")?;
 
         let mut bundles = Vec::new();
         for pre_key_items in items.devices() {
