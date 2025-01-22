@@ -157,7 +157,7 @@ impl<T: SignalDatabase> KeyManager<T> {
             .get_account(&target_service_id)
             .await
             .map_err(|_| ApiError {
-                status_code: StatusCode::UNPROCESSABLE_ENTITY,
+                status_code: StatusCode::NOT_FOUND,
                 body: format!(
                     "Could not find account for service id: {}",
                     target_service_id.service_id_string()
@@ -173,7 +173,7 @@ impl<T: SignalDatabase> KeyManager<T> {
                     ))
                     .await
                     .map_err(|_| ApiError {
-                        status_code: StatusCode::UNPROCESSABLE_ENTITY,
+                        status_code: StatusCode::NOT_FOUND,
                         body: format!("Device id does not exist: {}", device_id),
                     })?]
             }
