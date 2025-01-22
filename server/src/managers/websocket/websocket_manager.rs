@@ -96,7 +96,7 @@ where
                             Ok(msg) => msg,
                             Err(err) => {
                                 println!("WebSocketManager ERROR - Message::Binary: {}", err);
-                                connection
+                                let _ = connection
                                     .lock()
                                     .await
                                     .close_reason(1007, "Badly formatted")
@@ -109,7 +109,7 @@ where
                     Message::Text(t) => {
                         println!("Message '{}' from '{}'", t, address);
                         println!("replying...");
-                        connection.lock().await.send(Message::Text(t)).await;
+                        let _ = connection.lock().await.send(Message::Text(t)).await;
                         println!("sent!");
                     }
                     Message::Close(_) => {

@@ -4,7 +4,7 @@ use crate::{
     error::ApiError,
 };
 use anyhow::Result;
-use common::web_api::{AccountAttributes, DevicePreKeyBundle};
+use common::web_api::DevicePreKeyBundle;
 use hyper::StatusCode;
 use libsignal_core::{Aci, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::IdentityKey;
@@ -28,18 +28,16 @@ where
     pub async fn create_account(
         &self,
         phone_number: String,
-        account_attributes: AccountAttributes,
         aci_identity_key: IdentityKey,
         pni_identity_key: IdentityKey,
         primary_device: Device,
     ) -> Result<Account, ApiError> {
         let account = Account::new(
-            primary_device,
             Pni::from(Uuid::new_v4()),
             aci_identity_key,
             pni_identity_key,
+            primary_device,
             phone_number,
-            account_attributes,
         );
         self.db.add_account(&account).await.map_err(|err| {
             let mut out_err = ApiError {

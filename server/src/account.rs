@@ -1,28 +1,26 @@
 use anyhow::{bail, Result};
-use common::web_api::AccountAttributes;
+use common::web_api::{AccountCapabilityMode, DeviceCapabilityType};
 use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceIdKind};
 use libsignal_protocol::IdentityKey;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Account {
-    pni: Pni,
     aci: Aci,
+    pni: Pni,
     aci_identity_key: IdentityKey,
     pni_identity_key: IdentityKey,
     devices: Vec<Device>,
     phone_number: String,
-    account_attr: AccountAttributes,
 }
 
 impl Account {
     pub fn new(
-        device: Device,
         pni: Pni,
         aci_identity_key: IdentityKey,
         pni_identity_key: IdentityKey,
+        device: Device,
         phone_number: String,
-        account_attr: AccountAttributes,
     ) -> Self {
         Self {
             aci: Uuid::new_v4().into(),
@@ -31,7 +29,6 @@ impl Account {
             pni_identity_key,
             devices: vec![device],
             phone_number,
-            account_attr,
         }
     }
 
@@ -42,7 +39,6 @@ impl Account {
         pni_identity_key: IdentityKey,
         devices: Vec<Device>,
         phone_number: String,
-        account_attr: AccountAttributes,
     ) -> Self {
         Self {
             aci,
@@ -51,16 +47,15 @@ impl Account {
             pni_identity_key,
             devices,
             phone_number,
-            account_attr,
         }
-    }
-
-    pub fn pni(&self) -> Pni {
-        self.pni
     }
 
     pub fn aci(&self) -> Aci {
         self.aci
+    }
+
+    pub fn pni(&self) -> Pni {
+        self.pni
     }
 
     pub fn aci_identity_key(&self) -> IdentityKey {
@@ -87,8 +82,32 @@ impl Account {
         &self.phone_number
     }
 
-    pub fn account_attr(&self) -> &AccountAttributes {
-        &self.account_attr
+    pub fn has_capability(&self, device_capability: &DeviceCapabilityType) -> bool {
+        match device_capability.value().account_capability_mode {
+            AccountCapabilityMode::PrimaryDevice => self
+                .devices()
+                .iter()
+                .find(|device| device.device_id() == 1.into())
+                .expect("User always has a primary device")
+                .has_capability(device_capability),
+            AccountCapabilityMode::AnyDevice => self
+                .devices()
+                .iter()
+                .any(|device| device.has_capability(device_capability)),
+            AccountCapabilityMode::AllDevices => self
+                .devices()
+                .iter()
+                .all(|device| device.has_capability(device_capability)),
+        }
+    }
+
+    pub fn get_next_device_id(&self) -> u32 {
+        self.devices
+            .iter()
+            .map(|device| u32::from(device.device_id))
+            .max()
+            .expect("Will always have some device")
+            + 1
     }
 }
 
@@ -96,12 +115,13 @@ impl Account {
 pub struct Device {
     device_id: DeviceId,
     name: String,
-    last_seen: u64,
-    created: u64,
+    last_seen: u128,
+    created: u128,
     auth_token: String,
     salt: String,
     registration_id: u32,
     pni_registration_id: u32,
+    capabilities: Vec<DeviceCapabilityType>,
 }
 impl Device {
     pub fn device_id(&self) -> DeviceId {
@@ -110,10 +130,10 @@ impl Device {
     pub fn name(&self) -> &String {
         &self.name
     }
-    pub fn last_seen(&self) -> u64 {
+    pub fn last_seen(&self) -> u128 {
         self.last_seen
     }
-    pub fn created(&self) -> u64 {
+    pub fn created(&self) -> u128 {
         self.created
     }
 
@@ -131,6 +151,14 @@ impl Device {
 
     pub fn pni_registration_id(&self) -> u32 {
         self.pni_registration_id
+    }
+
+    pub fn capabilities(&self) -> Vec<DeviceCapabilityType> {
+        self.capabilities.clone()
+    }
+
+    pub fn has_capability(&self, capability: &DeviceCapabilityType) -> bool {
+        self.capabilities.contains(capability)
     }
 }
 

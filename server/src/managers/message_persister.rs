@@ -70,7 +70,7 @@ where
 
         tokio::spawn(async move {
             while message_persister.run_flag.load(Ordering::Relaxed) {
-                message_persister.persist_next_queues().await;
+                let _ = message_persister.persist_next_queues().await;
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         });
@@ -83,7 +83,7 @@ where
 
     // Finds the message queues where the oldest message is >10 minutes old.
     async fn persist_next_queues(&mut self) -> Result<()> {
-        let mut queues_to_persist = Vec::new();
+        let mut queues_to_persist;
 
         while {
             let time_in_secs: u64 = SystemTime::now()
@@ -126,7 +126,7 @@ where
 
     // Takes the message queues where the oldest message is >10 minutes old.
     async fn persist_queue(&mut self, account: &Account, device: &Device) -> Result<()> {
-        let mut messages = Vec::new();
+        let mut messages;
         let protocol_address =
             ProtocolAddress::new(account.aci().service_id_string(), device.device_id());
 

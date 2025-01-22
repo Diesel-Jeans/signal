@@ -6,9 +6,7 @@ use crate::{
     socket_manager::signal_ws_connect,
 };
 use async_native_tls::{Certificate, TlsConnector};
-use common::signalservice::{
-    web_socket_message, Envelope, WebSocketMessage, WebSocketRequestMessage,
-};
+use common::signalservice::{web_socket_message, WebSocketMessage, WebSocketRequestMessage};
 use common::web_api::{
     authorization::BasicAuthorizationHeader, PreKeyResponse, RegistrationRequest,
     RegistrationResponse,
@@ -18,14 +16,12 @@ use common::websocket::net_helper::{create_request, create_response};
 use http_client::h1::H1Client;
 use libsignal_core::{Aci, DeviceId, ServiceId};
 use libsignal_protocol::PreKeyBundle;
-use prost::Message;
 use serde_json::{from_slice, to_vec};
 use std::error::Error;
 use std::fmt::Display;
-use std::{env, fmt::Debug, fs, sync::Arc, time::Duration};
+use std::{fmt::Debug, fs, sync::Arc, time::Duration};
 use surf::{http::convert::json, Client, Config, Url};
 use surf::{Response, StatusCode};
-use tokio::sync::broadcast::Receiver;
 
 const REGISTER_URI: &str = "v1/registration";
 const MSG_URI: &str = "/v1/messages";

@@ -1,7 +1,6 @@
 mod account;
 mod account_authenticator;
 pub mod database;
-mod destination_device_validator;
 mod envelope;
 mod error;
 pub mod managers;
@@ -12,6 +11,7 @@ mod response;
 mod server;
 #[cfg(test)]
 mod test_utils;
+mod validators;
 
 #[tokio::main]
 pub async fn main() {
