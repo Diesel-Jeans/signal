@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::Display;
 
-use common::protocol_address::ParseProtocolAddressError;
+use common::{protocol_address::ParseProtocolAddressError, SignalError};
 use derive_more::derive::{Display, Error, From};
 use libsignal_core::{DeviceId, ServiceId};
 use libsignal_protocol::SignalProtocolError;
@@ -34,6 +34,8 @@ pub enum SignalClientError {
     NoSession,
     #[from]
     Protocol(SignalProtocolError),
+    #[from]
+    Signal(SignalError),
 }
 
 impl Error for SignalClientError {}
