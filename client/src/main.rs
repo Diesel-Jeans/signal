@@ -1,6 +1,7 @@
 use client::Client;
 use dotenv::dotenv;
 use server::SignalServer;
+use std::env;
 use std::{env::var, error::Error, fs, path::Path, path::PathBuf};
 use storage::device::Device;
 
@@ -29,6 +30,8 @@ fn client_db_path() -> String {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let use_tls = !env::args().any(|arg| arg == "--no-tls");
+    println!("Using tls: {}", use_tls);
     dotenv()?;
     let client_db_dir = client_db_path();
     let alice_path = client_db_dir.clone() + "/alice.db";
@@ -37,12 +40,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let alice_db_url = format!("sqlite://{}", alice_path);
     let bob_db_url = format!("sqlite://{}", bob_path);
 
-    let server_url = var("SERVER_URL").expect("Could not find SERVER_URL");
-    let cert_path = var("CERT_PATH").expect("Could not find CERT_PATH");
-
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("Failed to install rustls crypto provider");
+    let (cert_path, server_url) = if use_tls {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .expect("Failed to install rustls crypto provider");
+        (Some(var("CERT_PATH").expect("Could not find CERT_PATH")), var("HTTPS_SERVER_URL").expect("Could not find SERVER_URL"))
+    } else {
+        (None, var("HTTP_SERVER_URL").expect("Could not find SERVER_URL"))
+    };
 
     let mut alice = if Path::exists(Path::new(&alice_path)) {
         Client::<Device, SignalServer>::login(&alice_db_url, &cert_path, &server_url).await?
@@ -52,7 +57,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "123456789".into(),
             &alice_db_url,
             &server_url,
-            &cert_path,
+            &cert_path
         )
         .await?
     };
@@ -114,5 +119,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(err) => println!("{:?}", err),
     }
 
+
+    alice.disconnect().await;
+    bob.disconnect().await;
     Ok(())
 }

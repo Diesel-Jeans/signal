@@ -46,8 +46,11 @@ pub trait SignalServerAPI {
         username: &str,
         password: &str,
         url: &str,
-        tls_path: &str,
+        tls_path: &Option<String>,
     ) -> Result<(), SignalClientError>;
+
+    // Disconnect websocket to the backend
+    async fn disconnect(&mut self);
 
     /// Publish a sigle [PreKeyBundle] for this device.
     async fn publish_pre_key_bundle(
@@ -124,7 +127,7 @@ impl SignalServerAPI for SignalServer {
         username: &str,
         password: &str,
         url: &str,
-        tls_path: &str,
+        tls_path: &Option<String>,
     ) -> Result<(), SignalClientError> {
         if self.socket_manager.is_active().await {
             return Ok(());
@@ -138,6 +141,9 @@ impl SignalServerAPI for SignalServer {
             .await
             .map_err(SignalClientError::WebSocketError)?;
         Ok(())
+    }
+    async fn disconnect(&mut self){
+        self.socket_manager.close().await;
     }
 
     async fn publish_pre_key_bundle(
@@ -259,17 +265,24 @@ impl SignalServerAPI for SignalServer {
 }
 
 impl SignalServer {
-    pub fn new(cert_path: &str, server_url: &str) -> Self {
-        let cert_bytes = fs::read(cert_path).expect("Could not read certificate.");
+    pub fn new(cert_path: &Option<String>, server_url: &str) -> Self {
 
-        let crt = Certificate::from_pem(&cert_bytes).expect("Could not parse certificate.");
-
-        let tls_config = Arc::new(TlsConnector::new().add_root_certificate(crt));
+        
+        
+        let tls_config = if let Some(path) = cert_path {
+            let cert_bytes = fs::read(path).expect("Could not read certificate.");
+            let crt = Certificate::from_pem(&cert_bytes).expect("Could not parse certificate.");
+            Some(Arc::new(TlsConnector::new().add_root_certificate(crt)))
+        } else {
+            None
+        };
+        
         let http_client: H1Client = http_client::Config::new()
             .set_timeout(Some(Duration::from_secs(5)))
-            .set_tls_config(Some(tls_config))
+            .set_tls_config(tls_config)
             .try_into()
             .expect("Could not create HTTP client");
+        
         let http_client = Config::new()
             .set_http_client(http_client)
             .set_base_url(Url::parse(server_url).expect("Could not parse URL for server"))

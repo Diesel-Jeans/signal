@@ -1,3 +1,5 @@
+use std::env;
+
 mod account;
 mod account_authenticator;
 pub mod database;
@@ -15,11 +17,7 @@ mod validators;
 
 #[tokio::main]
 pub async fn main() {
-    //Starting logger
-    /*tracing_subscriber::fmt()
-    .log_internal_errors(true)
-    .with_max_level(tracing::Level::DEBUG)
-    .with_line_number(true)
-    .init();*/
-    server::start_server().await.unwrap();
+    let use_tls = !env::args().any(|arg| arg == "--no-tls");
+    println!("Using tls: {}", use_tls);
+    server::start_server(use_tls).await.unwrap();
 }

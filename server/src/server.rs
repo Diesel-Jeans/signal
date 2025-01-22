@@ -27,7 +27,7 @@ use axum::{
     http::{
         header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN}, HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri
     },
-    middleware::Next,
+    middleware::{from_fn, Next},
     response::{IntoResponse, Redirect, Response},
     routing::{any, delete, get, post, put},
     BoxError, Json, Router,
@@ -745,11 +745,12 @@ async fn signal_time_middleware(req: Request, next: Next) -> Response {
 ///  * create an async handler function: `handle_<method>_<endpoint_name>`
 ///  * add the router function to the axum router below.
 ///  * call the handler function from the router function to handle the request.
-pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("Failed to install rustls crypto provider");
-    let config = RustlsConfig::from_pem_file("cert/server.crt", "cert/server.key").await?;
+pub async fn start_server(use_tls: bool) -> Result<(), Box<dyn std::error::Error>> {
+    if use_tls {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .expect("Failed to install rustls crypto provider");
+    }
 
     let cors = CorsLayer::new()
         .allow_methods([
@@ -761,7 +762,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         ])
         .max_age(Duration::from_secs(5184000))
         .allow_credentials(true)
-        .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN, HeaderName::from_static("X-Requested-With"), HeaderName::from_static("X-Signal-Agent")]);
+        .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN, HeaderName::from_static("x-requested-with"), HeaderName::from_static("x-signal-agent")]);
 
     let state = SignalServerState::<PostgresDatabase, SignalWebSocket>::new().await;
 
@@ -786,7 +787,8 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/websocket", any(create_websocket_endpoint))
         .route("/v1/keepalive", get(get_keepalive))
         .with_state(state)
-        .layer(cors);
+        .layer(cors)
+        .layer(from_fn(signal_time_middleware));
 
     let address = env::var("SERVER_ADDRESS")?;
     let https_port = env::var("HTTPS_PORT")?;
@@ -796,15 +798,20 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let https_addr = SocketAddr::from_str(format!("{}:{}", address, https_port).as_str())?;
 
     // we should probably sometime in future a proxy or something to redirect instead
-    tokio::spawn(redirect_http_to_https(
-        http_addr,
-        http_port.parse()?,
-        https_port.parse()?,
-    ));
-
-    axum_server::bind_rustls(https_addr, config)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-        .await?;
+    
+    if use_tls {
+        tokio::spawn(redirect_http_to_https(
+            http_addr,
+            http_port.parse()?,
+            https_port.parse()?,
+        ));
+        let config = RustlsConfig::from_pem_file("cert/server.crt", "cert/server.key").await?;
+        axum_server::bind_rustls(https_addr, config)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await?;
+    } else {
+        axum_server::bind(http_addr).serve(app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+    }
 
     message_persister.stop().await;
 

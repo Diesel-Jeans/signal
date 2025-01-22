@@ -100,12 +100,11 @@ impl WSStream<Message, tungstenite::Error> for SignalStream {
 }
 
 pub async fn signal_ws_connect(
-    tls_cert: &str,
+    tls_cert: &Option<String>,
     url: &str,
     username: &str,
     password: &str,
 ) -> Result<TLSWebSocket, String> {
-    let tls_cfg = rustls_cfg(tls_cert)?;
     let url = format!("{}/v1/websocket", url.replace("http", "ws"));
     let mut req = url
         .into_client_request()
@@ -137,15 +136,20 @@ pub async fn signal_ws_connect(
             .set_tcp_keepalive(&keepalive)
             .map_err(|_| "Failed to set keepalive".to_string())?;
     }
-
-    let connector = Connector::Rustls(Arc::new(tls_cfg));
+    
+    let connector = if let Some(path) = tls_cert{
+        let tls_cfg = rustls_cfg(path)?;
+        Some(Connector::Rustls(Arc::new(tls_cfg)))
+    } else {
+        None
+    };
 
     let config = WebSocketConfig {
         max_frame_size: Some(0x210000),
         ..Default::default()
     };
 
-    let res = client_async_tls_with_config(req, stream, Some(config), Some(connector)).await;
+    let res = client_async_tls_with_config(req, stream, Some(config), connector).await;
     let (ws, _) = res.map_err(|_| "Failed to connect to server".to_string())?;
     Ok(ws)
 }
@@ -237,7 +241,7 @@ impl<T: WSStream<Message, tungstenite::Error> + std::fmt::Debug> SocketManager<T
         Ok(())
     }
 
-    async fn close(&mut self) {
+    pub async fn close(&mut self) {
         let mut guard = self.connection.lock().await;
         if let ConnectionState::Active(mut socket) =
             std::mem::replace(&mut *guard, ConnectionState::Closed)

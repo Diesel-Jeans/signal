@@ -89,7 +89,7 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
         phone_number: String,
         database_url: &str,
         server_url: &str,
-        cert_path: &str,
+        cert_path: &Option<String>,
     ) -> Result<Client<Device, SignalServer>> {
         let mut csprng = OsRng;
         let aci_registration_id = OsRng.gen_range(1..16383);
@@ -214,7 +214,7 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
 
     pub async fn login(
         database_url: &str,
-        cert_path: &str,
+        cert_path: &Option<String>,
         server_url: &str,
     ) -> Result<Client<Device, SignalServer>> {
         let pool = Client::<T, U>::connect_to_db(database_url, false).await?;
@@ -249,6 +249,10 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
             KeyManager::new(signed + 1, kyber + 1, one_time + 1), // Adds 1 to prevent reusing key ids
             Storage::new(device.clone(), ProtocolStore::new(device.clone())),
         ))
+    }
+
+    pub async fn disconnect(&mut self){
+        self.server_api.disconnect().await;
     }
 
     pub async fn send_message(
@@ -501,6 +505,9 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
         Ok(device_ids)
     }
 }
+
+
+
 
 fn decode_ciphertext(
     bytes: Vec<u8>,
