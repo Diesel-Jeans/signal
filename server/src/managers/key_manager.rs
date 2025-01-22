@@ -356,12 +356,7 @@ mod key_manager_tests {
         database.delete_account(&target.aci().into()).await.unwrap();
 
         assert_eq!(
-            IdentityKey::decode(
-                BASE64_STANDARD
-                    .decode(keys.identity_key())
-                    .unwrap()
-                    .as_slice()
-            )
+            IdentityKey::decode(keys.identity_key())
             .unwrap(),
             target.aci_identity_key()
         );
@@ -437,13 +432,7 @@ mod key_manager_tests {
         database.delete_account(&target.aci().into()).await.unwrap();
 
         assert_eq!(
-            IdentityKey::decode(
-                BASE64_STANDARD
-                    .decode(keys.identity_key())
-                    .unwrap()
-                    .as_slice()
-            )
-            .unwrap(),
+            IdentityKey::decode(keys.identity_key()).unwrap(),
             target.aci_identity_key()
         );
         assert!(device_bundle.len() == 2);

@@ -422,24 +422,27 @@ impl SetKeyRequest {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreKeyResponse {
-    identity_key: String, // Base64 endcoded
+    #[serde_as(as = "Base64")]
+    identity_key: Box<[u8]>,
     devices: Vec<PreKeyResponseItem>,
 }
 
 impl PreKeyResponse {
     pub fn new(identity_key: IdentityKey, devices: Vec<PreKeyResponseItem>) -> Self {
         Self {
-            identity_key: BASE64_STANDARD.encode(identity_key.serialize()),
+            identity_key: identity_key.serialize(),
             devices,
         }
     }
 
-    pub fn identity_key(&self) -> &str {
+    pub fn identity_key(&self) -> &Box<[u8]> {
         &self.identity_key
     }
+
     pub fn devices(&self) -> &Vec<PreKeyResponseItem> {
         &self.devices
     }
