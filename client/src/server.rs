@@ -231,7 +231,16 @@ impl SignalServerAPI for SignalServer {
         let id = self.socket_manager.next_id();
         let response = self
             .socket_manager
-            .send(id, create_request(id, "PUT", &uri, vec![], Some(payload)))
+            .send(
+                id,
+                create_request(
+                    id,
+                    "PUT",
+                    &uri,
+                    vec!["content-type:application/json".to_string()],
+                    Some(payload),
+                ),
+            )
             .await
             .map_err(SendMessageError::WebSocketError)?;
 
