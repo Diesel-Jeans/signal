@@ -101,7 +101,8 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
         };
 
         for envelope in envelopes {
-            self.send_message(envelope)
+            let _ = self
+                .send_message(envelope)
                 .await
                 .map_err(|e| println!("{}", e));
         }
@@ -133,7 +134,7 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
         if let ConnectionState::Active(mut socket) =
             std::mem::replace(&mut self.ws, ConnectionState::Closed)
         {
-            socket
+            let _ = socket
                 .send(Message::Close(Some(CloseFrame {
                     code: axum::extract::ws::close_code::NORMAL,
                     reason: "Goodbye".into(),
@@ -386,6 +387,7 @@ pub type ConnectionMap<T, U> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnecti
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
+        account::Device,
         database::SignalDatabase,
         managers::state::SignalServerState,
         postgres::PostgresDatabase,
