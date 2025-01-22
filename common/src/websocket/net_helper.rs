@@ -5,11 +5,13 @@ use crate::{
     web_api::SignalMessages,
 };
 use axum::http::{StatusCode, Uri};
-use rand::{rngs::OsRng, Rng as _};
+use rand::{rngs::OsRng, CryptoRng, Rng};
 use std::{
     str::FromStr,
+    sync::Arc,
     time::{SystemTime, SystemTimeError, UNIX_EPOCH},
 };
+use tokio::sync::Mutex;
 
 pub struct PathExtractor {
     parts: Vec<String>,
@@ -103,10 +105,8 @@ pub fn unpack_messages(body: Option<Vec<u8>>) -> Result<SignalMessages, String> 
     serde_json::from_str(&json).map_err(|_| "Failed to convert json to SignalMessages".to_string())
 }
 
-pub fn generate_req_id() -> u64 {
-    let mut rng = OsRng;
-    let rand_v: u64 = rng.gen();
-    rand_v
+pub fn generate_req_id<R: CryptoRng + Rng>(rng: &mut R) -> u64 {
+    rng.gen()
 }
 
 pub fn current_millis() -> Result<u128, SystemTimeError> {

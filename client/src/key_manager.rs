@@ -179,13 +179,13 @@ impl KeyManager {
         Ok(record)
     }
 
-    pub async fn generate_key_bundle<T: ClientDB>(
+    pub async fn generate_key_bundle<T: ClientDB, R: CryptoRng + Rng>(
         &mut self,
         store: &mut ProtocolStore<T>,
+        mut rng: &mut R,
     ) -> Result<SetKeyRequest, KeyManagerError> {
         let mut pre_keys: Vec<UploadPreKey> = Vec::new();
         let mut pq_signed_pre_keys: Vec<UploadSignedPreKey> = Vec::new();
-        let mut rng = OsRng;
 
         for _ in 0..100 {
             pre_keys.push(UploadPreKey::from(
@@ -328,7 +328,11 @@ mod key_manager_tests {
     async fn generate_key_bundle() {
         let mut store = store(0);
         let mut manager = KeyManager::default();
-        let keys = manager.generate_key_bundle(&mut store).await.unwrap();
+        let mut rng = OsRng;
+        let keys = manager
+            .generate_key_bundle(&mut store, &mut rng)
+            .await
+            .unwrap();
 
         for (pre_key, pq_pre_key) in keys
             .pre_key

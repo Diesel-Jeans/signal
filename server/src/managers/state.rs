@@ -10,27 +10,30 @@ use crate::test_utils::websocket::{MockDB, MockSocket};
 use crate::{database::SignalDatabase, message_cache::MessageCache, postgres::PostgresDatabase};
 use axum::extract::ws::Message;
 use common::websocket::wsstream::WSStream;
+use rand::{rngs::OsRng, CryptoRng, Rng};
 use std::fmt::Debug;
 
 #[derive(Debug)]
-pub struct SignalServerState<T, U>
+pub struct SignalServerState<T, U, R>
 where
     T: SignalDatabase,
     U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send + 'static,
 {
     pub db: T,
-    pub websocket_manager: WebSocketManager<U, T>,
+    pub websocket_manager: WebSocketManager<U, T, R>,
     pub account_manager: AccountManager<T>,
     pub key_manager: KeyManager<T>,
-    pub message_manager: MessagesManager<T, WebSocketConnection<U, T>>,
-    pub client_presence_manager: ClientPresenceManager<WebSocketConnection<U, T>>,
-    pub message_cache: MessageCache<WebSocketConnection<U, T>>,
+    pub message_manager: MessagesManager<T, WebSocketConnection<U, T, R>>,
+    pub client_presence_manager: ClientPresenceManager<WebSocketConnection<U, T, R>>,
+    pub message_cache: MessageCache<WebSocketConnection<U, T, R>>,
 }
 
-impl<T, U> Clone for SignalServerState<T, U>
+impl<T, U, R> Clone for SignalServerState<T, U, R>
 where
     T: SignalDatabase + Clone,
     U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send,
 {
     fn clone(&self) -> Self {
         Self {
@@ -45,9 +48,10 @@ where
     }
 }
 
-impl<U> SignalServerState<PostgresDatabase, U>
+impl<U, R> SignalServerState<PostgresDatabase, U, R>
 where
     U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send + 'static,
 {
     pub async fn new() -> Self {
         SignalServerState::connect("DATABASE_URL").await
@@ -69,14 +73,14 @@ where
 }
 
 #[cfg(test)]
-impl Default for SignalServerState<MockDB, MockSocket> {
+impl Default for SignalServerState<MockDB, MockSocket, OsRng> {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[cfg(test)]
-impl SignalServerState<MockDB, MockSocket> {
+impl SignalServerState<MockDB, MockSocket, OsRng> {
     pub fn new() -> Self {
         let db = MockDB {};
         let cache = MessageCache::connect();

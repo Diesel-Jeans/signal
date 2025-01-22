@@ -4,6 +4,7 @@ use anyhow::Result;
 use common::signalservice::Envelope;
 use deadpool_redis::{redis::cmd, Config, Connection, Runtime};
 use libsignal_core::ProtocolAddress;
+use rand::{CryptoRng, Rng};
 use std::{
     collections::HashMap,
     sync::Arc,
