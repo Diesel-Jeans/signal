@@ -113,7 +113,6 @@ where
                         println!("sent!");
                     }
                     Message::Close(_) => {
-                        connection.lock().await.close().await;
                         break;
                     }
                     _ => {}

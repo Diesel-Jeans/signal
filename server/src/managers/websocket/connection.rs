@@ -131,16 +131,12 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
     }
 
     pub async fn close(&mut self) {
-        if let ConnectionState::Active(mut socket) =
-            std::mem::replace(&mut self.ws, ConnectionState::Closed)
-        {
-            let _ = socket
-                .send(Message::Close(Some(CloseFrame {
-                    code: axum::extract::ws::close_code::NORMAL,
-                    reason: "Goodbye".into(),
-                })))
-                .await;
+        if let ConnectionState::Active(ref mut socket) = self.ws {
+            if let Err(e) = socket.close().await{
+                println!("WebSocketConnection ERROR: {e}");
+            }
         }
+        self.ws = ConnectionState::Closed;
     }
 
     pub async fn close_reason(&mut self, code: u16, reason: &str) -> Result<(), String> {
@@ -152,7 +148,6 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
         if let Err(x) = fut.await {
             return Err(format!("{}", x));
         }
-        self.close().await;
         Ok(())
     }
 
@@ -507,6 +502,7 @@ pub(crate) mod test {
         let (mut client, _, mut receiver, _) = create_connection("127.0.0.1:4042", state).await;
         assert!(client.is_active());
         client.close_reason(666, "test").await;
+        client.close().await;
         assert!(!client.is_active());
 
         assert!(!receiver.is_empty());
