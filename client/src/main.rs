@@ -81,13 +81,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await?
     };
 
-    alice.add_contact("bob", &bob.aci.into()).await.expect("No bob?");
-    bob.add_contact("alice", &alice.aci.into()).await.expect("No alice?");
+    alice
+        .add_contact("bob", &bob.aci.into())
+        .await
+        .expect("No bob?");
+    bob.add_contact("alice", &alice.aci.into())
+        .await
+        .expect("No alice?");
 
     // 1st message
-    alice
-        .send_message("Hello Bob!", "bob")
-        .await?;
+    alice.send_message("Hello Bob!", "bob").await?;
 
     let message_from_alice = bob.receive_message().await;
 
@@ -96,8 +99,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(err) => println!("{:?}", err),
     }
 
-    bob.send_message("Hello Alice!", "alice")
-        .await?;
+    bob.send_message("Hello Alice!", "alice").await?;
 
     let message_from_bob = alice.receive_message().await;
 
@@ -107,9 +109,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // 2nd message
-    alice
-        .send_message("Hello Bob again!", "bob")
-        .await?;
+    alice.send_message("Hello Bob again!", "bob").await?;
 
     let message_from_alice = bob.receive_message().await;
 
@@ -118,8 +118,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(err) => println!("{:?}", err),
     }
 
-    bob.send_message("Hello Alice again!",  "alice")
-        .await?;
+    bob.send_message("Hello Alice again!", "alice").await?;
 
     let message_from_bob = alice.receive_message().await;
 
