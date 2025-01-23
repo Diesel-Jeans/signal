@@ -193,6 +193,7 @@ pub struct GcmToken {
 
 /// A request to register an account.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RegistrationRequest {
     session_id: String,
     recovery_password: String,
