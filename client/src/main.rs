@@ -1,8 +1,15 @@
 use client::Client;
+use common::errors::DecodeEnvelopeError;
 use dotenv::dotenv;
 use server::SignalServer;
-use std::{env::var, error::Error, fs, path::Path, path::PathBuf};
-use storage::device::Device;
+use std::{
+    collections::HashMap,
+    env::var,
+    error::Error,
+    fs,
+    path::{Path, PathBuf},
+};
+use storage::{device::Device, generic::SignalStore};
 
 mod client;
 mod contact_manager;
@@ -70,49 +77,65 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await?
     };
 
+    let mut names = HashMap::new();
+    names.insert(
+        alice.storage.get_aci().await?.service_id_string(),
+        "Alice".to_owned(),
+    );
+    names.insert(
+        bob.storage.get_aci().await?.service_id_string(),
+        "Bob".to_owned(),
+    );
+
     // 1st message
     alice
         .send_message("Hello Bob!", &bob.aci.into(), "bob")
         .await?;
 
-    let message_from_alice = bob.receive_message().await;
+    let unknown_sender = "Unknown Sender".to_owned();
 
-    match message_from_alice {
-        Ok(message) => println!("{message}"),
-        Err(err) => println!("{:?}", err),
-    }
+    let message_from_alice = bob.receive_message().await?;
+    let alice_sender = names
+        .get(&message_from_alice.source_service_id()?.service_id_string())
+        .unwrap_or(&unknown_sender);
+    let alice_message_content = message_from_alice.try_get_message_as_string()?;
+
+    println!("{alice_sender}: {alice_message_content}");
 
     bob.send_message("Hello Alice!", &alice.aci.into(), "alice")
         .await?;
 
-    let message_from_bob = alice.receive_message().await;
+    let message_from_bob = alice.receive_message().await?;
+    let bob_sender = names
+        .get(&message_from_bob.source_service_id()?.service_id_string())
+        .unwrap_or(&unknown_sender);
+    let bob_message_content = message_from_bob.try_get_message_as_string()?;
 
-    match message_from_bob {
-        Ok(message) => println!("{message}"),
-        Err(err) => println!("{:?}", err),
-    }
+    println!("{bob_sender}: {bob_message_content}");
 
     // 2nd message
     alice
         .send_message("Hello Bob again!", &bob.aci.into(), "bob")
         .await?;
 
-    let message_from_alice = bob.receive_message().await;
+    let message_from_alice = bob.receive_message().await?;
+    let alice_sender = names
+        .get(&message_from_alice.source_service_id()?.service_id_string())
+        .unwrap_or(&unknown_sender);
+    let alice_message_content = message_from_alice.try_get_message_as_string()?;
 
-    match message_from_alice {
-        Ok(message) => println!("{message}"),
-        Err(err) => println!("{:?}", err),
-    }
+    println!("{alice_sender}: {alice_message_content}");
 
     bob.send_message("Hello Alice again!", &alice.aci.into(), "alice")
         .await?;
 
-    let message_from_bob = alice.receive_message().await;
+    let message_from_bob = alice.receive_message().await?;
+    let bob_sender = names
+        .get(&message_from_bob.source_service_id()?.service_id_string())
+        .unwrap_or(&unknown_sender);
+    let bob_message_content = message_from_bob.try_get_message_as_string()?;
 
-    match message_from_bob {
-        Ok(message) => println!("{message}"),
-        Err(err) => println!("{:?}", err),
-    }
+    println!("{bob_sender}: {bob_message_content}");
 
     Ok(())
 }
