@@ -258,9 +258,15 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
     pub async fn send_message(
         &mut self,
         message: &str,
-        service_id: &ServiceId,
         alias: &str,
     ) -> Result<()> {
+        let service_id = self
+            .storage
+            .device
+            .get_service_id_by_nickname(alias)
+            .await
+            .map_err(DatabaseError::from)?;
+
         let content = Content::builder()
             .data_message(
                 DataMessage::builder()
@@ -275,28 +281,28 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
 
         let timestamp = SystemTime::now();
 
-        // Update the contact.
-        let to = match self.contact_manager.get_contact(service_id) {
+        /*// Update the contact.
+        let to = match self.contact_manager.get_contact(&service_id) {
             Err(_) => {
-                self.add_contact(alias, service_id)
+                self.add_contact(alias, &service_id)
                     .await
                     .expect("Can add contact that does not exist yet");
 
-                let device_ids = self.get_new_device_ids(service_id).await?;
+                let device_ids = self.get_new_device_ids(&service_id).await?;
 
                 self.update_contact(alias, device_ids).await?;
 
                 self.contact_manager
-                    .get_contact(service_id)
-                    .expect("Can get contact that was just added.")
+                    .get_contact(&service_id)
+                    .expect("Can get contact")
             }
             Ok(contact) => contact,
-        };
+        };*/
 
         let msgs = encrypt(
             &mut self.storage.protocol_store.identity_key_store,
             &mut self.storage.protocol_store.session_store,
-            to,
+            self.contact_manager.get_contact(&service_id)?,
             pad_message(content.encode_to_vec().as_ref()).as_ref(),
             timestamp,
         )
@@ -324,20 +330,20 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
                     content: BASE64_STANDARD.encode(msg.1.serialize()),
                 })
                 .collect(),
-            online: false,
-            urgent: true,
+            online: true,
+            urgent: false,
             timestamp: timestamp
                 .duration_since(UNIX_EPOCH)
                 .expect("can get the time since epoch")
                 .as_secs(),
         };
 
-        match self.server_api.send_msg(&msgs, service_id).await {
+        match self.server_api.send_msg(&msgs, &service_id).await {
             Ok(_) => Ok(()),
             Err(_) => {
-                let device_ids = self.get_new_device_ids(service_id).await?;
+                let device_ids = self.get_new_device_ids(&service_id).await?;
                 self.update_contact(alias, device_ids).await?;
-                self.server_api.send_msg(&msgs, service_id).await
+                self.server_api.send_msg(&msgs, &service_id).await
             }
         }
     }
@@ -417,25 +423,36 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
     }
 
     pub async fn add_contact(&mut self, alias: &str, service_id: &ServiceId) -> Result<()> {
+        if self.contact_manager.get_contact(&service_id).is_ok(){
+            return Ok(());
+        }
         self.contact_manager
             .add_contact(&service_id)
             .map_err(SignalClientError::ContactManagerError)?;
-        let contact = self
-            .contact_manager
-            .get_contact(&service_id)
-            .map_err(SignalClientError::ContactManagerError)?;
 
+        
+        
+        let contact = self
+        .contact_manager
+        .get_contact(&service_id)
+        .map_err(SignalClientError::ContactManagerError)?;
+    
         self.storage
             .device
             .store_contact(contact)
             .await
             .map_err(DatabaseError::from)?;
-
+    
+        
         self.storage
-            .device
-            .insert_service_id_for_nickname(alias, &service_id)
-            .await
-            .map_err(|err| DatabaseError::Custom(Box::new(err)).into())
+        .device
+        .insert_service_id_for_nickname(alias, &service_id)
+        .await
+        .map_err(|err| SignalClientError::DatabaseError(DatabaseError::Custom(Box::new(err))))?;
+    
+        let device_ids = self.get_new_device_ids(&service_id).await?;
+        self.update_contact(alias, device_ids).await
+
     }
 
     pub async fn remove_contact(&mut self, alias: &str) -> Result<()> {
@@ -457,7 +474,7 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
             .map_err(|err| DatabaseError::Custom(Box::new(err)).into())
     }
 
-    pub async fn update_contact(&mut self, alias: &str, device_ids: Vec<DeviceId>) -> Result<()> {
+    async fn update_contact(&mut self, alias: &str, device_ids: Vec<DeviceId>) -> Result<()> {
         let service_id = self
             .storage
             .device

@@ -114,7 +114,8 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
         mut message: Envelope,
     ) -> Result<WebSocketMessage, SystemTimeError> {
         let id = generate_req_id();
-        message.ephemeral = Some(false);
+        message.ephemeral = None; // was false
+        message.story = Some(false); // TODO: needs to handled in handle_request instead
         let msg = create_request(
             id,
             "PUT",
@@ -421,6 +422,7 @@ pub(crate) mod test {
     use common::signalservice::{Envelope, WebSocketMessage, WebSocketRequestMessage};
     use common::websocket::net_helper::{create_request, create_response};
     use futures_util::{stream::SplitStream, StreamExt};
+    use hmac::digest::consts::False;
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};
 
@@ -431,7 +433,8 @@ pub(crate) mod test {
 
     fn make_envelope() -> Envelope {
         Envelope {
-            ephemeral: Some(false),
+            ephemeral: None,
+            story: Some(false),
             content: Some("Hello".as_bytes().to_vec()),
             ..Default::default()
         }
