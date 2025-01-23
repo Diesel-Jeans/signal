@@ -34,10 +34,15 @@ fn client_db_path() -> String {
         .to_owned()
 }
 
-async fn make_client(name: &str, phone: &str, certificate_path: &Option<String>, server_url: &str) -> Client::<Device, SignalServer>{
+async fn make_client(
+    name: &str,
+    phone: &str,
+    certificate_path: &Option<String>,
+    server_url: &str,
+) -> Client<Device, SignalServer> {
     let db_path = client_db_path() + "/" + name + ".db";
     let db_url = format!("sqlite://{}", db_path);
-    let client = if Path::exists(Path::new(&db_path)){
+    let client = if Path::exists(Path::new(&db_path)) {
         Client::<Device, SignalServer>::login(&db_url, certificate_path, server_url).await
     } else {
         Client::<Device, SignalServer>::register(
@@ -52,7 +57,7 @@ async fn make_client(name: &str, phone: &str, certificate_path: &Option<String>,
     client.expect("Failed to create client")
 }
 
-fn get_server_info() -> (Option<String>, String){
+fn get_server_info() -> (Option<String>, String) {
     let use_tls = !env::args().any(|arg| arg == "--no-tls");
     println!("Using tls: {}", use_tls);
     if use_tls {
@@ -71,13 +76,35 @@ fn get_server_info() -> (Option<String>, String){
     }
 }
 
-async fn add_name(names: &mut HashMap<String, String>, client: &Client<Device, SignalServer>, name: &str){
-    names.insert(client.storage.get_aci().await.expect("No ACI").service_id_string(), name.to_owned());
+async fn add_name(
+    names: &mut HashMap<String, String>,
+    client: &Client<Device, SignalServer>,
+    name: &str,
+) {
+    names.insert(
+        client
+            .storage
+            .get_aci()
+            .await
+            .expect("No ACI")
+            .service_id_string(),
+        name.to_owned(),
+    );
 }
 
-async fn receive_message(client: &mut Client<Device, SignalServer>, names: &HashMap<String, String>, default: &String){
+async fn receive_message(
+    client: &mut Client<Device, SignalServer>,
+    names: &HashMap<String, String>,
+    default: &String,
+) {
     let msg = client.receive_message().await.expect("Expected Message");
-    let name = names.get(&msg.source_service_id().expect("Failed to decode").service_id_string()).unwrap_or(default);
+    let name = names
+        .get(
+            &msg.source_service_id()
+                .expect("Failed to decode")
+                .service_id_string(),
+        )
+        .unwrap_or(default);
     let msg_text = msg.try_get_message_as_string().expect("No Text Content");
     println!("{name}: {msg_text}");
 }
@@ -103,18 +130,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     add_name(&mut contact_names, &alice, "Alice").await;
     add_name(&mut contact_names, &bob, "Bob").await;
 
-
     alice.send_message("Hello Bob!", "bob").await?;
     receive_message(&mut bob, &contact_names, &default_sender).await;
-    
+
     bob.send_message("Hello Alice!", "alice").await?;
     receive_message(&mut alice, &contact_names, &default_sender).await;
-    
-    
+
     alice.send_message("Hello Bob again!", "bob").await?;
     receive_message(&mut bob, &contact_names, &default_sender).await;
-    
-    
+
     bob.send_message("Hello Alice again!", "alice").await?;
     receive_message(&mut alice, &contact_names, &default_sender).await;
 
