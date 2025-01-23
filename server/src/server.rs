@@ -34,8 +34,7 @@ use axum::{
 };
 use axum_extra::{headers, TypedHeader};
 use axum_server::tls_rustls::RustlsConfig;
-use base64::prelude::{Engine as _, BASE64_STANDARD};
-use base64::prelude::{Engine as _, BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD};
+use base64::prelude::{Engine as _, BASE64_STANDARD, BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD};
 use common::web_api::{
     authorization::BasicAuthorizationHeader, DeviceCapabilityType, DevicePreKeyBundle,
     LinkDeviceRequest, PreKeyResponse, RegistrationRequest, RegistrationResponse, SetKeyRequest,
@@ -47,10 +46,9 @@ use headers::authorization::Basic;
 use headers::Authorization;
 use hmac::{Hmac, Mac};
 use libsignal_core::{DeviceId, ProtocolAddress, ServiceId, ServiceIdKind};
-use serde_json::json;
+use rand::{rngs::OsRng, CryptoRng, Rng};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::io::BufRead;
+use std::{collections::HashMap, sync::Arc};
 use std::{
     env,
     fmt::Debug,
@@ -58,10 +56,15 @@ use std::{
     str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 
-pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
-    state: &SignalServerState<T, U>,
+pub async fn handle_put_messages<
+    T: SignalDatabase,
+    U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send,
+>(
+    state: &SignalServerState<T, U, R>,
     authenticated_device: &AuthenticatedDevice,
     destination_identifier: &ServiceId,
     payload: SignalMessages,
@@ -143,8 +146,12 @@ pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::E
     Ok(SendMessageResponse { needs_sync })
 }
 
-pub async fn handle_keepalive<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
-    state: &SignalServerState<T, U>,
+pub async fn handle_keepalive<
+    T: SignalDatabase,
+    U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send,
+>(
+    state: &SignalServerState<T, U, R>,
     authenticated_device: &AuthenticatedDevice,
 ) -> Result<(), ApiError> {
     //Check if present in presencemanager. If not present, close connection for device. Else return 200 Ok
@@ -169,15 +176,23 @@ pub async fn handle_keepalive<T: SignalDatabase, U: WSStream<Message, axum::Erro
     Ok(())
 }
 
-async fn handle_get_messages<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
-    state: SignalServerState<T, U>,
+async fn handle_get_messages<
+    T: SignalDatabase,
+    U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send,
+>(
+    state: SignalServerState<T, U, R>,
     address: ProtocolAddress,
 ) {
     todo!("Get messages")
 }
 
-async fn handle_post_registration<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
-    state: SignalServerState<T, U>,
+async fn handle_post_registration<
+    T: SignalDatabase,
+    U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send,
+>(
+    state: SignalServerState<T, U, R>,
     auth_header: BasicAuthorizationHeader,
     registration: RegistrationRequest,
 ) -> Result<RegistrationResponse, ApiError> {
@@ -242,8 +257,9 @@ async fn handle_post_registration<T: SignalDatabase, U: WSStream<Message, axum::
 async fn handle_get_link_device_token<
     T: SignalDatabase,
     U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send,
 >(
-    _state: SignalServerState<T, U>,
+    _state: SignalServerState<T, U, R>,
     authenticated_device: AuthenticatedDevice,
 ) -> Result<LinkDeviceToken, ApiError> {
     if authenticated_device.device().device_id() != 1.into() {
@@ -278,8 +294,12 @@ async fn handle_get_link_device_token<
     })
 }
 
-async fn handle_post_link_device<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
-    state: SignalServerState<T, U>,
+async fn handle_post_link_device<
+    T: SignalDatabase,
+    U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send,
+>(
+    state: SignalServerState<T, U, R>,
     auth_header: Basic,
     link_device_request: LinkDeviceRequest,
 ) -> Result<LinkDeviceResponse, ApiError> {
@@ -422,8 +442,12 @@ async fn handle_post_link_device<T: SignalDatabase, U: WSStream<Message, axum::E
     })
 }
 
-async fn handle_delete_account<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
-    state: SignalServerState<T, U>,
+async fn handle_delete_account<
+    T: SignalDatabase,
+    U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send,
+>(
+    state: SignalServerState<T, U, R>,
     authenticated_device: AuthenticatedDevice,
 ) -> Result<(), ApiError> {
     state
@@ -436,8 +460,12 @@ async fn handle_delete_account<T: SignalDatabase, U: WSStream<Message, axum::Err
         })
 }
 
-async fn handle_delete_device<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
-    state: SignalServerState<T, U>,
+async fn handle_delete_device<
+    T: SignalDatabase,
+    U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send,
+>(
+    state: SignalServerState<T, U, R>,
     device_id: u32,
     authenticated_device: AuthenticatedDevice,
 ) -> Result<(), ApiError> {
@@ -532,7 +560,7 @@ fn parse_service_id(string: String) -> Result<ServiceId, ApiError> {
 /// Handler for the PUT v1/messages/{address} endpoint.
 #[debug_handler]
 async fn put_messages_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket, OsRng>>,
     authenticated_device: AuthenticatedDevice,
     Path(destination_identifier): Path<String>,
     Json(payload): Json<SignalMessages>,
@@ -550,7 +578,7 @@ async fn put_messages_endpoint(
 /// Handler for the POST v1/registration endpoint.
 #[debug_handler]
 async fn post_registration_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket, OsRng>>,
     headers: HeaderMap,
     Json(registration): Json<RegistrationRequest>,
 ) -> Result<Json<RegistrationResponse>, ApiError> {
@@ -582,7 +610,7 @@ async fn post_registration_endpoint(
 /// Handler for the GET v2/keys endpoint.
 #[debug_handler]
 async fn get_keys_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket, OsRng>>,
     authenticated_device: AuthenticatedDevice,
     Path((identifier, device_id)): Path<(String, String)>,
 ) -> Result<Json<PreKeyResponse>, ApiError> {
@@ -604,7 +632,7 @@ async fn get_keys_endpoint(
 /// Handler for the POST v2/keys/check endpoint.
 #[debug_handler]
 async fn post_keycheck_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket, OsRng>>,
     authenticated_device: AuthenticatedDevice,
     Json(check_keys_request): Json<CheckKeysRequest>,
 ) -> Result<(), ApiError> {
@@ -626,7 +654,7 @@ async fn post_keycheck_endpoint(
 /// Handler for the PUT v2/keys endpoint.
 #[debug_handler]
 async fn put_keys_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket, OsRng>>,
     authenticated_device: AuthenticatedDevice,
     Query(params): Query<HashMap<String, String>>,
     Json(set_keys_request): Json<SetKeyRequest>,
@@ -644,7 +672,7 @@ async fn put_keys_endpoint(
 /// Handler for the DELETE v1/accounts/me endpoint.
 #[debug_handler]
 async fn delete_account_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket, OsRng>>,
     authenticated_device: AuthenticatedDevice,
 ) -> Result<(), ApiError> {
     handle_delete_account(state, authenticated_device).await
@@ -653,7 +681,7 @@ async fn delete_account_endpoint(
 /// Handler for the DELETE v1/devices/{device_id} endpoint.
 #[debug_handler]
 async fn delete_device_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket, OsRng>>,
     Path(device_id): Path<u32>,
     authenticated_device: AuthenticatedDevice,
 ) -> Result<(), ApiError> {
@@ -663,7 +691,7 @@ async fn delete_device_endpoint(
 /// Handler for the GET v1/devices/provisioning/code endpoint.
 #[debug_handler]
 async fn get_link_device_token(
-    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket, OsRng>>,
     authenticated_device: AuthenticatedDevice,
 ) -> Result<LinkDeviceToken, ApiError> {
     handle_get_link_device_token(state, authenticated_device).await
@@ -672,7 +700,7 @@ async fn get_link_device_token(
 /// Handler for the POST v1/devices/link endpoint.
 #[debug_handler]
 async fn post_link_device_endpoint(
-    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket, OsRng>>,
     TypedHeader(Authorization(basic)): TypedHeader<Authorization<Basic>>,
     Json(link_device_request): Json<LinkDeviceRequest>,
 ) -> Result<LinkDeviceResponse, ApiError> {
@@ -682,7 +710,7 @@ async fn post_link_device_endpoint(
 // Websocket upgrade handler '/v1/websocket'
 #[debug_handler]
 async fn create_websocket_endpoint(
-    State(mut state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    State(mut state): State<SignalServerState<PostgresDatabase, SignalWebSocket, OsRng>>,
     authenticated_device: AuthenticatedDevice,
     ws: WebSocketUpgrade,
     user_agent: Option<TypedHeader<headers::UserAgent>>,
@@ -704,6 +732,7 @@ async fn create_websocket_endpoint(
                 addr,
                 sender,
                 state.clone(),
+                Arc::new(Mutex::new(OsRng)),
             );
             let addr = ws.protocol_address();
             wmgr.insert(ws, receiver).await;
@@ -723,7 +752,7 @@ async fn create_websocket_endpoint(
 
 #[debug_handler]
 pub async fn get_keepalive(
-    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket, OsRng>>,
     authenticated_device: AuthenticatedDevice,
 ) -> impl IntoResponse {
     handle_keepalive(&state, &authenticated_device).await
@@ -752,7 +781,7 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
 
-    let state = SignalServerState::<PostgresDatabase, SignalWebSocket>::new().await;
+    let state = SignalServerState::<PostgresDatabase, SignalWebSocket, OsRng>::new().await;
 
     let message_persister = MessagePersister::start(
         state.message_manager.clone(),

@@ -24,6 +24,7 @@ use common::websocket::wsstream::WSStream;
 use futures_util::{stream::SplitSink, Sink, SinkExt, Stream};
 use libsignal_core::{ProtocolAddress, ServiceId, ServiceIdKind};
 use prost::Message as PMessage;
+use rand::{CryptoRng, Rng};
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -42,22 +43,31 @@ pub enum UserIdentity {
 }
 
 #[derive(Debug)]
-pub struct WebSocketConnection<W: WSStream<Message, Error> + Debug, DB: SignalDatabase> {
+pub struct WebSocketConnection<
+    W: WSStream<Message, Error> + Debug,
+    DB: SignalDatabase,
+    R: CryptoRng + Rng + Send + 'static,
+> {
     identity: UserIdentity,
     socket_address: SocketAddr,
     ws: ConnectionState<W, Message>,
     pending_requests: HashMap<u64, String>,
-    state: SignalServerState<DB, W>,
+    state: SignalServerState<DB, W, R>,
+    rng: Arc<Mutex<R>>,
 }
 
-impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + Send + 'static>
-    WebSocketConnection<W, DB>
+impl<
+        W: WSStream<Message, Error> + Debug + Send + 'static,
+        DB: SignalDatabase + Send + 'static,
+        R: CryptoRng + Rng + Send,
+    > WebSocketConnection<W, DB, R>
 {
     pub fn new(
         identity: UserIdentity,
         socket_addr: SocketAddr,
         ws: SplitSink<W, Message>,
-        state: SignalServerState<DB, W>,
+        state: SignalServerState<DB, W, R>,
+        rng: Arc<Mutex<R>>,
     ) -> Self {
         Self {
             identity,
@@ -65,6 +75,7 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
             ws: ConnectionState::Active(ws),
             pending_requests: HashMap::new(),
             state,
+            rng,
         }
     }
 
@@ -82,6 +93,7 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
     pub async fn send_message(&mut self, message: Envelope) -> Result<(), String> {
         let msg = self
             .create_message(message)
+            .await
             .map_err(|_| "Time went backwards".to_string())?;
         match self.send(Message::Binary(msg.encode_to_vec())).await {
             Ok(_) => Ok(()),
@@ -109,11 +121,12 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
         true
     }
 
-    fn create_message(
+    async fn create_message(
         &mut self,
         mut message: Envelope,
     ) -> Result<WebSocketMessage, SystemTimeError> {
-        let id = generate_req_id();
+        let mut guard = self.rng.lock().await;
+        let id = generate_req_id(&mut *guard);
         message.ephemeral = Some(false);
         let msg = create_request(
             id,
@@ -168,7 +181,9 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
     }
 
     async fn send_queue_empty(&mut self) -> bool {
-        let id = generate_req_id();
+        let mut guard = self.rng.lock().await;
+        let id = generate_req_id(&mut *guard);
+        drop(guard);
         let Ok(time) = current_millis() else {
             return false;
         };
@@ -317,10 +332,11 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
 }
 
 #[async_trait::async_trait]
-impl<T, U> MessageAvailabilityListener for WebSocketConnection<T, U>
+impl<T, U, R> MessageAvailabilityListener for WebSocketConnection<T, U, R>
 where
     T: WSStream<Message, Error> + Debug + 'static,
     U: SignalDatabase,
+    R: CryptoRng + Rng + Send,
 {
     async fn handle_new_messages_available(&mut self) -> bool {
         if !(self.is_active() && self.send_messages(true).await) {
@@ -338,10 +354,11 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T, U> DisplacedPresenceListener for WebSocketConnection<T, U>
+impl<T, U, R> DisplacedPresenceListener for WebSocketConnection<T, U, R>
 where
     T: WSStream<Message, axum::Error> + Debug + 'static,
     U: SignalDatabase,
+    R: CryptoRng + Rng + Send + 'static,
 {
     async fn handle_displacement(&mut self, connected_elsewhere: bool) {
         let fut = if connected_elsewhere {
@@ -404,8 +421,8 @@ impl WSStream<Message, Error> for SignalWebSocket {
     }
 }
 
-pub type ClientConnection<T, U> = Arc<Mutex<WebSocketConnection<T, U>>>;
-pub type ConnectionMap<T, U> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnection<T, U>>>>;
+pub type ClientConnection<T, U, R> = Arc<Mutex<WebSocketConnection<T, U, R>>>;
+pub type ConnectionMap<T, U, R> = Arc<Mutex<HashMap<ProtocolAddress, ClientConnection<T, U, R>>>>;
 
 #[cfg(test)]
 pub(crate) mod test {
@@ -428,10 +445,14 @@ pub(crate) mod test {
     use futures_util::{stream::SplitStream, StreamExt};
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};
+    use rand::rngs::OsRng;
 
     use std::time::Duration;
     use std::{net::SocketAddr, str::FromStr, sync::Arc};
-    use tokio::sync::mpsc::{Receiver, Sender};
+    use tokio::sync::{
+        mpsc::{Receiver, Sender},
+        Mutex,
+    };
     use tokio::time::sleep;
 
     fn make_envelope() -> Envelope {
@@ -444,9 +465,9 @@ pub(crate) mod test {
 
     pub async fn create_connection<DB: SignalDatabase>(
         socket_addr: &str,
-        state: SignalServerState<DB, MockSocket>,
+        state: SignalServerState<DB, MockSocket, OsRng>,
     ) -> (
-        WebSocketConnection<MockSocket, DB>,
+        WebSocketConnection<MockSocket, DB, OsRng>,
         Sender<Result<Message, Error>>,
         Receiver<Message>,
         SplitStream<MockSocket>,
@@ -455,12 +476,12 @@ pub(crate) mod test {
         let (msender, mreceiver) = mock.split();
         let who = SocketAddr::from_str(socket_addr).unwrap();
         let auth_device = new_authenticated_device();
-
         let ws = WebSocketConnection::new(
             UserIdentity::AuthenticatedDevice(Box::new(auth_device)),
             who,
             msender,
             state,
+            Arc::new(Mutex::new(OsRng)),
         );
 
         (ws, sender, receiver, mreceiver)
@@ -468,7 +489,7 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_send_and_recv() {
-        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let state = SignalServerState::<MockDB, MockSocket, OsRng>::new();
         let (mut client, sender, mut receiver, mut mreceiver) =
             create_connection("127.0.0.1:4042", state).await;
 
@@ -493,7 +514,7 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_close() {
-        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let state = SignalServerState::<MockDB, MockSocket, OsRng>::new();
         let (mut client, _, _, _) = create_connection("127.0.0.1:4042", state).await;
 
         assert!(client.is_active());
@@ -503,7 +524,7 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_close_reason() {
-        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let state = SignalServerState::<MockDB, MockSocket, OsRng>::new();
         let (mut client, _, mut receiver, _) = create_connection("127.0.0.1:4042", state).await;
         assert!(client.is_active());
         client.close_reason(666, "test").await;
@@ -521,7 +542,7 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_send_message() {
-        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let state = SignalServerState::<MockDB, MockSocket, OsRng>::new();
         let (mut client, sender, mut receiver, mreceiver) =
             create_connection("127.0.0.1:4042", state).await;
         let mut env = make_envelope();
@@ -550,7 +571,7 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_on_receive_request() {
-        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let state = SignalServerState::<MockDB, MockSocket, OsRng>::new();
         let (mut client, sender, receiver, mreceiver) =
             create_connection("127.0.0.1:4042", state).await;
         let msg = r#"
@@ -586,7 +607,7 @@ pub(crate) mod test {
     #[ignore = "This in currently not testable"]
     #[tokio::test]
     async fn test_on_receive_response() {
-        let state = SignalServerState::<MockDB, MockSocket>::new();
+        let state = SignalServerState::<MockDB, MockSocket, OsRng>::new();
         let (mut client, sender, receiver, mreceiver) =
             create_connection("127.0.0.1:4042", state).await;
         client
@@ -597,7 +618,8 @@ pub(crate) mod test {
     #[tokio::test]
     async fn test_alice_sends_msg_to_bob() {
         let mut state =
-            SignalServerState::<PostgresDatabase, MockSocket>::connect("DATABASE_URL_TEST").await;
+            SignalServerState::<PostgresDatabase, MockSocket, OsRng>::connect("DATABASE_URL_TEST")
+                .await;
         let (alice, alice_sender, mut alice_receiver, alice_mreceiver) =
             create_connection("127.0.0.1:4042", state.clone()).await;
         let (bob, bob_sender, mut bob_receiver, bob_mreceiver) =
@@ -728,7 +750,7 @@ pub(crate) mod test {
     // this is more of a integration test and should maybe be somewhere else
     #[tokio::test]
     async fn test_handle_new_messages_available() {
-        let mut state = SignalServerState::<MockDB, MockSocket>::new();
+        let mut state = SignalServerState::<MockDB, MockSocket, OsRng>::new();
         let (ws, sender, mut receiver, mreceiver) =
             create_connection("127.0.0.1:4043", state.clone()).await;
         let address = ws.protocol_address();
@@ -789,7 +811,7 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_keepalive_for_present_device() {
-        let mut state = SignalServerState::<MockDB, MockSocket>::new();
+        let mut state = SignalServerState::<MockDB, MockSocket, OsRng>::new();
         let (mut client, sender, mut receiver, mut mreceiver) =
             create_connection("127.0.0.1:4042", state.clone()).await;
 
@@ -819,7 +841,7 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_keepalive_for_unpresent_device() {
-        let mut state = SignalServerState::<MockDB, MockSocket>::new();
+        let mut state = SignalServerState::<MockDB, MockSocket, OsRng>::new();
         let (mut client, sender, mut receiver, mut mreceiver) =
             create_connection("127.0.0.1:4042", state.clone()).await;
 

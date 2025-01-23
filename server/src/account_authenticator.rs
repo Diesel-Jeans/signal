@@ -17,15 +17,15 @@ use axum_extra::{
 };
 use common::websocket::wsstream::WSStream;
 use libsignal_core::ServiceId;
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, CryptoRng, Rng, RngCore};
 use std::fmt::Debug;
 
 const SALT_SIZE: usize = 16;
 const AUTH_TOKEN_HKDF_INFO: &[u8] = "authtoken".as_bytes();
 
 #[async_trait]
-impl<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>
-    FromRequestParts<SignalServerState<T, U>> for AuthenticatedDevice
+impl<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug, R: CryptoRng + Rng + Send>
+    FromRequestParts<SignalServerState<T, U, R>> for AuthenticatedDevice
 where
     T: Sync + Send,
 {
@@ -33,7 +33,7 @@ where
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &SignalServerState<T, U>,
+        state: &SignalServerState<T, U, R>,
     ) -> Result<Self, Self::Rejection> {
         let TypedHeader(Authorization(basic)) =
             TypedHeader::<Authorization<Basic>>::from_request_parts(parts, state)
@@ -75,8 +75,12 @@ where
     }
 }
 
-async fn authenticate_device<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
-    state: &SignalServerState<T, U>,
+async fn authenticate_device<
+    T: SignalDatabase,
+    U: WSStream<Message, axum::Error> + Debug,
+    R: CryptoRng + Rng + Send,
+>(
+    state: &SignalServerState<T, U, R>,
     service_id: &ServiceId,
     device_id: u32,
     password: &str,

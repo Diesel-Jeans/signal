@@ -190,8 +190,9 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
             .await
             .map_err(DatabaseError::from)?;
         let mut storage = Storage::new(device.clone(), proto_storage);
+        let mut rng = OsRng;
         let key_bundle = key_manager
-            .generate_key_bundle(&mut storage.protocol_store)
+            .generate_key_bundle(&mut storage.protocol_store, &mut rng)
             .await?;
 
         server_api.publish_pre_key_bundle(key_bundle).await?;
