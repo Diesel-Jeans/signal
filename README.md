@@ -17,6 +17,9 @@ SERVER_ADDRESS=127.0.0.1
 HTTPS_PORT=443
 HTTP_PORT=80
 ```
+
+if you are on linux and do not want to sudo the program, you can change the HTTPS and HTTP ports to your liking.
+
 3. Go into `server/cert`
 4. Generate certificates by running the following
 ```zsh

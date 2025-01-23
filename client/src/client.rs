@@ -277,24 +277,6 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
 
         let timestamp = SystemTime::now();
 
-        /*// Update the contact.
-        let to = match self.contact_manager.get_contact(&service_id) {
-            Err(_) => {
-                self.add_contact(alias, &service_id)
-                    .await
-                    .expect("Can add contact that does not exist yet");
-
-                let device_ids = self.get_new_device_ids(&service_id).await?;
-
-                self.update_contact(alias, device_ids).await?;
-
-                self.contact_manager
-                    .get_contact(&service_id)
-                    .expect("Can get contact")
-            }
-            Ok(contact) => contact,
-        };*/
-
         let msgs = encrypt(
             &mut self.storage.protocol_store.identity_key_store,
             &mut self.storage.protocol_store.session_store,
