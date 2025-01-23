@@ -132,7 +132,7 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
 
     pub async fn close(&mut self) {
         if let ConnectionState::Active(ref mut socket) = self.ws {
-            if let Err(e) = socket.close().await{
+            if let Err(e) = socket.close().await {
                 println!("WebSocketConnection ERROR: {e}");
             }
         }
