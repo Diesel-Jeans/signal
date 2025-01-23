@@ -942,6 +942,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bon",
+ "derive_more",
  "futures-util",
  "libsignal-protocol",
  "prost",

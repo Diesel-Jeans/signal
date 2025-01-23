@@ -1,11 +1,3 @@
-use axum::http::StatusCode;
-use base64::{prelude::BASE64_STANDARD, Engine as _};
-use core::str;
-use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
-use rand::{rngs::OsRng, Rng};
-use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
-use std::collections::HashMap;
-
 use crate::{
     contact_manager::ContactManager,
     encryption::{encrypt, pad_message, unpad_message},
@@ -20,15 +12,23 @@ use crate::{
         generic::{ProtocolStore, Storage},
     },
 };
+use axum::http::StatusCode;
+use base64::{prelude::BASE64_STANDARD, Engine as _};
 use common::{
+    envelope::ProcessedEnvelope,
     signalservice::{envelope, Content, DataMessage, Envelope},
     web_api::{AccountAttributes, RegistrationRequest, SignalMessage, SignalMessages},
 };
+use core::str;
+use libsignal_core::{Aci, DeviceId, Pni, ProtocolAddress, ServiceId};
 use libsignal_protocol::{
     message_decrypt, process_prekey_bundle, CiphertextMessage, CiphertextMessageType,
     IdentityKeyPair, SignalProtocolError,
 };
 use prost::Message;
+use rand::{rngs::OsRng, Rng};
+use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct Client<T: ClientDB, U: SignalServerAPI> {
@@ -344,7 +344,7 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
         }
     }
 
-    pub async fn receive_message(&mut self) -> Result<String> {
+    pub async fn receive_message(&mut self) -> Result<ProcessedEnvelope> {
         // I get Envelope from Server.
         let request = self
             .server_api
@@ -352,7 +352,6 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
             .await
             .ok_or(ReceiveMessageError::NoMessageReceived)?;
 
-        // FIX:
         let envelope = match Envelope::decode(request.body()) {
             Ok(e) => e,
             Err(_) => {
@@ -360,62 +359,24 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
                     .send_response(request, StatusCode::INTERNAL_SERVER_ERROR)
                     .await?;
 
-                return Err(SignalClientError::ReceiveMessageError(
-                    ReceiveMessageError::EnvelopeDecodeError,
-                ));
+                return Err(ReceiveMessageError::EnvelopeDecodeError)?;
             }
         };
-
-        // Envelope contains a ciphertext message; a so called `encrypted [Content]`
-        let ciphertext_content = envelope.content();
-
-        // The content of the envelope is base64 encoded.
-        let bytes = ciphertext_content.to_vec();
-
-        // The envelope contains information about which message type is received.
-        let _type = match envelope.r#type() {
-            envelope::Type::Ciphertext => Ok(CiphertextMessageType::Whisper),
-            envelope::Type::PrekeyBundle => Ok(CiphertextMessageType::PreKey),
-            envelope::Type::PlaintextContent => Ok(CiphertextMessageType::Plaintext),
-            _ => Err(ReceiveMessageError::InvalidMessageTypeInEnvelope),
-        }?;
-
-        // Use the information from envelope to construct a CiphertextMessage.
-        let ciphertext =
-            decode_ciphertext(bytes, _type).map_err(ReceiveMessageError::CiphertextDecodeError)?;
-
-        let address = ProtocolAddress::new(
-            envelope.source_service_id().to_string(),
-            envelope.source_device().into(),
-        );
-
-        let mut csprng = OsRng;
-        let store = &mut self.storage.protocol_store;
-
-        // Decrypt the message.
-        let plaintext = message_decrypt(
-            &ciphertext,
-            &address,
-            &mut store.session_store,
-            &mut store.identity_key_store,
-            &mut store.pre_key_store,
-            &mut store.signed_pre_key_store,
-            &mut store.kyber_pre_key_store,
-            &mut csprng,
+        let processed = Envelope::decrypt(
+            envelope,
+            &mut self.storage.protocol_store.session_store,
+            &mut self.storage.protocol_store.identity_key_store,
+            &mut self.storage.protocol_store.pre_key_store,
+            &mut self.storage.protocol_store.signed_pre_key_store,
+            &mut self.storage.protocol_store.kyber_pre_key_store,
+            &mut OsRng,
         )
-        .await
-        .map_err(ReceiveMessageError::DecryptMessageError)?;
+        .await?;
 
         let _ = self.server_api.send_response(request, StatusCode::OK).await;
+
         // The final message is stored within a DataMessage inside a Content.
-        Ok(
-            Content::decode(unpad_message(plaintext.as_ref()).unwrap().as_ref())
-                .map_err(ReceiveMessageError::ProtobufDecodeContentError)?
-                .data_message
-                .ok_or_else(|| ReceiveMessageError::InvalidMessageContent)?
-                .body()
-                .to_owned(),
-        )
+        Ok(processed)
     }
 
     pub async fn add_contact(&mut self, alias: &str, service_id: &ServiceId) -> Result<()> {
@@ -514,25 +475,5 @@ impl<T: ClientDB, U: SignalServerAPI> Client<T, U> {
         }
 
         Ok(device_ids)
-    }
-}
-
-fn decode_ciphertext(
-    bytes: Vec<u8>,
-    _type: CiphertextMessageType,
-) -> std::result::Result<CiphertextMessage, SignalProtocolError> {
-    match _type {
-        CiphertextMessageType::Whisper => {
-            Ok(CiphertextMessage::SignalMessage((&*bytes).try_into()?))
-        }
-        CiphertextMessageType::PreKey => Ok(CiphertextMessage::PreKeySignalMessage(
-            (&*bytes).try_into()?,
-        )),
-        CiphertextMessageType::SenderKey => {
-            Ok(CiphertextMessage::SenderKeyMessage((&*bytes).try_into()?))
-        }
-        CiphertextMessageType::Plaintext => {
-            Ok(CiphertextMessage::PlaintextContent((&*bytes).try_into()?))
-        }
     }
 }
