@@ -38,8 +38,8 @@ use base64::prelude::{Engine as _, BASE64_STANDARD};
 use base64::prelude::{Engine as _, BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD};
 use common::web_api::{
     authorization::BasicAuthorizationHeader, DeviceCapabilityType, DevicePreKeyBundle,
-    LinkDeviceRequest, PreKeyResponse, RegistrationRequest, RegistrationResponse, SetKeyRequest,
-    SignalMessages,
+    LinkDeviceRequest, PreKeyCount, PreKeyResponse, RegistrationRequest, RegistrationResponse,
+    SetKeyRequest, SignalMessages,
 };
 use common::websocket::wsstream::WSStream;
 use futures_util::StreamExt;
@@ -579,16 +579,16 @@ async fn post_registration_endpoint(
         .map(Json)
 }
 
-/// Handler for the GET v2/keys endpoint.
+/// Handler for the GET /v2/keys/:identifier/:device_id endpoint.
 #[debug_handler]
-async fn get_keys_endpoint(
+async fn get_keys_id_device_id(
     State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
     authenticated_device: AuthenticatedDevice,
     Path((identifier, device_id)): Path<(String, String)>,
 ) -> Result<Json<PreKeyResponse>, ApiError> {
     state
         .key_manager
-        .handle_get_keys(
+        .handle_get_keys_id_device_id(
             &state.db,
             &authenticated_device,
             ServiceId::parse_from_service_id_string(&identifier).ok_or_else(|| ApiError {
@@ -599,6 +599,23 @@ async fn get_keys_endpoint(
         )
         .await
         .map(Json)
+}
+
+/// Handler for the GET /v2/keys endpoint.
+#[debug_handler]
+async fn get_keys(
+    State(state): State<SignalServerState<PostgresDatabase, SignalWebSocket>>,
+    authenticated_device: AuthenticatedDevice,
+) -> Result<Json<PreKeyCount>, ApiError> {
+    let (count, pq_count) = state
+        .key_manager
+        .get_one_time_pre_key_count(&authenticated_device.account().aci().into())
+        .await
+        .map_err(|_| ApiError {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            body: "".to_string(),
+        })?;
+    Ok(axum::Json(PreKeyCount { count, pq_count }))
 }
 
 /// Handler for the POST v2/keys/check endpoint.
@@ -765,7 +782,11 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/", get(|| async { "Hello from Signal Server" }))
         .route("/v1/messages/:destination", put(put_messages_endpoint))
         .route("/v1/registration", post(post_registration_endpoint))
-        .route("/v2/keys/:identifier/:device_id", get(get_keys_endpoint))
+        .route(
+            "/v2/keys/:identifier/:device_id",
+            get(get_keys_id_device_id),
+        )
+        .route("/v2/keys", get(get_keys))
         .route("/v2/keys/check", post(post_keycheck_endpoint))
         .route("/v2/keys", put(put_keys_endpoint))
         .route("/v1/accounts/me", delete(delete_account_endpoint))

@@ -103,7 +103,7 @@ impl<T: SignalDatabase> KeyManager<T> {
         Ok(())
     }
 
-    pub async fn handle_get_keys<S: SignalDatabase>(
+    pub async fn handle_get_keys_id_device_id<S: SignalDatabase>(
         &self,
         database: &S,
         auth_device: &AuthenticatedDevice,
@@ -342,7 +342,7 @@ mod key_manager_tests {
         database.add_account(auth_device1.account()).await.unwrap();
 
         let keys = km
-            .handle_get_keys(
+            .handle_get_keys_id_device_id(
                 &database,
                 &auth_device1,
                 target.aci().into(),
@@ -422,7 +422,7 @@ mod key_manager_tests {
         database.add_account(auth_device1.account()).await.unwrap();
 
         let keys = km
-            .handle_get_keys(&database, &auth_device1, target.aci().into(), "*".into())
+            .handle_get_keys_id_device_id(&database, &auth_device1, target.aci().into(), "*".into())
             .await
             .unwrap();
 
