@@ -114,7 +114,8 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
         mut message: Envelope,
     ) -> Result<WebSocketMessage, SystemTimeError> {
         let id = generate_req_id();
-        message.ephemeral = Some(false);
+        message.ephemeral = None; // was false
+        message.story = Some(false); // TODO: needs to handled in handle_request instead
         let msg = create_request(
             id,
             "PUT",
@@ -131,16 +132,12 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
     }
 
     pub async fn close(&mut self) {
-        if let ConnectionState::Active(mut socket) =
-            std::mem::replace(&mut self.ws, ConnectionState::Closed)
-        {
-            let _ = socket
-                .send(Message::Close(Some(CloseFrame {
-                    code: axum::extract::ws::close_code::NORMAL,
-                    reason: "Goodbye".into(),
-                })))
-                .await;
+        if let ConnectionState::Active(ref mut socket) = self.ws {
+            if let Err(e) = socket.close().await {
+                println!("WebSocketConnection ERROR: {e}");
+            }
         }
+        self.ws = ConnectionState::Closed;
     }
 
     pub async fn close_reason(&mut self, code: u16, reason: &str) -> Result<(), String> {
@@ -152,7 +149,6 @@ impl<W: WSStream<Message, Error> + Debug + Send + 'static, DB: SignalDatabase + 
         if let Err(x) = fut.await {
             return Err(format!("{}", x));
         }
-        self.close().await;
         Ok(())
     }
 
@@ -426,6 +422,7 @@ pub(crate) mod test {
     use common::signalservice::{Envelope, WebSocketMessage, WebSocketRequestMessage};
     use common::websocket::net_helper::{create_request, create_response};
     use futures_util::{stream::SplitStream, StreamExt};
+    use hmac::digest::consts::False;
     use libsignal_core::Aci;
     use prost::{bytes::Bytes, Message as PMessage};
 
@@ -436,7 +433,8 @@ pub(crate) mod test {
 
     fn make_envelope() -> Envelope {
         Envelope {
-            ephemeral: Some(false),
+            ephemeral: None,
+            story: Some(false),
             content: Some("Hello".as_bytes().to_vec()),
             ..Default::default()
         }
@@ -507,6 +505,7 @@ pub(crate) mod test {
         let (mut client, _, mut receiver, _) = create_connection("127.0.0.1:4042", state).await;
         assert!(client.is_active());
         client.close_reason(666, "test").await;
+        client.close().await;
         assert!(!client.is_active());
 
         assert!(!receiver.is_empty());

@@ -14,9 +14,12 @@ DATABASE_URL=postgres://root:root@127.0.0.1:5432/signal_db
 DATABASE_URL_TEST=postgres://test:test@127.0.0.1:3306/signal_db_test
 REDIS_URL=redis://127.0.0.1:6379
 SERVER_ADDRESS=127.0.0.1
-HTTPS_PORT=4444
-HTTP_PORT=8888
+HTTPS_PORT=443
+HTTP_PORT=80
 ```
+
+if you are on linux and do not want to sudo the program, you can change the HTTPS and HTTP ports to your liking.
+
 3. Go into `server/cert`
 4. Generate certificates by running the following
 ```zsh
@@ -36,7 +39,8 @@ cargo run
 1. Go into `client`
 2. Create a file called `.env` with the following content
 ```
-SERVER_URL=https://localhost:4444
+HTTPS_SERVER_URL=https://localhost:443
+HTTP_SERVER_URL=http://localhost:80
 DATABASE_URL=sqlite://./client/client_db/dev.db
 DATABASE_URL_TEST=sqlite::memory:
 CERT_PATH=../server/cert/rootCA.crt
@@ -52,6 +56,9 @@ cargo sqlx database create -D sqlite://dev.db && cargo sqlx migrate run -D sqlit
 cargo run
 ```
 As an example, two clients should then be created and messages between them will be send.
+
+### TLS Configuration
+If you do not want to use HTTPS and WSS you can run the server and client with `--no-tls` and then they will just communicate over HTTP and WS
 
 ## Clean up
 ### Resetting the server database

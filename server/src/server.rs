@@ -21,14 +21,17 @@ use anyhow::Result;
 use axum::{
     debug_handler,
     extract::{
-        connect_info::ConnectInfo, ws::Message, ws::WebSocketUpgrade, Host, Path, Query, State,
+        connect_info::ConnectInfo,
+        ws::{Message, WebSocketUpgrade},
+        Host, Path, Query, Request, State,
     },
     handler::HandlerWithoutStateExt,
     http::{
         header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
-        HeaderMap, Method, StatusCode, Uri,
+        HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri,
     },
-    response::{IntoResponse, Redirect},
+    middleware::{from_fn, Next},
+    response::{IntoResponse, Redirect, Response},
     routing::{any, delete, get, post, put},
     BoxError, Json, Router,
 };
@@ -58,6 +61,8 @@ use std::{
     str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tower::ServiceBuilder;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 
 pub async fn handle_put_messages<T: SignalDatabase, U: WSStream<Message, axum::Error> + Debug>(
@@ -746,16 +751,33 @@ pub async fn get_keepalive(
     handle_keepalive(&state, &authenticated_device).await
 }
 
+async fn signal_time_middleware(req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+
+    response.headers_mut().insert(
+        "x-signal-timestamp",
+        HeaderValue::from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_millis() as u64,
+        ),
+    );
+
+    response
+}
+
 /// To add a new endpoint:
 ///  * create an async router function: `<method>_<endpoint_name>_endpoint`.
 ///  * create an async handler function: `handle_<method>_<endpoint_name>`
 ///  * add the router function to the axum router below.
 ///  * call the handler function from the router function to handle the request.
-pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("Failed to install rustls crypto provider");
-    let config = RustlsConfig::from_pem_file("cert/server.crt", "cert/server.key").await?;
+pub async fn start_server(use_tls: bool) -> Result<(), Box<dyn std::error::Error>> {
+    if use_tls {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .expect("Failed to install rustls crypto provider");
+    }
 
     let cors = CorsLayer::new()
         .allow_methods([
@@ -767,7 +789,15 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         ])
         .max_age(Duration::from_secs(5184000))
         .allow_credentials(true)
-        .allow_headers([AUTHORIZATION, CONTENT_TYPE, CONTENT_LENGTH, ACCEPT, ORIGIN]);
+        .allow_headers([
+            AUTHORIZATION,
+            CONTENT_TYPE,
+            CONTENT_LENGTH,
+            ACCEPT,
+            ORIGIN,
+            HeaderName::from_static("x-requested-with"),
+            HeaderName::from_static("x-signal-agent"),
+        ]);
 
     let state = SignalServerState::<PostgresDatabase, SignalWebSocket>::new().await;
 
@@ -796,17 +826,9 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/websocket", any(create_websocket_endpoint))
         .route("/v1/keepalive", get(get_keepalive))
         .with_state(state)
-        /*.layer(
-            ServiceBuilder::new()
-                .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(trace::DefaultMakeSpan::new().level(Level::DEBUG)), // .on_request(trace::DefaultOnRequest::new().level(Level::TRACE))
-                                                                                            // .on_response(trace::DefaultOnResponse::new().level(Level::TRACE))
-                                                                                            // .on_body_chunk(trace::DefaultOnBodyChunk::new()),
-                )
-                .layer(TraceLayer::new_for_grpc()),
-        )*/
-        .layer(cors);
+        .layer(CompressionLayer::new().gzip(true))
+        .layer(cors)
+        .layer(from_fn(signal_time_middleware));
 
     let address = env::var("SERVER_ADDRESS")?;
     let https_port = env::var("HTTPS_PORT")?;
@@ -816,15 +838,22 @@ pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let https_addr = SocketAddr::from_str(format!("{}:{}", address, https_port).as_str())?;
 
     // we should probably sometime in future a proxy or something to redirect instead
-    tokio::spawn(redirect_http_to_https(
-        http_addr,
-        http_port.parse()?,
-        https_port.parse()?,
-    ));
 
-    axum_server::bind_rustls(https_addr, config)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-        .await?;
+    if use_tls {
+        tokio::spawn(redirect_http_to_https(
+            http_addr,
+            http_port.parse()?,
+            https_port.parse()?,
+        ));
+        let config = RustlsConfig::from_pem_file("cert/server.crt", "cert/server.key").await?;
+        axum_server::bind_rustls(https_addr, config)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await?;
+    } else {
+        axum_server::bind(http_addr)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await?;
+    }
 
     message_persister.stop().await;
 

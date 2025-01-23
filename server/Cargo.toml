@@ -18,7 +18,7 @@ rand = "0.8.5"
 redis = "0.27.4"
 deadpool-redis = "0.18.0"
 uuid = { version = "1.10.0", features = ["v4"] }
-tower-http = { version = "0.6.1", features = ["cors", "trace"] }
+tower-http = { version = "0.6.1", features = ["cors", "trace", "compression-gzip"] }
 sha2 = "0.10"
 hex = "0.4.3"
 sqlx = { version = "0.8.2", features = ["runtime-tokio-rustls", "postgres", "macros"] }
